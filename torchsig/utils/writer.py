@@ -3,33 +3,88 @@
 from __future__ import annotations
 
 import concurrent.futures
-import os
+import math
 import threading
+from dataclasses import dataclass
 from pathlib import Path
-from shutil import disk_usage
 from time import time
-import warnings
+from typing import TYPE_CHECKING, Any
 
-# Built-In
-from typing import Any, TYPE_CHECKING
-
-import numpy as np
+import yaml
 from torch.utils.data._utils.collate import default_collate as torch_default_collate
-
-# Third Party
 from tqdm.auto import tqdm
 
-# TorchSig
-from torchsig.utils.file_handlers.hdf5 import HDF5Writer
-from torchsig.utils.yaml import write_dict_to_yaml
+from torchsig.utils.file_handlers.hdf5 import HDF5Reader, HDF5Writer
+from torchsig.utils.file_handlers.homogeneous_hdf5 import (
+    HomogeneousHDF5Reader,
+    HomogeneousHDF5Writer,
+)
+from torchsig.utils.file_handlers.packed_hdf5 import (
+    PackedHDF5Reader,
+    PackedHDF5Writer,
+)
+from torchsig.utils.file_handlers.packed_npy import PackedNPYReader, PackedNPYWriter
 
 if TYPE_CHECKING:
     from torch.utils.data import DataLoader
+
     from torchsig.utils.file_handlers.base_handler import FileWriter
 
 
+__all__ = ["DatasetCreator", "default_collate_fn", "identity_collate_fn"]
+
+
+_MISSING = object()
+_KNOWN_FILE_HANDLER_PAIRS = {
+    HDF5Writer: HDF5Reader,
+    PackedHDF5Writer: PackedHDF5Reader,
+    HomogeneousHDF5Writer: HomogeneousHDF5Reader,
+    PackedNPYWriter: PackedNPYReader,
+}
+
+
+def _resolve_file_reader(file_writer, file_reader):
+    expected_reader = _KNOWN_FILE_HANDLER_PAIRS.get(file_writer)
+    if file_reader is None:
+        return expected_reader
+    if expected_reader is not None and file_reader is not expected_reader:
+        raise ValueError(f"Incompatible file handler pair: {file_writer.__name__} requires {expected_reader.__name__}, got {file_reader.__name__}")
+    return file_reader
+
+
+def _yaml_safe_value(value: Any) -> Any:
+    """Return a stable YAML-safe representation of a runtime option."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        safe_value = value
+    elif isinstance(value, Path):
+        safe_value = str(value)
+    elif isinstance(value, type):
+        safe_value = f"{value.__module__}.{value.__qualname__}"
+    elif isinstance(value, dict):
+        safe_value = {str(key): _yaml_safe_value(item) for key, item in value.items()}
+    elif isinstance(value, (list, tuple)):
+        safe_value = [_yaml_safe_value(item) for item in value]
+    else:
+        try:
+            yaml.safe_dump(value)
+            safe_value = value
+        except yaml.YAMLError:
+            safe_value = repr(value)
+    return safe_value
+
+
+def _qualified_name(value: Any) -> str:
+    """Return a stable qualified name for a class or callable."""
+    module = getattr(value, "__module__", None)
+    name = getattr(value, "__qualname__", getattr(value, "__name__", None))
+    if module is not None and name is not None:
+        return f"{module}.{name}"
+    return str(value)
+
+
 def default_collate_fn(batch):
-    """Collates a batch by zipping its elements together.
+    """Collates a batch by zipping its elements together. Note: not pickle-safe for complex
+    nested structures, but works for typical (data, label) batches.
 
     Args:
         batch (tuple): A batch from the dataloader.
@@ -37,16 +92,58 @@ def default_collate_fn(batch):
     Returns:
         tuple: A tuple of zipped elements, where each element corresponds to a single batch item.
     """
-    return tuple(zip(*batch))
+    return tuple(zip(*batch, strict=False))
+
+
+def identity_collate_fn(batch):
+    """Pickle-safe identity collate for Signal objects (returns list unchanged)."""
+    return batch
+
+
+@dataclass(frozen=True)
+class _DatasetExistenceProbe:
+    """Configurable notion of 'dataset exists' without entering FileWriter.__enter__()."""
+
+    root: Path
+    maybe_data_file: Path | None
+
+    def exists(self) -> bool:
+        if not self.root.exists() or not self.root.is_dir():
+            return False
+        if self.maybe_data_file is not None:
+            return self.maybe_data_file.exists()
+        # fallback: any content
+        return any(self.root.iterdir())
+
+
+def _deep_equal(a: Any, b: Any, *, float_rtol: float = 1e-9, float_atol: float = 0.0) -> bool:
+    """Recursive equality for YAML-loaded structures (dict/list/scalars)."""
+    if a is b:
+        equal = True
+    elif a is None or b is None:
+        equal = a is b
+    elif isinstance(a, (float, int)) and isinstance(b, (float, int)):
+        # Floats: tolerate tiny rounding changes from serialization/IO
+        equal = math.isclose(float(a), float(b), rel_tol=float_rtol, abs_tol=float_atol) if isinstance(a, float) or isinstance(b, float) else int(a) == int(b)
+    elif isinstance(a, dict) and isinstance(b, dict):
+        equal = False if set(a.keys()) != set(b.keys()) else all(_deep_equal(a[k], b[k], float_rtol=float_rtol, float_atol=float_atol) for k in a)
+    elif isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
+        equal = False if len(a) != len(b) else all(_deep_equal(x, y, float_rtol=float_rtol, float_atol=float_atol) for x, y in zip(a, b, strict=True))
+    else:
+        equal = a == b
+    return equal
 
 
 class DatasetCreator:
     """Class for creating a dataset and saving it to disk in batches.
 
-    This class generates a dataset if it doesn't already exist on disk.
+    This class generates a dataset if it does not already exist on disk.
     It processes the data in batches and saves it using a specified file handler.
     The class allows setting options like whether to overwrite existing datasets,
-    batch size, and number of worker threads.
+    batch size, and number of worker threads. Known HDF5 writers infer their
+    matching reader. ``HomogeneousHDF5Writer`` is an opt-in backend requiring
+    every top-level sample to share one shape and dtype; component counts,
+    component arrays, and effective metadata may vary.
 
     Attributes:
         dataloader (DataLoader): The DataLoader used to load data in batches.
@@ -58,92 +155,225 @@ class DatasetCreator:
 
     def __init__(
         self,
-        dataloader: DataLoader = None,
+        dataloader: DataLoader,
         dataset_length: int | None = None,
+        *,
         root: str = ".",
-        overwrite: bool = True,  # will overwrite any existing dataset on disk
+        overwrite: bool = True,
         tqdm_desc: str | None = None,
         file_handler: FileWriter = HDF5Writer,
+        file_reader: type | None = None,
         multithreading: bool = True,
-        **kwargs,  # any additional file handler args
+        max_inflight_futures: int = 32,
+        **kwargs,
     ):
         """Initializes the DatasetCreator.
 
         Args:
-            dataloader (DataLoader): The DataLoader used to load data in batches.
-            dataset_length (int): The number of samples to draw from a dataset.
-            root (Path): The root directory where the dataset will be saved.
-            overwrite (bool): Flag indicating whether to overwrite an existing dataset.
-            tqdm_desc (str): A description for the progress bar.
-            file_handler (FileWriter): The file handler used for saving the dataset.
+            dataloader (DataLoader): DataLoader used to load data in batches. Required.
+            dataset_length (int): Number of dataset items to be created. Length inferrence attempted if not provided.
+            root (Path): Root directory where the dataset files will be saved. Defaults to current directory.
+            overwrite (bool): Flag indicating whether to overwrite an existing dataset. Defaults to True.
+            tqdm_desc (str): Description for the progress bar.
+            file_handler (FileWriter): File handler used to write dataset. Defaults to HDF5Writer.
+            file_reader: Optional reader class paired with the writer for metadata.
+                Known HDF5 writer classes infer their matching reader and reject
+                incompatible explicit pairings.
+            multithreading (bool): Whether to use multithreading for writing batches. Defaults to True.
+            max_inflight_futures (int): Maximum number of concurrent futures when using multithreading. Defaults to 32.
+            **kwargs: Additional arguments for the file handler.
         """
+        # File attributes
         self.root = Path(root)
         self.dataset_info_filepath = self.root.joinpath("dataset_info.yaml")
         self.writer_info_filepath = self.root.joinpath("writer_info.yaml")
-        self.dataset_length = dataset_length
-        self.overwrite = overwrite
-        self.batch_size = dataloader.batch_size
-        self.num_workers = dataloader.num_workers
-        self.multithreading = multithreading
-        self.num_batches = self.dataset_length // self.batch_size
-        if not np.equal(self.dataset_length % self.batch_size, 0):
-            self.num_batches += (
-                1  # include the partial batch at the end if it can't be evenly batched
-            )
+        legacy_file_writer = kwargs.pop("file_writer", _MISSING)
+        if legacy_file_writer is not _MISSING:
+            if file_handler is not HDF5Writer and file_handler is not legacy_file_writer:
+                raise TypeError("DatasetCreator received conflicting file_handler and file_writer arguments")
+            file_handler = legacy_file_writer
+        self.file_handler = file_handler
+        self.file_reader = _resolve_file_reader(file_handler, file_reader)
+        self.kwargs = dict(kwargs)
+        self.writer_info_kwargs = _yaml_safe_value(self.kwargs)
+
+        self.overwrite = bool(overwrite)
+        self.multithreading = bool(multithreading)
+        self.max_inflight_futures = int(max_inflight_futures)
 
         self.dataloader = dataloader
-        if (
-            self.dataloader.dataset.target_labels is None
-            and self.dataloader.collate_fn == torch_default_collate
-        ):
-            # DataLoader should just return Signal objects
-            # do not use torch's default collate function
-            self.dataloader.collate_fn = lambda x: x
-        self.file_handler = file_handler
+        self.dataset_length_requested = self._infer_dataset_length(dataset_length)
 
-        # get reference to tqdm progress bar object
-        self.pbar = tqdm()
+        # optional
+        self.batch_size = getattr(dataloader, "batch_size", None)
+        self.num_workers = getattr(dataloader, "num_workers", None)
 
         self.tqdm_desc = "Generating Dataset:" if tqdm_desc is None else tqdm_desc
 
-        # limit in gigabytes for remaining space on disk for which writer stops writing
-        self.minimum_remaining_disk_gigabytes = 1
-
-        # Thread lock for updating tqdm message to avoid race conditions
-        self._tqdm_lock = threading.Lock()
-
+        # counters
+        self.items_written = 0
+        self._counter_lock = threading.Lock()
         self._msg_timer = None
 
-    def get_writing_info_dict(self) -> dict[str, Any]:
-        """Returns a dictionary with information about the dataset being written.
+    def _infer_dataset_length(self, dataset_length: int | None) -> int:
+        """Infer dataset length or require it explicitly for iterable datasets.
+        For map-style datasets, the length can be inferred from the dataset object.
+        For iterable datasets, the length cannot be inferred and must be provided.
 
-        This method gathers information regarding the root, overwrite status,
-        batch size, number of workers, file handler class, and the save type
-        of the dataset.
+        Args:
+            dataset_length (int | None): The length of the dataset to be created. If None
+                the method will attempt to infer the length from the dataloader's dataset.
+
+        Returns:
+            int: dataset length.
+        """
+        if dataset_length is not None:
+            return int(dataset_length)
+
+        # map-style datasets: try len(dataloader.dataset) to infer dataset length
+        try:
+            inferred_length = len(self.dataloader.dataset)
+        except Exception as e:  # pylint: disable=broad-except
+            raise ValueError("dataset_length must be provided when writing from an IterableDataset (e.g., TorchSigIterableDataset), because length cannot be inferred.") from e
+        return int(inferred_length)
+
+    def _existence_probe(self) -> _DatasetExistenceProbe:
+        """Instantiate writer without entering context to not enter setup, resetting folder."""
+        maybe_data_file = None
+        try:
+            writer = self.file_handler(root=self.root, **self.kwargs)
+            maybe_data_file = getattr(writer, "datapath", None)
+            if isinstance(maybe_data_file, (str, Path)):
+                maybe_data_file = Path(maybe_data_file)
+        except Exception:  # noqa: BLE001 - optional handler probes may execute third-party code
+            # best-effort only
+            maybe_data_file = None
+        return _DatasetExistenceProbe(root=self.root, maybe_data_file=maybe_data_file)
+
+    def _get_dataset_metadata_dict(self) -> dict[str, Any]:
+        """Best-effort extraction of dataset metadata for YAML.
+
+        Returns:
+            dict: dictionary containing dataset metadata information.
+        """
+        ds = self.dataloader.dataset
+        if hasattr(ds, "get_full_metadata"):
+            return ds.get_full_metadata()
+        return {}
+
+    def get_dataset_info_dict(self, *, dataset_length: int, original_target_labels: Any) -> dict[str, Any]:
+        """Get metadata content for the dataset_info.yaml file.
+
+        Returns:
+            Dict[str, Any]: Dictionary containing the dataset metadata information.
+        """
+        ds = self.dataloader.dataset
+        seed = getattr(ds, "rng_seed", None)
+
+        result = {
+            "dataset_length": int(dataset_length),
+            "seed": None if seed is None else int(seed),
+            "target_labels": original_target_labels,
+            "dataset_metadata": self._get_dataset_metadata_dict(),
+        }
+        experiment_config = getattr(ds, "experiment_config", None)
+        if experiment_config is not None:
+            result["experiment_config"] = experiment_config.to_dict()
+        return result
+
+    def get_writer_info_dict(self, *, complete: bool) -> dict[str, Any]:
+        """Returns a dictionary with information about the dataset writing configuration.
+        Used primarily for creating content for the writer_info.yaml summary file.
 
         Returns:
             Dict[str, Any]: Dictionary containing the dataset writing configuration.
         """
         return {
             "root": str(self.root),
-            "overwrite": self.overwrite,
-            "batch_size": self.batch_size,
-            "num_workers": self.num_workers,
-            "complete": False,
+            "overwrite": bool(self.overwrite),
+            "batch_size": None if self.batch_size is None else int(self.batch_size),
+            "num_workers": None if self.num_workers is None else int(self.num_workers),
+            "file_handler": getattr(self.file_handler, "__name__", str(self.file_handler)),
+            "file_handler_qualified": _qualified_name(self.file_handler),
+            "file_reader_qualified": (None if self.file_reader is None else _qualified_name(self.file_reader)),
+            "file_handler_kwargs": self.writer_info_kwargs,
+            "multithreading": bool(self.multithreading),
+            "dataset_length_requested": int(self.dataset_length_requested),
+            "items_written": int(self.items_written),
+            "complete": bool(complete),
+            "timestamp_unix": int(time()),
         }
 
-    def _write_batch(self, writer, batch_idx: int, batch: Any):
-        """Multi-threaded writer batch
-        Args:
-            batch_idx (int): batch index
-            batch (Any): batch
-        """
-        try:
-            # write to disk
-            writer.write(batch_idx, batch)
-        finally:
-            # Clear batch reference to help garbage collection
-            del batch
+    def check_yamls(self, *, expected_dataset_info: dict[str, Any]) -> tuple[bool, list[tuple[str, Any, Any]]]:
+        """Returns (complete, differences) without mutating dataset or entering writer context."""
+        differences: list[tuple[str, Any, Any]] = []
+
+        if not self.writer_info_filepath.exists():
+            return False, [("writer_info.yaml", "missing", "expected present")]
+
+        with self.writer_info_filepath.open() as f:
+            writer_disk = yaml.safe_load(f) or {}
+        complete = bool(writer_disk.get("complete", False))
+        expected_handler = getattr(self.file_handler, "__name__", str(self.file_handler))
+        if "file_handler" in writer_disk and writer_disk["file_handler"] != expected_handler:
+            differences.append(
+                (
+                    "file_handler",
+                    writer_disk["file_handler"],
+                    expected_handler,
+                )
+            )
+        if "file_handler_kwargs" in writer_disk and not _deep_equal(
+            writer_disk["file_handler_kwargs"],
+            self.writer_info_kwargs,
+        ):
+            differences.append(
+                (
+                    "file_handler_kwargs",
+                    writer_disk["file_handler_kwargs"],
+                    self.writer_info_kwargs,
+                )
+            )
+
+        if not self.dataset_info_filepath.exists():
+            differences.append(("dataset_info.yaml", "missing", "expected present"))
+            return complete, differences
+
+        with self.dataset_info_filepath.open() as f:
+            dataset_disk = yaml.safe_load(f) or {}
+
+        stable_keys = ["seed", "target_labels", "dataset_metadata"]
+        if "experiment_config" in expected_dataset_info:
+            stable_keys.append("experiment_config")
+        for k in stable_keys:
+            if k not in dataset_disk:
+                differences.append((k, "missing_on_disk", expected_dataset_info.get(k)))
+                continue
+            if not _deep_equal(dataset_disk.get(k), expected_dataset_info.get(k)):
+                differences.append((k, dataset_disk.get(k), expected_dataset_info.get(k)))
+
+        # Length must match requested for "no regeneration needed"
+        disk_len = dataset_disk.get("dataset_length", None)
+        if disk_len is None or int(disk_len) != int(self.dataset_length_requested):
+            differences.append(("dataset_length", disk_len, int(self.dataset_length_requested)))
+
+        return complete, differences
+
+    def _ensure_signal_batch_mode(self) -> tuple[Any, Any]:
+        """Mutate dataset/dataloader so DataLoader yields Signal objects; return (orig_target_labels, orig_collate_fn)."""
+        ds = self.dataloader.dataset
+        orig_target_labels = getattr(ds, "target_labels", None)
+        orig_collate_fn = getattr(self.dataloader, "collate_fn", None)
+
+        # Force dataset to return Signal objects (TorchSigIterableDataset behavior)
+        if hasattr(ds, "target_labels"):
+            ds.target_labels = None
+
+        # Ensure DataLoader does not try to default-collate Signal objects into tensors
+        if getattr(ds, "target_labels", None) is None and self.dataloader.collate_fn in (torch_default_collate, default_collate_fn):
+            self.dataloader.collate_fn = identity_collate_fn
+
+        return orig_target_labels, orig_collate_fn
 
     def create(self) -> None:
         """Creates the dataset on disk by writing batches to the file handler.
@@ -156,244 +386,127 @@ class DatasetCreator:
         Raises:
             ValueError: If the dataset is already generated and `overwrite` is set to False.
         """
-        temp_labels = self.dataloader.dataset.target_labels
-        self.dataloader.dataset.target_labels = None
-        with self.file_handler(root=self.root) as writer:
-            if writer.exists() and not self.overwrite:
-                complete, different_params = self.check_yamls()
-                if np.equal(len(different_params), 0) and complete:
-                    print(f"Dataset already exists in {self.root}. Not regenerating.")
-                    return
+        from torchsig.utils.yaml import write_dict_to_yaml  # noqa: PLC0415
 
-                if not complete:
-                    # dataset on disk is corrupted
-                    # dataset was not fully written to disk
-                    raise RuntimeError(
-                        f"Dataset only partially exists in {self.root} (writing dataset to disk was cancelled early). Regenerate the dataset by setting overwrite = True for DatasetCreator"
-                    )
-                # dataset exists on disk with different params
-                # use dataset on disk instead
-                # warn users that params are different
-                print(
-                    f"Dataset exists at {self.root} but is different than current dataset."
-                )
-                print("Differences:")
-                for row in different_params:
-                    key, disk_value, current_value = row
-                    print(f"\t{key} = {current_value} ({disk_value} found)")
-                print(
-                    "If you want to overwrite dataset on disk, set overwrite = True for the DatasetCreator."
-                )
-                print("Not regenerating. Using dataset on disk.")
+        ds = self.dataloader.dataset
+        orig_target_labels = getattr(ds, "target_labels", None)
+        orig_collate_fn = getattr(self.dataloader, "collate_fn", None)
+
+        expected_dataset_info = self.get_dataset_info_dict(
+            dataset_length=self.dataset_length_requested,
+            original_target_labels=orig_target_labels,
+        )
+
+        # Existence/overwrite decision before entering writer context.
+        probe = self._existence_probe()
+        if probe.exists() and not self.overwrite:
+            complete, diffs = self.check_yamls(expected_dataset_info=expected_dataset_info)
+            if complete and len(diffs) == 0:
+                print(f"Dataset already exists in {self.root}. Not regenerating.")
                 return
+            if not complete:
+                raise RuntimeError(f"Dataset only partially exists in {self.root}. Regenerate by setting overwrite=True.")
+            if any(key == "file_handler" for key, _, _ in diffs):
+                raise RuntimeError(f"Dataset at {self.root} was created with a different file handler. Regenerate by setting overwrite=True.")
+            print(f"Dataset exists at {self.root} but differs from current dataset config. Using dataset on disk.")
+            for k, disk_v, cur_v in diffs:
+                print(f"\t{k}: disk={disk_v} current={cur_v}")
+            return
 
-            # generate info yamls
-            write_dict_to_yaml(self.writer_info_filepath, self.get_writing_info_dict())
-
-            # store start time
+        # create dataset
+        try:
+            orig_target_labels, orig_collate_fn = self._ensure_signal_batch_mode()
+            self.items_written = 0
             self._msg_timer = time()
 
-            # write dataset
-            if self.multithreading:
-                # write each batch as its own thread
-                # num_threads defaults to: min(32, os.cpu_count() + 4)
-                with concurrent.futures.ThreadPoolExecutor() as executor:
+            with self.file_handler(
+                root=self.root,
+                **self.kwargs,
+            ) as writer:
+                # Write initial YAMLs
+                write_dict_to_yaml(
+                    self.dataset_info_filepath,
+                    self.get_dataset_info_dict(
+                        dataset_length=0,
+                        original_target_labels=orig_target_labels,
+                    ),
+                )
+                write_dict_to_yaml(self.writer_info_filepath, self.get_writer_info_dict(complete=False))
 
-                    # Process batches in chunks to avoid memory buildup
-                    batch_chunk_size = max(
-                        1, min(100, self.num_batches) // 10
-                    )  # Process in smaller chunks
+                remaining = self.dataset_length_requested
 
-                    batch_iter = enumerate(self.dataloader)
-                    processed_batches = 0
-                    total_batches = self.num_batches
+                # Best-effort progress bar total
+                total_batches = None
+                if isinstance(self.batch_size, int) and self.batch_size > 0:
+                    total_batches = math.ceil(self.dataset_length_requested / self.batch_size)
 
-                    # Process in chunks to manage memory
-                    while processed_batches < total_batches:
-                        # Get next chunk of batches
-                        chunk_futures = []
-                        chunk_size = 0
+                pbar = tqdm(desc=self.tqdm_desc, total=total_batches)
 
-                        for _ in range(
-                            min(batch_chunk_size, total_batches - processed_batches)
-                        ):
-                            try:
-                                batch_idx, batch = next(batch_iter)
+                if self.multithreading:
+                    writer_lock = threading.Lock()
+                    futures: list[concurrent.futures.Future[int]] = []
 
-                                if batch_idx == self.num_batches - 1 and not np.equal(
-                                    self.dataset_length % self.batch_size, 0
-                                ):
-                                    batch = batch[
-                                        : self.dataset_length % self.batch_size
-                                    ]
+                    def submit_write(batch_idx: int, batch: Any) -> int:
+                        # Lock writer.write for safety with HDF5Writer buffering
+                        with writer_lock:
+                            writer.write(batch_idx, batch)
+                        return len(batch) if hasattr(batch, "__len__") else 1
 
-                                future = executor.submit(
-                                    self._write_batch, writer, batch_idx, batch
-                                )
-                                chunk_futures.append(future)
-                                chunk_size += 1
-                            except StopIteration:
+                    # Single executor; max_workers=1 is enough since writer calls are serialized
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                        for batch_idx, batch in enumerate(self.dataloader):
+                            if remaining <= 0:
                                 break
+                            if hasattr(batch, "__len__") and len(batch) > remaining:
+                                batch = batch[:remaining]
+                            batch_len = len(batch) if hasattr(batch, "__len__") else 1
+                            futures.append(executor.submit(submit_write, batch_idx, batch))
+                            remaining -= batch_len
 
-                        # Only process if we have futures to process
-                        if chunk_futures:
-                            # Wait for chunk to complete before processing next chunk
-                            concurrent.futures.wait(chunk_futures)
+                            if len(futures) >= self.max_inflight_futures:
+                                for fut in futures:
+                                    self.items_written += fut.result()
+                                    pbar.update(1)
+                                futures.clear()
 
-                            # Clear references to help garbage collection
-                            for future in chunk_futures:
-                                future.result()  # Ensure completion
-                            del chunk_futures
+                        for fut in futures:
+                            self.items_written += fut.result()
+                            pbar.update(1)
 
-                            processed_batches += chunk_size
-
-                            # Force garbage collection between chunks
-                            import gc
-
-                            gc.collect()
-
-                        else:
-                            # No more batches to process
+                else:  # single-threaded writing
+                    for batch_idx, batch in enumerate(self.dataloader):
+                        if remaining <= 0:
                             break
 
-            else:
-                # single threaded writing
-                itr = iter(self.dataloader)
+                        if hasattr(batch, "__len__") and len(batch) > remaining:
+                            batch = batch[:remaining]
 
-                for batch_idx in tqdm(range(self.num_batches), total=self.num_batches):
-                    batch = next(itr)
+                        batch_len = len(batch) if hasattr(batch, "__len__") else 1
+                        writer.write(batch_idx, batch)
+                        remaining -= batch_len
 
-                    if batch_idx == self.num_batches - 1 and not np.equal(
-                        self.dataset_length % self.batch_size, 0
-                    ):
-                        batch = batch[: self.dataset_length % self.batch_size]
+                        self.items_written += batch_len
+                        pbar.update(1)
 
-                    try:
-                        # write to disk
-                        self._write_batch(writer, batch_idx, batch)
+                pbar.close()
 
-                        # update progress bar message
-                        self._update_tqdm_message(batch_idx)
+            # Validate after successful context close
+            if self.items_written != self.dataset_length_requested:
+                raise RuntimeError(f"DatasetCreator wrote {self.items_written} samples, expected {self.dataset_length_requested}.")
 
-                    finally:
-                        # Clear batch reference to help garbage collection
-                        del batch
+            # Final YAML update
+            write_dict_to_yaml(
+                self.dataset_info_filepath,
+                self.get_dataset_info_dict(
+                    dataset_length=self.items_written,
+                    original_target_labels=orig_target_labels,
+                ),
+            )
+            write_dict_to_yaml(self.writer_info_filepath, self.get_writer_info_dict(complete=True))
 
-                        # Force garbage collection every 10 batches
-                        if np.equal(batch_idx % 10, 0):
-                            import gc
-
-                            gc.collect()
-            # update writer yaml
-            # indicate writing dataset to disk was successful
-            updated_writer_yaml = self.get_writing_info_dict()
-            updated_writer_yaml["complete"] = True
-            write_dict_to_yaml(self.writer_info_filepath, updated_writer_yaml)
-            self.dataloader.dataset.target_labels = temp_labels
-
-    def _update_tqdm_message(self, batch_idx: int):
-        """Updates the tqdm progress bar with remaining disk space
-
-        Informs the user how much remaining space left (in gigabytes) is
-        on their disk. Includes a check to stop writing to disk in case
-        the disk is at risk of being completely filled.
-
-        Raises:
-            ValueError: If the disk space remaining is below a threshold
-        """
-        with self._tqdm_lock:
-
-            # compute elapsed time since last run
-            elapsed_time = time() - self._msg_timer
-
-            # run every second, but wait until 20 iterations have
-            # passed in order to create a more realiable estimate
-            if not batch_idx or elapsed_time > 1:
-
-                # get the amount of disk space remaining
-                disk_size_available_bytes = disk_usage(self.root)[2]
-                # convert to GB and round to two decimal places
-                disk_size_available_gigabytes = np.round(
-                    disk_size_available_bytes / (1000**3), 2
-                )
-                # get size of dataset written so far
-                dataset_size_current_gigabytes = self._get_directory_size_gigabytes(self.root)
-                # num samples processed and remaining
-                num_samples_written = (batch_idx + 1) * self.batch_size
-                num_samples_remaining = self.dataset_length - num_samples_written
-                # estimate size per sample
-                dataset_size_per_sample_gigabytes = (
-                    dataset_size_current_gigabytes / num_samples_written
-                )
-                # predict estimated size
-                dataset_size_remaining_gigabytes = np.round(
-                    dataset_size_per_sample_gigabytes * num_samples_remaining, 2
-                )
-                # estimate total dataset size
-                dataset_size_total_gigabytes = np.round(
-                    dataset_size_per_sample_gigabytes * self.dataset_length, 2
-                )
-
-                # concatenate disk size for progress bar message
-                updated_tqdm_desc = f"{self.tqdm_desc} estimated dataset size = {dataset_size_total_gigabytes} GB, dataset remaining = {dataset_size_remaining_gigabytes} GB, remaining disk = {disk_size_available_gigabytes} GB"
-
-                # avoid crashing by stopping write process
-                if (
-                    disk_size_available_gigabytes
-                    < self.minimum_remaining_disk_gigabytes
-                ):
-                    # remaining disk size is below a hard cutoff value to avoid crashing operating system
-                    raise ValueError(
-                        f"Disk nearly full! Remaining space is {disk_size_available_gigabytes} GB. Please make space before continuing."
-                    )
-                if dataset_size_remaining_gigabytes > disk_size_available_gigabytes:
-                    # projected size of dataset too large for available disk space
-                    raise ValueError(
-                        f"Not enough disk space. Projected dataset size is {dataset_size_remaining_gigabytes} GB. Remaining space is {disk_size_available_gigabytes} GB. Please reduce dataset size or make space before continuing."
-                    )
-
-                # set the progress bar message
-                self.pbar.set_description(updated_tqdm_desc)
-
-    def _get_directory_size_gigabytes(self, start_path: str | Path) -> float:
-        """Calculate the total size of a directory (including subdirectories) in gigabytes.
-
-        This function recursively walks through all files in the specified directory
-        and its subdirectories, summing their sizes. Files that cannot be accessed
-        (due to permissions, deletion, etc.) are skipped with a warning.
-
-        Args:
-            start_path: Path to the directory to calculate size for. Can be either
-                a string or Path object.
-
-        Returns:
-            Total size of the directory in gigabytes as a float.
-
-        Raises:
-            NotADirectoryError: If the provided path is not a directory.
-            FileNotFoundError: If the provided path doesn't exist.
-        """
-        total_size = 0
-        start_path = Path(start_path)
-
-        # Validate the path
-        if not start_path.exists():
-            raise FileNotFoundError(f"Path does not exist: {start_path}")
-        if not start_path.is_dir():
-            raise NotADirectoryError(f"Path is not a directory: {start_path}")
-
-        for path, _, files in os.walk(start_path):
-            for f in files:
-                fp = Path(path) / f
-                try:
-                    total_size += fp.stat().st_size
-                except (OSError, FileNotFoundError) as e:
-                    # Skip files that can't be accessed
-                    warnings.warn(
-                        f"Skipping file {fp} due to error: {e}",
-                        RuntimeWarning,
-                        stacklevel=2
-                    )
-                    continue
-
-        return total_size / (1000**3)
+        finally:
+            # Always restore caller-visible state
+            if hasattr(ds, "target_labels"):
+                ds.target_labels = orig_target_labels
+            if orig_collate_fn is not None:
+                self.dataloader.collate_fn = orig_collate_fn

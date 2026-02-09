@@ -1,0 +1,37 @@
+Title: Document dataset frequency configuration and boundary behavior
+
+Summary
+
+Dataset users configure `sample_rate`, `frequency_min`, `frequency_max`,
+`signal_center_freq_min`, `signal_center_freq_max`, `bandwidth_min`, and
+`bandwidth_max`, but the relationships among these fields are not explained in
+the user-facing dataset guide.
+
+Proposed documentation
+
+Add a frequency-configuration section to `docs/datasets.rst` that defines each
+field and distinguishes:
+
+- The full Nyquist interval implied by `sample_rate`.
+- The configured usable interval defined by `frequency_min` and
+  `frequency_max`.
+- The range from which requested component centers are sampled.
+- The range from which component bandwidths are sampled.
+- Requested center frequencies versus realized metadata after edge filtering.
+
+Explain that center-frequency limits alone do not guarantee that a component's
+full occupied bandwidth fits inside the usable interval. A component placed
+near an edge may be anti-alias filtered, changing its final center frequency and
+bandwidth metadata.
+
+Include one valid symmetric configuration and one edge-placement example.
+
+Acceptance criteria
+
+- Every dataset frequency field has units, meaning, and expected range
+  documented.
+- The difference between Nyquist limits and configured usable limits is clear.
+- Boundary filtering and its effect on realized metadata are described.
+- Examples use internally consistent center, bandwidth, and edge values.
+- The source RST builds without warnings.
+

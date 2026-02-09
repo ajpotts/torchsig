@@ -1,0 +1,36 @@
+Title: Make adjacent-channel interference center-frequency units consistent
+
+Summary
+
+`adjacent_channel_interference` documents `center_frequency` as normalized
+relative to the sample rate. Its implementation constructs time as
+`arange(n) / sample_rate` and uses `center_frequency` directly in a complex
+exponential. That calculation treats `center_frequency` as a physical frequency
+in the same units as `sample_rate`, not as a normalized fraction of the sample
+rate.
+
+For example, with `sample_rate=4` and `center_frequency=0.2`, the implementation
+creates an offset of 0.05 cycles per sample, or 0.05 times the sample rate, rather
+than the documented 0.2 times the sample rate.
+
+Proposed change
+
+Choose one unit convention and apply it throughout the functional API,
+`AdjacentChannelInterference` transform, defaults, validation, and docstrings.
+
+Using physical frequency units consistent with `sample_rate` is recommended for
+consistency with TorchSIG `center_freq` metadata and other DSP functions. If
+backward compatibility requires normalized frequency, compute the exponential
+directly from the normalized value and clearly name it accordingly.
+
+Acceptance criteria
+
+- The parameter's units are unambiguous in both functional and transform
+  documentation.
+- The implementation and parameter validation use the documented convention.
+- A deterministic tone or FFT-based test verifies the generated interference
+  peak at the requested offset.
+- Tests use a sample rate other than one so physical and normalized units cannot
+  accidentally produce the same expected result.
+- Any compatibility impact or migration requirement is documented.
+

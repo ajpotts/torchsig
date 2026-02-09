@@ -1,18 +1,113 @@
 """Digital Signal Processing (DSP) Utils"""
 
 from copy import copy
+from dataclasses import dataclass
+from functools import lru_cache
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
 import torchaudio
 from scipy import signal as sp
 
-from torchsig import __version__ as torchsig_version
-
 # data types to be used internally within torchsig
 TorchSigComplexDataType = np.complex64
 TorchSigRealDataType = np.float32
+
+if TYPE_CHECKING:
+    from torchsig.datasets.datasets import TorchSigIterableDataset
+    from torchsig.signals.signal_types import Signal
+
+__all__ = [
+    "SAMPLING_CLOCK_MAX_OCCUPIED_BANDWIDTH",
+    "SamplingPositions",
+    "TorchSigComplexDataType",
+    "TorchSigRealDataType",
+    "bandwidth_from_lower_upper_freq",
+    "center_freq_from_lower_upper_freq",
+    "compute_spectrogram",
+    "convolve",
+    "design_half_band_filter",
+    "estimate_filter_length",
+    "estimate_occupied_bandwidth",
+    "estimate_tone_bandwidth",
+    "frequency_shift",
+    "gaussian_taps",
+    "generate_sampling_positions",
+    "interpolate_power_of_2_resampler",
+    "is_even",
+    "is_multiple_of_4",
+    "is_odd",
+    "low_pass",
+    "low_pass_iterative_design",
+    "lower_freq_from_center_freq_bandwidth",
+    "multistage_polyphase_decimator",
+    "multistage_polyphase_interpolator",
+    "multistage_polyphase_resampler",
+    "noise_generator",
+    "pad_head_tail_to_length",
+    "partition_polyphase",
+    "polyphase_decimator",
+    "polyphase_fractional_resampler",
+    "polyphase_integer_interpolator",
+    "prototype_polyphase_filter",
+    "prototype_polyphase_filter_decimation",
+    "prototype_polyphase_filter_interpolation",
+    "sampling_clock_impairments",
+    "slice_head_tail_to_length",
+    "slice_tail_to_length",
+    "srrc_taps",
+    "upconversion_anti_aliasing_filter",
+    "update_signal_snr",
+    "update_signal_snr_bandwidth",
+    "upper_freq_from_center_freq_bandwidth",
+    "upsample",
+]
+
+# floor applied to linear power spectrogram (1e-10 in power is -100 dB relative to strongest bin)
+_POWER_FLOOR_RATIO = 1e-10
+_MAX_SAMPLING_CLOCK_OUTPUT_SAMPLES = 10_000_000
+
+# Full two-sided occupied bandwidth as a fraction of sample rate. The
+# sampling-clock prototype is flat to about 0.03 dB through these ±0.35 edges.
+SAMPLING_CLOCK_MAX_OCCUPIED_BANDWIDTH = 0.7
+
+
+@dataclass(frozen=True)
+class SamplingPositions:
+    """Nominal and impaired sampling positions in polyphase units."""
+
+    nominal_indices: np.ndarray
+    nominal: np.ndarray
+    actual: np.ndarray
+    uprate: int
+
+    @property
+    def timing_error(self) -> np.ndarray:
+        """Return actual-minus-nominal timing error in input-sample units."""
+        return (self.actual - self.nominal) / self.uprate
+
+    @property
+    def nominal_input_samples(self) -> np.ndarray:
+        """Return nominal positions in input-sample units."""
+        return self.nominal / self.uprate
+
+    @property
+    def actual_input_samples(self) -> np.ndarray:
+        """Return impaired positions in input-sample units."""
+        return self.actual / self.uprate
+
+
+@lru_cache(maxsize=1)
+def torchsig_cache_version() -> str:
+    """Return installed package version without importing torchsig."""
+    try:
+        return package_version("torchsig")
+    except PackageNotFoundError:
+        return "dev"
 
 
 def slice_tail_to_length(input_signal: np.ndarray, num_samples: int) -> np.ndarray:
@@ -104,9 +199,7 @@ def pad_head_tail_to_length(input_signal: np.ndarray, num_samples: int) -> np.nd
         num_zeros = num_samples - len(output_signal)
         num_zeros_begin = int(np.ceil(num_zeros / 2))
         num_zeros_end = int(np.floor(num_zeros / 2))
-        output_signal = np.concatenate(
-            (np.zeros(num_zeros_begin), output_signal, np.zeros(num_zeros_end))
-        )
+        output_signal = np.concatenate((np.zeros(num_zeros_begin), output_signal, np.zeros(num_zeros_end)))
 
     # signal is too long, throw error
     elif len(output_signal) > num_samples:
@@ -119,7 +212,7 @@ def pad_head_tail_to_length(input_signal: np.ndarray, num_samples: int) -> np.nd
 
 # apply an anti-aliasing filter to a signal which has aliased and wrapped around the
 # -fs/2 or +fs/2 boundary due to upconversion
-def upconversion_anti_aliasing_filter(
+def upconversion_anti_aliasing_filter(  # noqa: PLR0917
     input_signal: np.ndarray,
     center_freq: float,
     bandwidth: float,
@@ -179,20 +272,12 @@ def upconversion_anti_aliasing_filter(
 
     # compute the bandwidth and center frequency of the non-aliased portion of the signal
     # to support the anti-aliasing filter design
-    sliced_bandwidth = bandwidth_from_lower_upper_freq(
-        sliced_lower_signal_edge, sliced_upper_signal_edge
-    )
-    sliced_center_freq = center_freq_from_lower_upper_freq(
-        sliced_lower_signal_edge, sliced_upper_signal_edge
-    )
+    sliced_bandwidth = bandwidth_from_lower_upper_freq(sliced_lower_signal_edge, sliced_upper_signal_edge)
+    sliced_center_freq = center_freq_from_lower_upper_freq(sliced_lower_signal_edge, sliced_upper_signal_edge)
     # compute center freq and bandwith to support bounding box. this is slightly wider than the
     # sliced numbers above because the box should run all the way to the boundary
-    box_bandwidth = bandwidth_from_lower_upper_freq(
-        box_lower_signal_edge, box_upper_signal_edge
-    )
-    box_center_freq = center_freq_from_lower_upper_freq(
-        box_lower_signal_edge, box_upper_signal_edge
-    )
+    box_bandwidth = bandwidth_from_lower_upper_freq(box_lower_signal_edge, box_upper_signal_edge)
+    box_center_freq = center_freq_from_lower_upper_freq(box_lower_signal_edge, box_upper_signal_edge)
 
     # map the bandwidth of the signal to the filter passband spec
     passband_edge = sliced_bandwidth / 2
@@ -209,9 +294,7 @@ def upconversion_anti_aliasing_filter(
     # modulate the LPF to BPF
     num_lpf_weights = len(lpf_weights)
     n = np.arange(-int((num_lpf_weights - 1) / 2), int((num_lpf_weights - 1) / 2) + 1)
-    bpf_weights = lpf_weights * np.exp(
-        2j * np.pi * (sliced_center_freq / sample_rate) * n
-    )
+    bpf_weights = lpf_weights * np.exp(2j * np.pi * (sliced_center_freq / sample_rate) * n)
     # apply BPF
     output = convolve(input_signal, bpf_weights)
 
@@ -265,9 +348,7 @@ def is_multiple_of_4(number):
     return is_even(number) and is_even(int(number / 2))
 
 
-def interpolate_power_of_2_resampler(
-    input_signal: np.ndarray, interpolation_rate: int
-) -> np.ndarray:
+def interpolate_power_of_2_resampler(input_signal: np.ndarray, interpolation_rate: int) -> np.ndarray:
     """Applies power of 2 resampling
 
     Args:
@@ -285,31 +366,23 @@ def interpolate_power_of_2_resampler(
     """
     # interpolation_rate must be an integer
     if not isinstance(interpolation_rate, int):
-        raise TypeError(
-            "interpolation_rate: " + str(interpolation_rate) + ", must be an integer"
-        )
+        raise TypeError("interpolation_rate: " + str(interpolation_rate) + ", must be an integer")
 
     # interpolation rate must be >= 2
     interpolate_rate_min = 2
     if interpolation_rate < interpolate_rate_min:
-        raise ValueError(
-            "interpolation_rate: " + str(interpolation_rate) + ", must be >= 2"
-        )
+        raise ValueError("interpolation_rate: " + str(interpolation_rate) + ", must be >= 2")
 
     # interpolation_rate must be a power of 2
     if is_odd(interpolation_rate):
-        raise ValueError(
-            "interpolation_rate: " + str(interpolation_rate) + ", must be power of 2"
-        )
+        raise ValueError("interpolation_rate: " + str(interpolation_rate) + ", must be power of 2")
 
     # determine how many 1;2 stages are needed
     num_stages = int(np.log2(interpolation_rate))
 
     # universal filter params
     attenuation_db = 120
-    passband_percentage = (
-        0.8  # the percent of bandwidth that the passband edge represents
-    )
+    passband_percentage = 0.8  # the percent of bandwidth that the passband edge represents
 
     # sample buffer to be continually processed, perform a copy
     # as to not modifying the input variable by reference
@@ -318,9 +391,7 @@ def interpolate_power_of_2_resampler(
     # iterate through each stage
     for stage_number in range(num_stages):
         # design the interpolator filter for current stage
-        weights = design_half_band_filter(
-            stage_number, passband_percentage, attenuation_db
-        )
+        weights = design_half_band_filter(stage_number, passband_percentage, attenuation_db)
         # scale by 2 to account maintain consistent power level through the 1:2 interpolation
         weights *= 2
         # apply 1:2 interpolate
@@ -332,9 +403,7 @@ def interpolate_power_of_2_resampler(
     return sample_buffer
 
 
-def design_half_band_filter(
-    stage_number: int = 0, passband_percentage: float = 0.8, attenuation_db: float = 120
-) -> np.ndarray:
+def design_half_band_filter(stage_number: int = 0, passband_percentage: float = 0.8, attenuation_db: float = 120) -> np.ndarray:
     """Designs half band filter weights for dyadic resampling
 
     Implements the filter design for dyadic (power of 2) resampling, see fred
@@ -370,9 +439,7 @@ def design_half_band_filter(
     transition_bandwidth = 2 * (cutoff - fpass)
 
     # initial filter length estimation
-    filter_length_estim = estimate_filter_length(
-        transition_bandwidth, attenuation_db, sample_rate
-    )
+    filter_length_estim = estimate_filter_length(transition_bandwidth, attenuation_db, sample_rate)
 
     # a properly sized half band filter will be such that filter_length_estim+1 is a multiple of 4
     filter_length_plus_1 = int(np.ceil((filter_length_estim + 1) / 4)) * 4
@@ -398,18 +465,12 @@ def design_half_band_filter(
 
     # check if filter_length+1 is multiple of 4
     if not is_multiple_of_4(filter_length + 1):
-        raise ValueError(
-            "filter length: "
-            + str(filter_length)
-            + ", filter_length+1 must be an multiple of 4"
-        )
+        raise ValueError("filter length: " + str(filter_length) + ", filter_length+1 must be an multiple of 4")
 
     return weights
 
 
-def multistage_polyphase_resampler(
-    input_signal: np.ndarray, resample_rate: float
-) -> np.ndarray:
+def multistage_polyphase_resampler(input_signal: np.ndarray, resample_rate: float) -> np.ndarray:
     """Multi-stage polyphase filterbank-based resampling.
 
     If the resampling rate is 1.0, then nothing is done and then same input
@@ -425,23 +486,51 @@ def multistage_polyphase_resampler(
     Returns:
         np.ndarray: The resampled signal
     """
-    resample_out = input_signal
-    if resample_rate == 1:
-        # no resampling, pass through
-        resample_out = input_signal
-    if resample_rate > 1:  # interpolation
-        # call the multi-stage polyphase interpolator
-        resample_out = multistage_polyphase_interpolator(input_signal, resample_rate)
-    elif resample_rate < 1:  # decimation
-        # apply the decimation
-        resample_out = multistage_polyphase_decimator(input_signal, 1 / resample_rate)
+    if resample_rate <= 0:
+        raise ValueError(f"resample_rate must be greater than 0, got {resample_rate}")
 
-    return resample_out
+    if resample_rate > 1:
+        return multistage_polyphase_interpolator(input_signal, resample_rate)
+
+    if resample_rate < 1:
+        return multistage_polyphase_decimator(input_signal, 1 / resample_rate)
+
+    return input_signal
 
 
-def multistage_polyphase_decimator(
-    input_signal: np.ndarray, decimation_rate: float
-) -> np.ndarray:
+def multistage_polyphase_resampler_actual_rate(resample_rate: float) -> float:
+    """Return the effective rate selected by the multistage resampler."""
+    if resample_rate <= 0:
+        raise ValueError(f"resample_rate must be greater than 0, got {resample_rate}")
+
+    if resample_rate > 1:
+        integer_rate = int(resample_rate)
+        fractional_rate = resample_rate / integer_rate
+
+        if fractional_rate > 1:
+            up_rate, down_rate = _polyphase_fractional_integer_rates(fractional_rate)
+            fractional_rate = up_rate / down_rate
+
+        return integer_rate * fractional_rate
+
+    if resample_rate < 1:
+        decimation_rate = 1 / resample_rate
+        integer_rate = int(decimation_rate)
+        fractional_rate = decimation_rate / integer_rate
+
+        if fractional_rate > 1:
+            requested_fractional_rate = 1 / fractional_rate
+            up_rate, down_rate = _polyphase_fractional_integer_rates(requested_fractional_rate)
+            actual_fractional_rate = up_rate / down_rate
+        else:
+            actual_fractional_rate = 1.0
+
+        return actual_fractional_rate / integer_rate
+
+    return 1.0
+
+
+def multistage_polyphase_decimator(input_signal: np.ndarray, decimation_rate: float) -> np.ndarray:
     """Multi-stage polyphase filterbank-based decimation
 
     The decimation is applied with two possible stages. The first stage implements the
@@ -466,14 +555,10 @@ def multistage_polyphase_decimator(
     # decimate by integer rate, if no integer decimation, pass through only
     decimation_integer_out = polyphase_decimator(input_signal, decimation_integer_rate) if decimation_integer_rate > 1 else input_signal
     # apply fractional rate resampling, if no resampling, pass through
-    decimation_fractional_out = polyphase_fractional_resampler(decimation_integer_out, 1 / decimation_fractional_rate) if decimation_fractional_rate > 1 else decimation_integer_out
-
-    return decimation_fractional_out
+    return polyphase_fractional_resampler(decimation_integer_out, 1 / decimation_fractional_rate) if decimation_fractional_rate > 1 else decimation_integer_out
 
 
-def multistage_polyphase_interpolator(
-    input_signal: np.ndarray, resample_rate_ideal: float
-) -> np.ndarray:
+def multistage_polyphase_interpolator(input_signal: np.ndarray, resample_rate_ideal: float) -> np.ndarray:
     """Multi-stage polyphase filterbank-based interpolation
 
     The interpolation is applied with two possible stages. The first stage implements the
@@ -501,14 +586,17 @@ def multistage_polyphase_interpolator(
     # interpolate by a fractional rate, if no rate change, just a pass through
     interpolate_fractional_out = polyphase_fractional_resampler(input_signal, interpolation_fractional_rate) if interpolation_fractional_rate > 1 else input_signal
     # interpolate by an integer rate, if no rate change, just a pass through
-    interpolate_integer_out = polyphase_integer_interpolator(interpolate_fractional_out, interpolation_integer_rate) if interpolation_integer_rate > 1 else interpolate_fractional_out
-
-    return interpolate_integer_out
+    return polyphase_integer_interpolator(interpolate_fractional_out, interpolation_integer_rate) if interpolation_integer_rate > 1 else interpolate_fractional_out
 
 
-def polyphase_fractional_resampler(
-    input_signal: np.ndarray, fractional_rate: float
-) -> np.ndarray:
+def _polyphase_fractional_integer_rates(fractional_rate: float) -> tuple[int, int]:
+    """Map a requested fractional rate to the resampler's integer ratio."""
+    up_rate = 10000
+    down_rate = max(1, int(np.round(up_rate / fractional_rate)))
+    return up_rate, down_rate
+
+
+def polyphase_fractional_resampler(input_signal: np.ndarray, fractional_rate: float) -> np.ndarray:
     """Fractional rate polyphase resampler
 
     Implements a fractional rate resampler through the SciPy upfirdn() function
@@ -524,19 +612,17 @@ def polyphase_fractional_resampler(
         np.ndarray: Resampled signal
     """
     # map the fractional part to an up and down rate
-    base_rate = 10000
-    up_rate = base_rate
-    down_rate = int(np.ceil(base_rate / fractional_rate))
+    up_rate, down_rate = _polyphase_fractional_integer_rates(fractional_rate)
+    base_rate = up_rate
 
     # design the prototype filter
-    prototype_filter = prototype_polyphase_filter_interpolation(base_rate)
+    filter_dtype = np.float32 if input_signal.dtype in (np.dtype(np.float32), np.dtype(np.complex64)) else np.float64
+    prototype_filter = prototype_polyphase_filter_interpolation(base_rate, dtype=filter_dtype)
     filter_length = len(prototype_filter)
     taps_per_branch = (filter_length - 1) / base_rate
 
     # apply the interpolator
-    fractional_interp_out = sp.upfirdn(
-        prototype_filter, input_signal, up_rate, down_rate
-    )
+    fractional_interp_out = sp.upfirdn(prototype_filter, input_signal, up_rate, down_rate)
 
     # discard transition period at beginning and end
     total_subtract_off = taps_per_branch * fractional_rate
@@ -545,9 +631,9 @@ def polyphase_fractional_resampler(
 
     return fractional_interp_out[subtract_begin:-subtract_end]
 
-def prototype_polyphase_filter_interpolation(
-    num_branches: int, attenuation_db=120
-) -> np.ndarray:
+
+@lru_cache(maxsize=16)
+def prototype_polyphase_filter_interpolation(num_branches: int, attenuation_db=120, dtype=np.float64) -> np.ndarray:
     """Designs polyphase filterbank weights for interpolation
 
     Args:
@@ -558,15 +644,15 @@ def prototype_polyphase_filter_interpolation(
         np.ndarray: Filter weights
     """
     # design the prototype filter
-    weights = prototype_polyphase_filter(num_branches, attenuation_db)
+    weights = _prototype_polyphase_filter_cached(num_branches, attenuation_db).astype(dtype, copy=True)
     # scale the weights for interpolation
     weights *= num_branches
+    weights.setflags(write=False)
     return weights
 
 
-def prototype_polyphase_filter_decimation(
-    num_branches: int, attenuation_db=120
-) -> np.ndarray:
+@lru_cache(maxsize=16)
+def prototype_polyphase_filter_decimation(num_branches: int, attenuation_db=120, dtype=np.float64) -> np.ndarray:
     """Designs polyphase filterbank weights for decimation
 
     Args:
@@ -577,24 +663,16 @@ def prototype_polyphase_filter_decimation(
         np.ndarray: Filter weights
     """
     # design the prototype filter
-    weights = prototype_polyphase_filter(num_branches, attenuation_db)
+    weights = _prototype_polyphase_filter_cached(num_branches, attenuation_db).astype(dtype, copy=True)
     # scale the weights for decimation
     weights /= num_branches
+    weights.setflags(write=False)
     return weights
 
 
-def prototype_polyphase_filter(
-    num_branches: int, attenuation_db: float = 120
-) -> np.ndarray:
-    """Designs the prototype filter for a polyphase filter bank
-
-    Args:
-        num_branches (int): Number of branches in the polyphase filterbank
-        attenuation_db (int, optional): Sidelobe attenuation level. Defaults to 120.
-
-    Returns:
-        np.ndarray: Filter weights
-    """
+@lru_cache(maxsize=8)
+def _prototype_polyphase_filter_cached(num_branches: int, attenuation_db: float = 120) -> np.ndarray:
+    """Load or design prototype weights and retain them in memory."""
     # design filter
     sample_rate = 1.0
     cutoff = sample_rate / (2 * num_branches)
@@ -604,13 +682,11 @@ def prototype_polyphase_filter(
     pfb_weights_directory_name = "pfb_weights"
 
     # set up path to pfb filter weights
-    pfb_weights_directory_path = (
-        Path(__file__).parent.absolute().joinpath(pfb_weights_directory_name)
-    )
+    pfb_weights_directory_path = Path(__file__).parent.absolute().joinpath(pfb_weights_directory_name)
     pfb_weights_directory_path.mkdir(parents=True, exist_ok=True)
 
     # formating for the weights filename
-    pfb_weights_filename = f"torchsig_{torchsig_version}_pfb_weights_num_branches_{num_branches}_attenuation_db_{attenuation_db:0.0f}.npy"
+    pfb_weights_filename = f"torchsig_{torchsig_cache_version()}_pfb_weights_num_branches_{num_branches}_attenuation_db_{attenuation_db:0.0f}.npy"
 
     # create path to weights file
     path_to_file = pfb_weights_directory_path / pfb_weights_filename
@@ -620,7 +696,7 @@ def prototype_polyphase_filter(
         # weight file exists
         try:
             filter_weights = np.load(path_to_file)
-        except Exception:
+        except (EOFError, OSError, ValueError):
             # failed to load weights, corrupted file?
             regen_weights = True
     else:
@@ -628,17 +704,26 @@ def prototype_polyphase_filter(
 
     if regen_weights:
         # design prototype filter weights
-        filter_weights = low_pass_iterative_design(
-            cutoff, transition_bandwidth, sample_rate, attenuation_db
-        )
+        filter_weights = low_pass_iterative_design(cutoff, transition_bandwidth, sample_rate, attenuation_db)
         np.save(path_to_file, filter_weights)
 
     return filter_weights
 
 
-def polyphase_integer_interpolator(
-    input_signal: np.ndarray, interpolation_rate: int
-) -> np.ndarray:
+def prototype_polyphase_filter(num_branches: int, attenuation_db: float = 120) -> np.ndarray:
+    """Design the prototype filter for a polyphase filter bank.
+
+    Args:
+        num_branches: Number of branches in the polyphase filterbank.
+        attenuation_db: Sidelobe attenuation level. Defaults to 120.
+
+    Returns:
+        Independently mutable filter weights.
+    """
+    return _prototype_polyphase_filter_cached(num_branches, attenuation_db).copy()
+
+
+def polyphase_integer_interpolator(input_signal: np.ndarray, interpolation_rate: int) -> np.ndarray:
     """Integer-rate polyphase filterbank-based interpolation
 
     Args:
@@ -655,12 +740,11 @@ def polyphase_integer_interpolator(
     num_branches = interpolation_rate
 
     # design the prototype polyphase filter
-    interpolation_filter = prototype_polyphase_filter_interpolation(num_branches)
+    filter_dtype = np.float32 if input_signal.dtype in (np.dtype(np.float32), np.dtype(np.complex64)) else np.float64
+    interpolation_filter = prototype_polyphase_filter_interpolation(num_branches, dtype=filter_dtype)
 
     # apply interpolation
-    interpolate_out = sp.upfirdn(
-        interpolation_filter, input_signal, interpolation_rate, 1
-    )
+    interpolate_out = sp.upfirdn(interpolation_filter, input_signal, interpolation_rate, 1)
 
     # subtract off transition periods
     half_filter_length = int((len(interpolation_filter) - 1) / 2)
@@ -674,18 +758,12 @@ def polyphase_integer_interpolator(
     interpolate_out = interpolate_out[subtract_off_begin:-subtract_off_end]
 
     # length check for even interpolation rates
-    equal_lengths_boolean = len(interpolate_out) == int(
-        num_branches * len(input_signal)
-    )
+    equal_lengths_boolean = len(interpolate_out) == int(num_branches * len(input_signal))
     # length check for odd interpolation rates
-    lengths_off_by_one_boolean = len(interpolate_out) == int(
-        (num_branches * len(input_signal)) + 1
-    )
+    lengths_off_by_one_boolean = len(interpolate_out) == int((num_branches * len(input_signal)) + 1)
 
     if not (equal_lengths_boolean or lengths_off_by_one_boolean):
-        raise ValueError(
-            "polyphase_integer_interpolator() does not have proper number of samples"
-        )
+        raise ValueError("polyphase_integer_interpolator() does not have proper number of samples")
 
     return interpolate_out
 
@@ -707,7 +785,8 @@ def polyphase_decimator(input_signal: np.ndarray, decimation_rate: int) -> np.nd
     num_branches = decimation_rate
 
     # design the prototype polyphase filter
-    decimation_filter = prototype_polyphase_filter_decimation(num_branches)
+    filter_dtype = np.float32 if input_signal.dtype in (np.dtype(np.float32), np.dtype(np.complex64)) else np.float64
+    decimation_filter = prototype_polyphase_filter_decimation(num_branches, dtype=filter_dtype)
 
     # apply interpolation
     decimate_out = sp.upfirdn(decimation_filter, input_signal, 1, decimation_rate)
@@ -729,22 +808,267 @@ def polyphase_decimator(input_signal: np.ndarray, decimation_rate: int) -> np.nd
     length_floor_boolean = len(decimate_out) == int(np.floor(fractional_length))
     length_ceil_boolean = len(decimate_out) == int(np.ceil(fractional_length))
 
-    length_off_by_one_floor_boolean = len(decimate_out) == int(
-        np.floor(fractional_length) - 1
-    )
-    length_off_by_one_ceil_boolean = len(decimate_out) == int(
-        np.ceil(fractional_length) - 1
-    )
+    length_off_by_one_floor_boolean = len(decimate_out) == int(np.floor(fractional_length) - 1)
+    length_off_by_one_ceil_boolean = len(decimate_out) == int(np.ceil(fractional_length) - 1)
 
-    if not (
-        length_floor_boolean
-        or length_ceil_boolean
-        or length_off_by_one_floor_boolean
-        or length_off_by_one_ceil_boolean
-    ):
+    if not (length_floor_boolean or length_ceil_boolean or length_off_by_one_floor_boolean or length_off_by_one_ceil_boolean):
         raise ValueError("polyphase_decimator() does not have proper number of samples")
 
     return decimate_out
+
+
+def partition_polyphase(h: np.ndarray, up_rate: int, taps_per_phase: int) -> np.ndarray:
+    """Partitions filter coefficients into a polyphase filter bank.
+
+    Args:
+        h: Filter coefficients (1D array of floats)
+        up_rate: Upsampling factor (integer)
+        taps_per_phase: Number of taps per phase (integer)
+
+    Returns:
+        2D array representing the polyphase filter bank
+    """
+    total_taps = up_rate * taps_per_phase
+    padded_taps = np.zeros(total_taps, dtype=TorchSigRealDataType)
+    copied_taps = min(len(h), total_taps)
+    padded_taps[:copied_taps] = h[:copied_taps]
+    return np.ascontiguousarray(padded_taps.reshape(taps_per_phase, up_rate).T * up_rate)
+
+
+def polyphase_resample_at_positions(
+    h: np.ndarray,
+    x: np.ndarray,
+    uprate: int,
+    positions: np.ndarray,
+) -> np.ndarray:
+    """Resample a complex signal at specified polyphase positions.
+
+    Args:
+        h: Polyphase interpolation filter coefficients.
+        x: Input complex IQ samples.
+        uprate: Number of polyphase filter phases.
+        positions: One-dimensional array of sampling positions in
+            polyphase units. Positions must be finite and within the
+            valid padded-input range.
+
+    Returns:
+        Interpolated complex IQ samples, one per sampling position.
+    """
+    if not isinstance(uprate, (int, np.integer)) or uprate <= 0:
+        raise ValueError("uprate must be a positive integer")
+
+    positions = np.asarray(positions, dtype=np.float64)
+    if positions.ndim != 1:
+        raise ValueError("positions must be one-dimensional")
+    if not np.all(np.isfinite(positions)):
+        raise ValueError("positions must be finite")
+
+    taps_per_phase = int(np.ceil(len(h) / uprate))
+    h_pfb = partition_polyphase(h, uprate, taps_per_phase)
+
+    # Preserve the original zero-padding and dtype.
+    padded_len = len(x) + 2 * taps_per_phase - 1
+    input_padded = np.zeros(
+        padded_len,
+        dtype=TorchSigComplexDataType,
+    )
+    input_start = taps_per_phase - 1
+    input_end = input_start + len(x)
+    input_padded[input_start:input_end] = x
+
+    max_input_idx = len(input_padded) - taps_per_phase
+    max_sample_position = max_input_idx * uprate + (uprate - 1)
+
+    if np.any(positions < 0.0) or np.any(positions > max_sample_position):
+        raise ValueError("positions must be within the valid input range")
+
+    if len(positions) == 0:
+        return np.empty(0, dtype=TorchSigComplexDataType)
+
+    input_indices = np.floor_divide(positions, uprate).astype(np.int64)
+    phase_positions = positions - input_indices * uprate
+    phases = np.floor(phase_positions).astype(np.int64)
+    fractions = phase_positions - phases
+    windows = np.lib.stride_tricks.sliding_window_view(input_padded, taps_per_phase)
+    delayed = windows[input_indices, ::-1]
+    first = np.sum(h_pfb[phases] * delayed, axis=1)
+
+    next_phases = phases + 1
+    carry = next_phases == uprate
+    next_phases[carry] = 0
+    next_input_indices = input_indices + carry
+    # A carried position beyond the final window can only have zero fraction,
+    # so clipping is safe and avoids materializing an unused invalid window.
+    next_input_indices = np.minimum(next_input_indices, max_input_idx)
+    next_delayed = windows[next_input_indices, ::-1]
+    second = np.sum(h_pfb[next_phases] * next_delayed, axis=1)
+    output = first + fractions * (second - first)
+    return output.astype(TorchSigComplexDataType, copy=False)
+
+
+def generate_sampling_positions(
+    num_input_samples: int,
+    taps_per_phase: int,
+    uprate: int,
+    drate: float,
+    jitter_ppm: float,
+    drift_ppm: float,
+    rng: np.random.Generator | None = None,
+    initial_phase: float = 0.0,
+    jitter_model: str = "independent",
+    jitter_alpha: float = 0.9,
+) -> SamplingPositions:
+    """Generate nominal and impaired polyphase sampling positions.
+
+    Independent and AR(1) jitter are absolute timing errors; period jitter is
+    accumulated from independent sampling-period errors. Drift retains the
+    historical TorchSIG model: ``drift_ppm`` changes the nominal period and is
+    also the standard deviation of a Gaussian period-error random walk. The
+    accumulated random walk is integrated into absolute timing error.
+
+    Positions outside the padded-input bounds are omitted, while
+    ``nominal_indices`` records which nominal outputs remain.
+    """
+    if not isinstance(num_input_samples, (int, np.integer)) or num_input_samples < 0:
+        raise ValueError("num_input_samples must be a nonnegative integer")
+    if not isinstance(taps_per_phase, (int, np.integer)) or taps_per_phase <= 0:
+        raise ValueError("taps_per_phase must be a positive integer")
+    if not isinstance(uprate, (int, np.integer)) or uprate <= 0:
+        raise ValueError("uprate must be a positive integer")
+    if not np.isfinite(drate) or drate <= 0.0:
+        raise ValueError("drate must be finite and positive")
+    if not np.isfinite(jitter_ppm) or jitter_ppm < 0.0:
+        raise ValueError("jitter_ppm must be finite and nonnegative")
+    if not np.isfinite(drift_ppm):
+        raise ValueError("drift_ppm must be finite")
+    if not np.isfinite(initial_phase) or not 0.0 <= initial_phase < 1.0:
+        raise ValueError("initial_phase must be finite and in the interval [0, 1)")
+    if jitter_model not in {"independent", "period", "ar1"}:
+        raise ValueError("jitter_model must be 'independent', 'period', or 'ar1'")
+    if not np.isfinite(jitter_alpha) or abs(jitter_alpha) >= 1.0:
+        raise ValueError("jitter_alpha must be finite and have absolute value less than 1")
+
+    nominal_increment = drate * (1.0 + drift_ppm * 1e-6)
+    if not np.isfinite(nominal_increment) or nominal_increment <= 0.0:
+        raise ValueError("drift_ppm produces a nonfinite or nonpositive sampling-position increment")
+
+    padded_len = num_input_samples + 2 * taps_per_phase - 1
+    max_input_idx = padded_len - taps_per_phase
+    max_position = max_input_idx * uprate + (uprate - 1)
+    first_position = uprate / drate + initial_phase * uprate
+    count = 0 if first_position > max_position else int(np.floor((max_position - first_position) / nominal_increment)) + 1
+    if count > _MAX_SAMPLING_CLOCK_OUTPUT_SAMPLES:
+        raise RuntimeError("sampling clock output capacity exhausted")
+
+    nominal_all = first_position + np.arange(count, dtype=np.float64) * nominal_increment
+    generator = np.random.default_rng() if rng is None else rng
+    # Jitter is specified in input-sample periods and converted to the
+    # polyphase units used by the interpolator.
+    jitter_std = jitter_ppm * 1e-6 * uprate
+    drift_std = drift_ppm * 1e-6
+    if jitter_std == 0.0 and drift_std == 0.0:
+        jitter_innovations = np.zeros(count, dtype=np.float64)
+        drift_innovations = np.zeros(count, dtype=np.float64)
+    elif isinstance(generator, np.random.Generator):
+        if drift_std:
+            # Interleaving preserves the historical jitter/drift RNG order.
+            innovations = generator.normal(0.0, 1.0, (count, 2))
+            jitter_innovations = innovations[:, 0] * jitter_std
+            drift_innovations = innovations[:, 1] * drift_std
+        else:
+            jitter_innovations = generator.normal(0.0, jitter_std, count)
+            drift_innovations = np.zeros(count, dtype=np.float64)
+    else:
+        # Support generator-like test doubles that only implement scalar draws.
+        jitter_innovations = np.empty(count, dtype=np.float64)
+        drift_innovations = np.empty(count, dtype=np.float64)
+        for idx in range(count):
+            jitter_innovations[idx] = generator.normal(0.0, jitter_std)
+            drift_innovations[idx] = generator.normal(0.0, drift_std) if drift_std else 0.0
+
+    if jitter_model == "independent":
+        jitter_error = jitter_innovations
+    elif jitter_model == "period":
+        jitter_error = np.cumsum(jitter_innovations)
+    else:
+        jitter_error = np.empty(count, dtype=np.float64)
+        if count:
+            jitter_error[0] = jitter_innovations[0]
+        innovation_scale = np.sqrt(1.0 - jitter_alpha**2)
+        for idx in range(1, count):
+            jitter_error[idx] = jitter_alpha * jitter_error[idx - 1] + innovation_scale * jitter_innovations[idx]
+
+    drift_error = np.zeros(count, dtype=np.float64)
+    if count > 1 and drift_std:
+        drift_error[1:] = np.cumsum(np.cumsum(drift_innovations))[:-1]
+    actual_all = nominal_all + jitter_error + drift_error
+
+    valid = (actual_all >= 0.0) & (actual_all <= max_position)
+    return SamplingPositions(
+        nominal_indices=np.flatnonzero(valid),
+        nominal=nominal_all[valid],
+        actual=actual_all[valid],
+        uprate=int(uprate),
+    )
+
+
+def sampling_clock_impairments(  # noqa: PLR0917
+    h: np.ndarray,
+    x: np.ndarray,
+    uprate: int,
+    drate: float,
+    jitter_ppm: float,
+    drift_ppm: float,
+    rng: np.random.Generator | None = None,
+    initial_phase: float = 0.0,
+    jitter_model: str = "independent",
+    jitter_alpha: float = 0.9,
+) -> np.ndarray:
+    """Apply sampling-clock jitter and drift using polyphase filtering.
+
+    This function generates sampling positions with clock impairments
+    and delegates interpolation to polyphase_resample_at_positions().
+
+    Args:
+        h: Filter coefficients (1D array of floats).
+        x: Input signal (1D array of complex numbers).
+        uprate: Upsampling factor (positive integer).
+        drate: Downsampling factor (positive float).
+        jitter_ppm: Jitter in parts per million.
+        drift_ppm: Drift in parts per million.
+        rng: Random number generator. Defaults to
+            ``np.random.default_rng()``.
+        initial_phase: Initial sampling phase in input-sample periods.
+            Must be in the half-open interval ``[0, 1)``.
+        jitter_model: Jitter process: ``"independent"``, ``"period"``, or
+            ``"ar1"``. Defaults to independent absolute timing jitter.
+        jitter_alpha: AR(1) coefficient, with absolute value less than one.
+
+    Returns:
+        Output signal with clock impairments.
+    """
+    if not isinstance(uprate, (int, np.integer)) or uprate <= 0:
+        raise ValueError("uprate must be a positive integer")
+    taps_per_phase = int(np.ceil(len(h) / uprate))
+    positions = generate_sampling_positions(
+        num_input_samples=len(x),
+        taps_per_phase=taps_per_phase,
+        uprate=uprate,
+        drate=drate,
+        jitter_ppm=jitter_ppm,
+        drift_ppm=drift_ppm,
+        rng=rng,
+        initial_phase=initial_phase,
+        jitter_model=jitter_model,
+        jitter_alpha=jitter_alpha,
+    )
+
+    return polyphase_resample_at_positions(
+        h=h,
+        x=x,
+        uprate=uprate,
+        positions=positions.actual,
+    )
 
 
 def upsample(signal: np.ndarray, rate: int) -> np.ndarray:
@@ -814,9 +1138,7 @@ def bandwidth_from_lower_upper_freq(lower_freq: float, upper_freq: float) -> flo
     return upper_freq - lower_freq
 
 
-def lower_freq_from_center_freq_bandwidth(
-    center_freq: float, bandwidth: float
-) -> float:
+def lower_freq_from_center_freq_bandwidth(center_freq: float, bandwidth: float) -> float:
     """Calculates the lower frequency from center frequency and bandwidth
 
     Args:
@@ -829,9 +1151,7 @@ def lower_freq_from_center_freq_bandwidth(
     return center_freq - (bandwidth / 2)
 
 
-def upper_freq_from_center_freq_bandwidth(
-    center_freq: float, bandwidth: float
-) -> float:
+def upper_freq_from_center_freq_bandwidth(center_freq: float, bandwidth: float) -> float:
     """Calculates upper frequency from center frequency and bandwidth
 
     Args:
@@ -844,9 +1164,7 @@ def upper_freq_from_center_freq_bandwidth(
     return center_freq + (bandwidth / 2)
 
 
-def frequency_shift(
-    signal: np.ndarray, frequency: float, sample_rate: float
-) -> np.ndarray:
+def frequency_shift(signal: np.ndarray, frequency: float, sample_rate: float) -> np.ndarray:
     """Performs a frequency shift
 
     Args:
@@ -860,79 +1178,103 @@ def frequency_shift(
         np.ndarray: The frequency shifted signal
     """
     # build mixer
-    mixer = np.exp(
-        2j * np.pi * (frequency / sample_rate) * np.arange(0, len(signal))
-    ).astype(TorchSigComplexDataType)
+    mixer = np.exp(2j * np.pi * (frequency / sample_rate) * np.arange(0, len(signal))).astype(TorchSigComplexDataType)
     return signal * mixer
 
 
-def compute_spectrogram(
-    iq_samples: np.ndarray, fft_size: int, fft_stride: int
-) -> np.ndarray:
-    """Computes two-dimensional spectrogram values in dB.
+def compute_spectrogram(iq_samples: np.ndarray, fft_size: int, fft_stride: int) -> np.ndarray:
+    """Computes two-dimensional spectrogram values in dB, in image row order.
+
+    Output shape is ``(fft_size, num_frames)`` with ``num_frames =
+    1 + (num_samples - fft_size) // fft_stride``, where ``num_samples`` is the
+    input length after any zero padding. Trailing samples that do not fill a
+    complete frame are discarded.
+
+    Axis 0 is frequency, ordered from highest to lowest so that row 0 is the top
+    of the rendered image, matching waterfall-display convention and raster
+    image convention (``imshow`` with ``origin='upper'``, PNG encoding, and
+    top-left-origin bounding box formats). For a sample rate ``fs``::
+
+        f[row] = (fft_size // 2 - 1 - row) * fs / fft_size
+
+    so row 0 holds ``+fs/2 - fs/fft_size`` and row ``fft_size - 1`` holds
+    ``-fs/2``. This is the raw FFT ordering after ``fftshift`` followed by a
+    reversal.
+
+    Axis 1 is time. Column ``j`` covers input samples
+    ``[j * fft_stride, j * fft_stride + fft_size)``; ``center=False``: no
+    edge padding is inserted, so column index maps linearly to sample index with
+    no offset.
+
+    Values are power in dB, floored 100 dB below the peak bin. No window or
+    length normalization is applied, so absolute levels are not comparable
+    across different values of ``fft_size``; only relative levels within one
+    spectrogram are meaningful.
 
     Args:
-        iq_samples (np.ndarray): Input signal.
+        iq_samples (np.ndarray): One-dimensional complex input signal. Zero
+            padded at the end if shorter than ``fft_size``.
         fft_size (int): The size of the FFT in number of bins.
         fft_stride (int): The stride is the amount by which the input sample
             pointer increases for each FFT. When fft_stride=fft_size, then there is
-            no overlap of input samples in successive FFTs. When fft_stride=fft_size/2,
-            there is 50% overlap of input samples between successive FFTs.
+            no overlap of input samples in successive FFTs. Note: permits strides
+            larger than fft_size for data subset sampling.
 
     Raises:
-        ValueError: Throws an error if fft_stride is less than 0 or greater than `fft_size`.
+        ValueError: If ``fft_size`` is not positive. If ``fft_stride`` is not
+            positive. If ``iq_samples`` is not one dimensional.
 
     Returns:
-        np.ndarray: Two-dimensional array of spectrogram values in dB.
+        np.ndarray: Array of shape ``(fft_size, num_frames)`` of spectrogram
+        values in dB, with descending frequency along axis 0.
     """
-    # error handling
+    # argument error handling
+    if fft_size <= 0:
+        raise ValueError(f"fft_size must be positive, got fft_size={fft_size}.")
+
     if fft_stride <= 0:
-        raise ValueError(f"0 < {fft_stride} <= {fft_size}")
+        raise ValueError(f"fft_stride must be positive, got fft_stride={fft_stride}.")
+
+    # input complex IQ values
+    samples = np.asarray(iq_samples, dtype=TorchSigComplexDataType)
+
+    if samples.ndim != 1:
+        raise ValueError(f"iq_samples must be one dimensional, got shape {samples.shape}.")
 
     # input signal is too short and needs to be zero-padded
-    if len(iq_samples) < fft_size:
-        # number of zeros to be padded
-        num_zeros = fft_size - len(iq_samples)
-        # form the zero array
-        zero_padding = np.zeros(num_zeros, dtype=TorchSigComplexDataType)
-        # put zeros at the end
-        iq_samples_formatted = np.concatenate((iq_samples, zero_padding))
-    else:
-        # do not modify input samples
-        iq_samples_formatted = copy(iq_samples)
+    if samples.size < fft_size:
+        zero_padding = np.zeros(fft_size - samples.size, dtype=TorchSigComplexDataType)
+        samples = np.concatenate((samples, zero_padding))
 
     # get reference to spectrogram function
     spectrogram_function = torchaudio.transforms.Spectrogram(
         n_fft=fft_size,
-        window_fn=torch.blackman_window,
+        window_fn=torch.blackman_window,  # preference dynamic range over resolution
         win_length=fft_size,
         hop_length=fft_stride,
         center=False,
-        onesided=False,
-        power=2,
+        onesided=False,  # complex
+        power=2,  # power
     )
 
-    # compute the spectrogram in linear units
-    spectrogram_linear = spectrogram_function(torch.from_numpy(iq_samples_formatted))
+    # compute the spectrogram (STFT) in linear units
+    # linear power, shape (fft_size, num_frames), raw FFT bin order:
+    # DC first, ascending positive bins, then negative bins wrapped to the end
+    spectrogram_linear = spectrogram_function(torch.from_numpy(samples))
 
-    # apply FFT shift
-    spectrogram_linear_fftshift = torch.fft.fftshift(spectrogram_linear, dim=0)
+    # unwrap frequency to ascending order, -fs/2 ... +fs/2 - fs/fft_size
+    spectrogram_linear = torch.fft.fftshift(spectrogram_linear, dim=0)
+
+    # flip to descending order so row 0 is the top of the image
+    spectrogram_linear = torch.flip(spectrogram_linear, dims=(0,))
 
     # convert to numpy types
-    spectrogram_linear_numpy = spectrogram_linear_fftshift.numpy()
+    spectrogram_numpy = spectrogram_linear.numpy()
 
-    # calculate a small epsilon value to replace all zero values
-    epsilon = np.max(np.max(np.abs(spectrogram_linear_numpy))) * np.sqrt(1e-20)
-
-    # find the zero locations, and replace them with tiny values
-    zero_ind_rows, zero_ind_cols = np.where(np.equal(spectrogram_linear_numpy, 0))
-    spectrogram_linear_numpy[zero_ind_rows, zero_ind_cols] = epsilon
-
-    # convert to dB
-    spectrogram_db = 10 * np.log10(spectrogram_linear_numpy)
-
-    # reverse bins order of FFT bins
-    return spectrogram_db[::-1, :]
+    # dB scaling with -100 dB floor
+    peak = spectrogram_numpy.max()
+    floor = peak * _POWER_FLOOR_RATIO if peak > 0 else np.finfo(spectrogram_numpy.dtype).tiny
+    return 10.0 * np.log10(np.maximum(spectrogram_numpy, floor))
 
 
 def estimate_tone_bandwidth(num_samples: int, sample_rate: float):
@@ -965,8 +1307,9 @@ def convolve(signal: np.ndarray, taps: np.ndarray) -> np.ndarray:
     Returns:
         np.ndarray: The convolution output
     """
+    two_tap_filter_length = 2
     filtered = sp.convolve(signal, taps, mode="full")
-    if len(taps) == 2:
+    if len(taps) == two_tap_filter_length:
         return filtered[1:]
     if is_even(len(taps)):  # even-length filter
         slice_length = int(len(taps) / 2)
@@ -1007,9 +1350,7 @@ def low_pass(
     )
 
 
-def estimate_filter_length(
-    transition_bandwidth: float, attenuation_db: float, sample_rate: float
-) -> int:
+def estimate_filter_length(transition_bandwidth: float, attenuation_db: float, sample_rate: float) -> int:
     """Estimates FIR filter length
 
     Estimate the length of an FIR filter using fred harris' approximation,
@@ -1024,9 +1365,7 @@ def estimate_filter_length(
     Returns:
         int: The estimated filter length
     """
-    filter_length = int(
-        np.round((sample_rate / transition_bandwidth) * (attenuation_db / 22))
-    )
+    filter_length = int(np.round((sample_rate / transition_bandwidth) * (attenuation_db / 22)))
 
     # odd-length filters are desirable because they do not introduce a half-sample delay
     if np.equal(np.mod(filter_length, 2), 0):
@@ -1035,9 +1374,7 @@ def estimate_filter_length(
     return filter_length
 
 
-def srrc_taps(
-    iq_samples_per_symbol: int, filter_span_in_symbols: int, alpha: float = 0.35
-) -> np.ndarray:
+def srrc_taps(iq_samples_per_symbol: int, filter_span_in_symbols: int, alpha: float = 0.35) -> np.ndarray:
     """Designs square-root raised cosine (SRRC) pulse shaping filter
 
     Args:
@@ -1068,13 +1405,7 @@ def srrc_taps(
             )
         else:
             taps[i] = 4 * alpha / (np.pi * (1 - 16 * alpha**2 * (n[i] / n_s) ** 2))
-            taps[i] = taps[i] * (
-                np.cos((1 + alpha) * np.pi * n[i] / n_s)
-                + np.sinc((1 - alpha) * n[i] / n_s)
-                * (1 - alpha)
-                * np.pi
-                / (4.0 * alpha)
-            )
+            taps[i] = taps[i] * (np.cos((1 + alpha) * np.pi * n[i] / n_s) + np.sinc((1 - alpha) * n[i] / n_s) * (1 - alpha) * np.pi / (4.0 * alpha))
     return taps
 
 
@@ -1129,9 +1460,7 @@ def low_pass_iterative_design(
         within a reasonable number of iterations, the initial design is returned.
     """
     # estimate the filter length
-    filter_length = estimate_filter_length(
-        transition_bandwidth, desired_attenuation_db, sample_rate
-    )
+    filter_length = estimate_filter_length(transition_bandwidth, desired_attenuation_db, sample_rate)
 
     # initialize design counter
     iterations = 0
@@ -1140,7 +1469,6 @@ def low_pass_iterative_design(
     max_iterations = 2 * filter_length
 
     while True:
-
         # design the filter
         lpf = sp.firwin(
             filter_length,
@@ -1153,9 +1481,7 @@ def low_pass_iterative_design(
         # get FFT of filter from 0 to fs/2
         fft_size = 4096
         fft_linear = np.abs(np.fft.fftshift(np.fft.fft(lpf, fft_size * 2)))
-        fft_linear[np.where(np.equal(fft_linear, 0))[0]] = (
-            1e-15  # replace all zeros with tiny value
-        )
+        fft_linear[np.where(np.equal(fft_linear, 0))[0]] = 1e-15  # replace all zeros with tiny value
         fft_db = 20 * np.log10(fft_linear)
         fft_db = fft_db[fft_size:]
         f = np.linspace(0, 0.5, fft_size) * sample_rate
@@ -1171,9 +1497,7 @@ def low_pass_iterative_design(
 
         if iterations > max_iterations:
             # hit too many iterations, exit to avoid infinite loop
-            raise Warning(
-                "low_pass_iterative_design has trouble converging, using initial design."
-            )
+            raise Warning("low_pass_iterative_design has trouble converging, using initial design.")
 
         if desired_attenuation_db > measured_attenuation_db:
             # the filter is below speed and needs an increase to filter length
@@ -1238,10 +1562,7 @@ def noise_generator(
         raise ValueError("Noise power must be greater than or equal to 0.")
 
     if continuous:
-        noise_source = (
-            rng.standard_normal((num_samples,), dtype=TorchSigRealDataType)
-            + 1j * rng.standard_normal((num_samples,), dtype=TorchSigRealDataType)
-        ) / np.sqrt(
+        noise_source = (rng.standard_normal((num_samples,), dtype=TorchSigRealDataType) + 1j * rng.standard_normal((num_samples,), dtype=TorchSigRealDataType)) / np.sqrt(
             2
         )  # continous white noise (1.0 W)
     else:  # impulsive
@@ -1256,23 +1577,146 @@ def noise_generator(
     if color == "white":  # flat frequency spectrum
         s = 1
     elif color == "pink":  # 1/f (flicker noise), -10 db/decade frequency power spectrum
-        s = 1 / np.where(
-            np.equal(freqs, 0), float("inf"), np.sqrt(np.abs(freqs))
-        )  # zero-mean (DC=0)
+        s = 1 / np.where(np.equal(freqs, 0), float("inf"), np.sqrt(np.abs(freqs)))  # zero-mean (DC=0)
         s = s / np.sqrt(np.mean(s**2))  # RMS normalize shaping filter (estimated)
-    elif (
-        color == "red"
-    ):  # 1/f**2 (brownian noise), -20 dB/decade frequency power spectrum
-        s = 1 / np.where(
-            np.equal(freqs, 0), float("inf"), np.abs(freqs)
-        )  # zero-mean (DC=0)
+    elif color == "red":  # 1/f**2 (brownian noise), -20 dB/decade frequency power spectrum
+        s = 1 / np.where(np.equal(freqs, 0), float("inf"), np.abs(freqs))  # zero-mean (DC=0)
         s = s / np.sqrt(np.mean(s**2))  # RMS normalize shaping filter (estimated)
     else:
-        raise ValueError(
-            f"Invalid noise type {type}. Must be 'white', 'pink', or 'red'."
-        )
+        raise ValueError(f"Invalid noise type {type}. Must be 'white', 'pink', or 'red'.")
 
     x_shaped = s * x_white
     noise = np.fft.ifft(x_shaped, norm="ortho")
     est_power = np.sum(np.abs(noise) ** 2) / len(noise)
     return np.sqrt(power / est_power) * noise
+
+
+def update_signal_snr(dataset: "TorchSigIterableDataset", new_signal: "Signal") -> np.ndarray:
+    """Adjust a signal to a sampled target SNR without changing its bandwidth.
+
+    Args:
+        dataset (TorchSigIterableDataset): The dataset object containing FFT parameters, noise floor information,
+            and other metadata needed for processing.
+        new_signal (Signal): The signal object to be processed, containing:
+            - data: The time-domain signal data
+            - snr_db_min: Minimum target SNR in dB
+            - snr_db_max: Maximum target SNR in dB
+            - bandwidth: Canonical full bandwidth, which is not modified
+
+    Returns:
+        The adjusted signal spectrogram in dB, for optional diagnostics.
+
+    Notes:
+        The SNR correction is performed by:
+        1. Computing a spectrogram of the signal
+        2. Estimating the current SNR from the spectrogram
+        3. Calculating a correction factor to match the target SNR
+        4. Applying this correction to the signal data
+
+        The signal data and ``snr_db`` metadata are updated in place. The
+        generator-selected canonical ``bandwidth`` is preserved.
+    """
+    # corrects snr of signal according to dataset
+    snr_db = np.round(dataset.random_generator.uniform(new_signal.snr_db_min, new_signal.snr_db_max), 1)
+    # compute spectral estimate of signal. use a large stride to process only a
+    # subset of the data to reduce computation
+    signal_spectrogram_db = compute_spectrogram(
+        new_signal.data,
+        dataset.fft_size,
+        dataset.fft_stride,
+    )
+    # average over time, used in PSD estimate for SNR calculation
+    signal_avg_fft_db = np.mean(signal_spectrogram_db, axis=1)
+    # estimate the frequency response maximum value
+    max_value_db = np.max(signal_avg_fft_db)
+    # estimate SNR
+    snr_estimate_db = max_value_db - dataset.noise_power_db
+    # calculate the appropriate correction to set SNR
+    correction_db = snr_db - snr_estimate_db
+    # convert correction value to linear
+    correction = 10 ** (correction_db / 10)
+    # apply correction value to signal
+    new_signal.data *= np.sqrt(correction)
+    signal_avg_fft_db += correction_db
+    signal_spectrogram_db += correction_db
+    new_signal["snr_db"] = snr_db
+
+    return signal_spectrogram_db
+
+
+def estimate_occupied_bandwidth(
+    dataset: "TorchSigIterableDataset",
+    signal_spectrogram_db: np.ndarray,
+) -> float | None:
+    """Estimate a diagnostic threshold-span bandwidth from a spectrogram.
+
+    This estimate spans the first and last max-hold FFT bins more than 3 dB
+    above the configured noise floor. It is sensitive to sidelobes and isolated
+    spectral bins and is therefore not a 99%-power bandwidth. It must not be
+    used to replace a signal's configured canonical ``bandwidth``.
+
+    Args:
+        dataset: Dataset providing FFT and frequency-bound metadata.
+        signal_spectrogram_db: Signal spectrogram after SNR adjustment.
+
+    Returns:
+        Estimated threshold-span bandwidth in Hz, or ``None`` when no FFT bin
+        exceeds the threshold.
+    """
+    # Compute a max hold for bandwidth estimation.
+    # Compute max hold for bandwidth estimation
+    signal_max_fft_db = np.max(signal_spectrogram_db, axis=1)
+    relative_threshold_db = 3
+    bandwidth_estimation_threshold_db = dataset.noise_power_db + relative_threshold_db
+    exceedance_indices = np.where(signal_max_fft_db > bandwidth_estimation_threshold_db)[0]
+
+    if len(exceedance_indices) == 1:
+        # Single threshold exceedance - bandwidth equals 1 FFT bin width
+        lower_edge_index = upper_edge_index = exceedance_indices[0]
+    elif len(exceedance_indices) > 1:
+        # Multiple exceedances - compute bandwidth
+        lower_edge_index = exceedance_indices[0]
+        upper_edge_index = exceedance_indices[-1]
+    else:
+        return None
+
+    f = np.linspace(-0.5, 0.5 - (1 / dataset.fft_size), dataset.fft_size) * dataset.sample_rate
+    upper_freq = f[upper_edge_index]
+    lower_freq = f[lower_edge_index]
+
+    widen_bandwidth_value = dataset.sample_rate / dataset.fft_size / 2
+    lower_freq = max(lower_freq - widen_bandwidth_value, dataset.frequency_min)
+    upper_freq = min(upper_freq + widen_bandwidth_value, dataset.frequency_max)
+
+    return float(upper_freq - lower_freq)
+
+
+def update_signal_snr_bandwidth(
+    dataset: "TorchSigIterableDataset",
+    new_signal: "Signal",
+) -> None:
+    """Adjust signal SNR and store a noncanonical bandwidth diagnostic.
+
+    This compatibility wrapper retains its existing public name while
+    separating SNR adjustment from occupied-bandwidth estimation. The estimate
+    is stored as ``estimated_occupied_bandwidth`` and never replaces the
+    generator-selected canonical ``bandwidth``.
+
+    If occupied bandwidth cannot be estimated because no FFT bins exceed the
+    threshold, the generator-selected canonical bandwidth is used as a
+    fallback.
+
+    Args:
+        dataset: Dataset metadata and random source used for adjustment.
+        new_signal: Signal to update in place.
+    """
+    signal_spectrogram_db = update_signal_snr(dataset, new_signal)
+    estimated_bandwidth = estimate_occupied_bandwidth(
+        dataset,
+        signal_spectrogram_db,
+    )
+
+    if estimated_bandwidth is None:
+        estimated_bandwidth = new_signal.bandwidth
+
+    new_signal["estimated_occupied_bandwidth"] = estimated_bandwidth

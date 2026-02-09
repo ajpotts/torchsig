@@ -6,6 +6,8 @@ from typing import Any, Optional
 import numpy as np
 from torch import Generator
 
+__all__ = ["ChoiceDistribution", "Distribution", "Log10UniformRangeDistribution", "Seedable", "UniformDistribution", "UniformRangeDistribution", "make_distribution"]
+
 
 class Seedable:
     """A class/interface representing objects capable of accessing random numbers and being seeded.
@@ -37,7 +39,7 @@ class Seedable:
         self.random_generator = None
         self.kwargs = kwargs
 
-        if not seed:
+        if seed is None:
             # choose random seed
             seed = secrets.randbits(64)
 
@@ -49,14 +51,21 @@ class Seedable:
             # add parents
             self.add_parent(parent)
 
-    def add_parent(self, parent: "Seedable") -> None:
+    def add_parent(self, parent: "Seedable", register: bool = True) -> None:
         """Add parent Seedable object and set up RNGs accordingly.
 
         Args:
             parent: Parent Seedable object to add.
+            register: If True (default), add self to parent.children so that
+                future seed propagation reaches this object. Pass False for
+                transient objects (e.g. per-sample Signal instances) that only
+                need the parent link for metadata/RNG access during their
+                lifetime but must not accumulate in the parent's child list,
+                which would otherwise cause unbounded memory growth.
         """
         self.parent = parent
-        self.parent.children += [self]
+        if register:
+            self.parent.children += [self]
         self.update_from_parent()
 
     def update_from_parent(self) -> None:
@@ -105,9 +114,7 @@ class Seedable:
         """
         return f"{self.__class__.__name__}(seed={self.rng_seed}, parent={self.parent})"
 
-    def get_distribution(
-        self, params: list | tuple | float, scaling: str = "linear"
-    ) -> "Distribution":
+    def get_distribution(self, params: list | tuple | float, scaling: str = "linear") -> "Distribution":
         """Create distribution function with proper seeding.
 
         Args:
@@ -122,9 +129,7 @@ class Seedable:
         return new_distribution
 
 
-def make_distribution(
-    params: list | tuple | float, scaling: str = "linear"
-) -> "Distribution":
+def make_distribution(params: list | tuple | float, scaling: str = "linear") -> "Distribution":
     """Creates distribution given params.
 
     Args:
@@ -155,9 +160,7 @@ def make_distribution(
         return UniformDistribution(params)
 
     # undefined distribution
-    raise ValueError(
-        f"Undefined conditions in make_distribution(). params = {params}, scaling = {scaling}"
-    )
+    raise ValueError(f"Undefined conditions in make_distribution(). params = {params}, scaling = {scaling}")
 
 
 class Distribution(Seedable):
@@ -195,9 +198,7 @@ class Distribution(Seedable):
         Returns:
             Value(s) from distribution.
         """
-        raise NotImplementedError(
-            "The Distribution class does not specify a distribution by itself. This must be specified by a subclass."
-        )
+        raise NotImplementedError("The Distribution class does not specify a distribution by itself. This must be specified by a subclass.")
 
     def __call__(self, size: int | None = None) -> Any | np.ndarray:
         """Distribution can return single value or np array of values sampled.
@@ -279,9 +280,7 @@ class Log10UniformRangeDistribution(Distribution):
         if np.equal(self.params[0], 0) or np.equal(self.params[1], 0):
             raise ValueError(f"Cannot compute log10(0). params = {self.params}")
         if self.params[0] < 0 or self.params[1] < 0:
-            raise ValueError(
-                f"Cannot compute log10 of negative number. params = {self.params}"
-            )
+            raise ValueError(f"Cannot compute log10 of negative number. params = {self.params}")
 
         low_log10 = np.log10(self.params[0])
         high_log10 = np.log10(self.params[1])

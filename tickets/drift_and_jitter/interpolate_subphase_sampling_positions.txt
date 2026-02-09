@@ -1,0 +1,35 @@
+Title: Interpolate sub-phase sampling positions instead of truncating them
+
+Summary
+
+The Python and Numba polyphase resamplers convert each continuous sampling
+position to an integer filter-bank phase. The fractional remainder below one
+polyphase step is discarded. With the clock transforms' 5000 phases, this
+quantizes timing to 200 ppm.
+
+Low requested jitter values consequently do not control the output. With a
+fixed seed, 1, 5, 10, and 50 ppm jitter can produce bit-identical IQ arrays.
+The realized timing error becomes a biased two-level process rather than the
+requested zero-mean Gaussian process.
+
+Proposed change
+
+Retain the sub-phase remainder and interpolate between adjacent polyphase
+branch outputs. Handle the final branch by carrying into the next input sample.
+Apply equivalent logic in the Python and Numba implementations.
+
+Linear interpolation is an acceptable first implementation. A Farrow
+structure or derivative branch may be considered if accuracy or performance
+requirements justify it.
+
+Acceptance criteria
+
+- Sampling positions that differ by less than one polyphase step can produce
+  correspondingly different output samples.
+- Fixed-seed outputs for 1, 5, 10, and 50 ppm jitter are not all identical.
+- Realized low-ppm timing error has approximately the requested mean and
+  variance without the current negative bias.
+- Boundary tests cover interpolation across the final phase into the next
+  input sample.
+- Python and Numba outputs agree within documented numerical tolerances.
+- Targeted benchmarks quantify the interpolation cost.

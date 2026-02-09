@@ -1,16 +1,24 @@
 """File Handler Base and Utility Classes for reading and writing datasets to/from disk."""
 
-# TorchSig
-# Third Party
-# Built-In
 import pathlib
 import shutil
+from contextlib import suppress
 from typing import Any
 
 from torchsig.utils.printing import generate_repr_str
 
+__all__ = ["BaseFileHandler", "FileReader", "FileWriter", "reset_folder"]
+
 
 def reset_folder(path: str) -> None:
+    """Resets a folder by deleting it if it exists and recreating it.
+
+    Args:
+        path (str): Path to the folder to reset.
+
+    Raises:
+        ValueError: If the path exists but is not a directory.
+    """
     folder_path = pathlib.Path(path)
 
     if folder_path.exists():
@@ -25,20 +33,24 @@ def reset_folder(path: str) -> None:
     # folder does not exists / is deleted
 
     # Recreate the folder
-    folder_path.mkdir(
-        parents=True, exist_ok=True
-    )  # 'parents=True' allows creation of intermediate dirs if needed
+    folder_path.mkdir(parents=True, exist_ok=True)  # 'parents=True' allows creation of intermediate dirs if needed
 
 
 class FileWriter:
+    """Base class for writing datasets to disk.
+
+    Attributes:
+        root (pathlib.Path): Location on disk to write dataset.
+    """
 
     def __init__(self, root: str, **kwargs):
-        """File writer base clas
+        """Initializes the FileWriter.
 
         Args:
-            root (str): Location on disk to write dataset
+            root (str): Location on disk to write dataset.
         """
-        self.root: pathlib.Path = pathlib.Path(root)
+        _ = kwargs  # Accepted for a uniform file-handler constructor API.
+        self.root: pathlib.Path = pathlib.Path(root).resolve()
 
     def _setup(self) -> None:
         """Hook for subclasses to perform setup after folder reset."""
@@ -76,30 +88,39 @@ class FileWriter:
 
     def __del__(self):
         """Destructor to ensure clean resource cleanup"""
-        try:
+        with suppress(Exception):  # Destructors must not propagate cleanup failures.
             self.teardown()
-        except Exception:
-            pass  # Ignore errors during cleanup
 
     def __str__(self) -> str:
+        """Return the writer class name."""
         return f"{self.__class__.__name__}"
 
     def __repr__(self) -> str:
+        """Return a detailed representation of the writer."""
         return generate_repr_str(self)
 
     def __len__(self) -> int:
+        """Return the dataset length supplied by a concrete writer."""
         raise NotImplementedError
 
     def __enter__(self):
+        """Set up the writer and enter its context."""
         self.setup()
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
+        """Tear down the writer when leaving its context."""
         self.teardown()
         return False
 
 
 class FileReader:
+    """Base class for reading datasets from disk.
+
+    Attributes:
+        root (pathlib.Path): Dataset location on disk.
+        dataset_info_filepath (pathlib.Path): Path to dataset info file.
+    """
 
     def __init__(self, root: str, **kwargs):
         """File reader base class
@@ -107,7 +128,8 @@ class FileReader:
         Args:
             root (str): Dataset location on disk.
         """
-        self.root = pathlib.Path(root)
+        _ = kwargs  # Accepted for a uniform file-handler constructor API.
+        self.root = pathlib.Path(root).resolve()
         self.dataset_info_filepath = self.root.joinpath("dataset_info.yaml")
 
     def read(self, idx: int) -> Any:
@@ -125,12 +147,15 @@ class FileReader:
         raise NotImplementedError
 
     def __str__(self) -> str:
+        """Return the reader class name."""
         return f"{self.__class__.__name__}"
 
     def __repr__(self) -> str:
+        """Return a detailed representation of the reader."""
         return generate_repr_str(self)
 
     def __len__(self) -> int:
+        """Return the dataset length supplied by a concrete reader."""
         raise NotImplementedError
 
 
@@ -166,7 +191,9 @@ class BaseFileHandler:
         raise ValueError(f"Invalid File Handler mode: {mode}")
 
     def __str__(self) -> str:
+        """Return the handler class name."""
         return f"{self.__class__.__name__}"
 
     def __repr__(self) -> str:
+        """Return a detailed representation of the handler."""
         return generate_repr_str(self)
