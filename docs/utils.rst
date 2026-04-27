@@ -89,6 +89,11 @@ For guidance on selecting and using an HDF5 backend, see
     :undoc-members:
     :show-inheritance:
 
+.. automodule:: torchsig.utils.file_handlers.npy
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 Variable and Data Verification Utils
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
