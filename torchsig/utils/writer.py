@@ -177,17 +177,12 @@ class DatasetCreator:
         return int(inferred_length)
 
     def _existence_probe(self) -> _DatasetExistenceProbe:
-        """Instantiate writer without entering context to not enter setup, resetting folder."""
-        maybe_data_file = None
-        try:
-            writer = self.file_handler(root=self.root)
-            maybe_data_file = getattr(writer, "datapath", None)
-            if isinstance(maybe_data_file, (str, Path)):
-                maybe_data_file = Path(maybe_data_file)
-        except Exception:
-            # best-effort only
-            maybe_data_file = None
-        return _DatasetExistenceProbe(root=self.root, maybe_data_file=maybe_data_file)
+        filename = getattr(self.file_handler, "filename", None)
+
+        return _DatasetExistenceProbe(
+            root=self.root,
+            maybe_data_file=None if filename is None else self.root / filename,
+        )
 
     def _get_dataset_metadata_dict(self) -> dict[str, Any]:
         """Best-effort extraction of dataset metadata for YAML.
