@@ -19,6 +19,7 @@ from torchsig.utils.dsp import (
     TorchSigRealDataType,
     is_even,
     multistage_polyphase_resampler,
+    multistage_polyphase_resampler_actual_rate,
     prototype_polyphase_filter,
     sampling_clock_impairments,
 )
@@ -52,6 +53,7 @@ __all__ = [
     "cut_out",
     "digital_agc",
     "doppler",
+    "doppler_batch",
     "drop_samples",
     "fading",
     "interleave_complex",
@@ -617,19 +619,91 @@ def doppler(
 
     Returns:
         Data with wideband Doppler.
+
+    Raises:
+        ValueError: If data is not a one-dimensional NumPy array, propagation
+            speed is not finite and positive, or velocity is not finite or has
+            magnitude greater than or equal to propagation speed.
     """
+    if not np.isfinite(propagation_speed) or propagation_speed <= 0:
+        raise ValueError("propagation_speed must be finite and positive")
+    if not np.isfinite(velocity) or abs(velocity) >= propagation_speed:
+        raise ValueError(
+            "velocity must be finite and have magnitude less than propagation_speed"
+        )
+    if not isinstance(data, np.ndarray) or data.ndim != 1:
+        raise ValueError("data must be a one-dimensional NumPy array")
+
     n = data.size
 
     # time scaling factor
     alpha = propagation_speed / (propagation_speed - velocity)
 
-    # if necessary, pad with zeros to maintain size
-    if alpha > 1.0:
-        num_zeros = int(np.ceil(n * (alpha - 1)) + 1)
-        data = np.concatenate((data, np.zeros(num_zeros)))
+    resample_rate = 1 / alpha
+    actual_rate = multistage_polyphase_resampler_actual_rate(resample_rate)
 
-    data = multistage_polyphase_resampler(data, 1 / alpha)[:n]
-    return data.astype(TorchSigComplexDataType)
+    # A requested near-unity rate may map to an exact 1:1 integer ratio. Avoid
+    # constructing and applying a large polyphase filter when no samples would
+    # be added or removed by the selected resampling plan.
+    if actual_rate == 1.0:
+        return data.astype(TorchSigComplexDataType, copy=False)
+
+    # If necessary, pad with zeros to maintain size. Use the effective rational
+    # rate selected by the resampler rather than the ideal Doppler rate.
+    if alpha > 1.0:
+        num_zeros = int(np.ceil((n / actual_rate) - n) + 1)
+        data = np.concatenate((data, np.zeros(num_zeros, dtype=data.dtype)))
+
+    data = multistage_polyphase_resampler(data, resample_rate)
+
+    return data[:n].astype(TorchSigComplexDataType, copy=False)
+
+
+def doppler_batch(
+    data: np.ndarray,
+    velocity: float = 1e1,
+    propagation_speed: float = speed_of_light,
+) -> np.ndarray:
+    """Apply one wideband Doppler rate to a batch along its last axis.
+
+    Args:
+        data: Two-dimensional complex IQ data shaped ``(batch, samples)``.
+        velocity: Shared relative velocity in m/s (positive = approaching).
+        propagation_speed: Wave speed in the medium.
+
+    Returns:
+        Doppler-shifted data with the same shape and complex64 dtype.
+
+    Raises:
+        ValueError: If the data is not a two-dimensional NumPy array or the
+            physical parameters are invalid.
+    """
+    if not np.isfinite(propagation_speed) or propagation_speed <= 0:
+        raise ValueError("propagation_speed must be finite and positive")
+    if not np.isfinite(velocity) or abs(velocity) >= propagation_speed:
+        raise ValueError(
+            "velocity must be finite and have magnitude less than propagation_speed"
+        )
+    if not isinstance(data, np.ndarray) or data.ndim != 2:
+        raise ValueError("data must be a two-dimensional NumPy array")
+
+    num_samples = data.shape[-1]
+    alpha = propagation_speed / (propagation_speed - velocity)
+    resample_rate = 1 / alpha
+    actual_rate = multistage_polyphase_resampler_actual_rate(resample_rate)
+
+    if actual_rate == 1.0:
+        return data.astype(TorchSigComplexDataType, copy=False)
+
+    if alpha > 1.0:
+        num_zeros = int(
+            np.ceil((num_samples / actual_rate) - num_samples) + 1
+        )
+        padding = np.zeros((data.shape[0], num_zeros), dtype=data.dtype)
+        data = np.concatenate((data, padding), axis=-1)
+
+    data = multistage_polyphase_resampler(data, resample_rate)
+    return data[..., :num_samples].astype(TorchSigComplexDataType, copy=False)
 
 
 def drop_samples(
@@ -1901,7 +1975,6 @@ def time_varying_noise(
         + (10.0 ** (noise_power / 20.0)) * (real_noise + 1j * imag_noise) / np.sqrt(2)
     ).astype(TorchSigComplexDataType)
 
-
 def _power_renorm_scale(
     input_power: float, output_power: float, rel_floor: float = 1e-9
 ) -> float:
@@ -1915,4 +1988,4 @@ def _power_renorm_scale(
     return input_power / denom
 
 
-__all__ = ["add_slope", "additive_noise", "adjacent_channel_interference", "awgn", "carrier_frequency_drift", "carrier_phase_noise", "channel_swap", "clock_drift", "clock_jitter", "coarse_gain_change", "cochannel_interference", "complex_to_2d", "cut_out", "digital_agc", "doppler", "drop_samples", "fading", "interleave_complex", "intermodulation_products", "iq_imbalance", "nonlinear_amplifier", "nonlinear_amplifier_table", "normalize", "passband_ripple", "patch_shuffle", "phase_offset", "quantize", "shadowing", "spectral_inversion", "spectrogram", "spectrogram_drop_samples", "spectrogram_image", "spurs", "time_reversal", "time_varying_noise"]
+__all__ = ["add_slope", "additive_noise", "adjacent_channel_interference", "awgn", "carrier_frequency_drift", "carrier_phase_noise", "channel_swap", "clock_drift", "clock_jitter", "coarse_gain_change", "cochannel_interference", "complex_to_2d", "cut_out", "digital_agc", "doppler", "doppler_batch", "drop_samples", "fading", "interleave_complex", "intermodulation_products", "iq_imbalance", "nonlinear_amplifier", "nonlinear_amplifier_table", "normalize", "passband_ripple", "patch_shuffle", "phase_offset", "quantize", "shadowing", "spectral_inversion", "spectrogram", "spectrogram_drop_samples", "spectrogram_image", "spurs", "time_reversal", "time_varying_noise"]
