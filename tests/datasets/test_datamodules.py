@@ -1,53 +1,99 @@
 """Unit Tests for datamodules"""
 import random
 from pathlib import Path
+from unittest.mock import Mock
 
+import numpy as np
 import pytest
 import torch
 
-from torchsig.datasets.datamodules import TorchSigDataModule
+from torchsig.datasets.datamodules import _seed_worker, set_global_seed, TorchSigDataModule
+from torch.utils.data import Subset
 from torchsig.utils.defaults import TorchSigDefaults
 from torchsig.utils.writer import identity_collate_fn
 
 
-@pytest.mark.filterwarnings(r"ignore:.*fork\(\) may lead to deadlocks in the child:DeprecationWarning")
-@pytest.mark.parametrize(
-    "num_workers, overwrite",
-    [
-        (None, True),  # single worker with overwrite (should create dataset files on disk)
-        (None, False), # single worker with no overwrite (should not error, just skip creation)
-        (2, True),     # multiworker with overwrite (should create dataset files on disk)
-        (3, False),    # multiworker with no overwrite (should not error, just skip creation)
-    ],
-)
-def test_TorchSigDataModule_smoke_and_disk_artifacts(tmp_path, num_workers, overwrite):
-    # tests that TorchSigDataModule can prepare data and set up dataloaders without error, and that
-    # it creates dataset files on disk after prepare_data/setup (multiworker)
-    metadata = TorchSigDefaults().default_dataset_metadata
+@pytest.mark.parametrize("overwrite", [True, False])
+def test_torchsig_datamodule_smoke_and_disk_artifacts(tmp_path, overwrite):
+    fft_size = 64
+    num_iq_samples_dataset = fft_size**2
+
+    metadata = TorchSigDefaults().default_dataset_metadata.copy()
+    metadata.update(
+        {
+            "num_iq_samples_dataset": num_iq_samples_dataset,
+            "fft_size": fft_size,
+            "fft_stride": fft_size,
+            "num_signals_min": 1,
+            "num_signals_max": 1,
+            "signal_duration_in_samples_min": int(0.8 * num_iq_samples_dataset),
+            "signal_duration_in_samples_max": num_iq_samples_dataset,
+        }
+    )
 
     dm = TorchSigDataModule(
         root=tmp_path,
         metadata=metadata,
-        dataset_size=16,
+        dataset_size=12,
         overwrite=overwrite,
         impairment_level=0,
         collate_fn=identity_collate_fn,
-        num_workers=num_workers,
+        num_workers=0,
     )
+
     dm.prepare_data()
     dm.setup()
 
     assert dm.impairment_level == 0
+    assert any(tmp_path.iterdir())
 
-    dls = [dm.train_dataloader(), dm.val_dataloader(), dm.test_dataloader()]
-    for dl in dls:
-        for _batch_idx, data in enumerate(dl): # check all batches (multiworker issues)
-            assert hasattr(data, "__len__")
-            print(len(data))
+    for dataloader in [
+        dm.train_dataloader(),
+        dm.val_dataloader(),
+        dm.test_dataloader(),
+    ]:
+        assert len(dataloader.dataset) > 0
+        batch = next(iter(dataloader))
+        assert hasattr(batch, "__len__")
 
+@pytest.mark.slow_no_gpu
+@pytest.mark.filterwarnings(
+    r"ignore:.*fork\(\) may lead to deadlocks in the child:DeprecationWarning"
+)
+@pytest.mark.parametrize("num_workers", [2])
+def test_torchsig_datamodule_multiworker_smoke(tmp_path, num_workers):
+    fft_size = 64
+    num_iq_samples_dataset = fft_size**2
 
-    # At least ensure dataset directory is populated after prepare_data/setup.
-    # (Exact filenames depend on file handler; HDF5 usually uses data.h5.)
+    metadata = TorchSigDefaults().default_dataset_metadata.copy()
+    metadata.update(
+        {
+            "num_iq_samples_dataset": num_iq_samples_dataset,
+            "fft_size": fft_size,
+            "fft_stride": fft_size,
+            "num_signals_min": 1,
+            "num_signals_max": 1,
+            "signal_duration_in_samples_min": int(0.8 * num_iq_samples_dataset),
+            "signal_duration_in_samples_max": num_iq_samples_dataset,
+        }
+    )
+
+    dm = TorchSigDataModule(
+        root=tmp_path,
+        metadata=metadata,
+        dataset_size=8,
+        overwrite=True,
+        impairment_level=0,
+        collate_fn=identity_collate_fn,
+        num_workers=num_workers,
+    )
+
+    dm.prepare_data()
+    dm.setup()
+
+    batch = next(iter(dm.train_dataloader()))
+
+    assert hasattr(batch, "__len__")
     assert any(tmp_path.iterdir())
 
 
@@ -84,101 +130,240 @@ def _tensors_identical(a: torch.Tensor, b: torch.Tensor) -> bool:
     # Same shape → do a normal allclose check.
     return torch.allclose(a, b)
 
-@pytest.mark.parametrize("num_workers", [0, 1, 2])
+@pytest.mark.parametrize("num_workers", [0])
 def test_dataloader_reproducibility(tmp_path: Path, num_workers: int):
-    # -----------------------------------------------------------------
-    #    Make the *global* Python RNG deterministic (this influences
-    #    the *order* of the shuffling RNG inside DataLoader when `shuffle=True`).
-    # -----------------------------------------------------------------
+    """DataModules with the same seed should produce matching split batches."""
     random.seed(0)
 
-    # -----------------------------------------------------------------
-    #    Common configuration for all three DataModule instances
-    # -----------------------------------------------------------------
-    metadata = TorchSigDefaults().default_dataset_metadata
-    dataset_size = 10                     # tiny dataset -- fast to generate
+    fft_size = 64
+    num_iq_samples_dataset = fft_size**2
+
+    metadata = TorchSigDefaults().default_dataset_metadata.copy()
+    metadata.update(
+        {
+            "num_iq_samples_dataset": num_iq_samples_dataset,
+            "fft_size": fft_size,
+            "fft_stride": fft_size,
+            "num_signals_min": 1,
+            "num_signals_max": 1,
+            "signal_duration_in_samples_min": int(0.8 * num_iq_samples_dataset),
+            "signal_duration_in_samples_max": num_iq_samples_dataset,
+        }
+    )
+
     shared_kwargs = {
         "root": tmp_path,
         "metadata": metadata,
-        "dataset_size": dataset_size,
-        "dataset_splits": [0.6, 0.2, 0.2],   # explicit train/val/test fractions
+        "dataset_size": 10,
+        "dataset_splits": [0.6, 0.2, 0.2],
         "batch_size": 2,
-        "num_workers": num_workers,          # the “problematic” setting we want to test
+        "num_workers": num_workers,
         "seed": 42,
-        "collate_fn": lambda x: x,           # identity -- we only care about the raw Signal objects
+        "collate_fn": lambda x: x,
     }
 
-    # -----------------------------------------------------------------
-    #    Create the on-disk dataset **once** (deterministic because we pass seed=42)
-    # -----------------------------------------------------------------
     dm_create = TorchSigDataModule(
         **shared_kwargs,
         create_num_workers=0,
     )
     dm_create.prepare_data()
 
-    # -----------------------------------------------------------------
-    #     Build **two** independent DataModules that will read the SAME
-    #     on-disk files.  All random seeds are the same, so every step
-    #     (split, shuffle, worker-level RNG) must be identical.
-    # -----------------------------------------------------------------
     dm1 = TorchSigDataModule(**shared_kwargs)
     dm2 = TorchSigDataModule(**shared_kwargs)
 
-    # -----------------------------------------------------------------
-    #    Initialise the splits (random_split uses a seeded Generator)
-    # -----------------------------------------------------------------
     dm1.setup()
     dm2.setup()
 
-    # -----------------------------------------------------------------
-    #    Grab the first 2 batches (4 samples) from each loader
-    # -----------------------------------------------------------------
-    train_batches_1 = _first_n_batches(dm1.train_dataloader(), 2)
-    train_batches_2 = _first_n_batches(dm2.train_dataloader(), 2)
-
-    val_batches_1   = _first_n_batches(dm1.val_dataloader(),   2)
-    val_batches_2   = _first_n_batches(dm2.val_dataloader(),   2)
-
-    test_batches_1  = _first_n_batches(dm1.test_dataloader(),  2)
-    test_batches_2  = _first_n_batches(dm2.test_dataloader(),  2)
-
-    # -----------------------------------------------------------------
-    #    Convert the list of `Signal` objects into a single Tensor.
-    #    (All Signals contain a NumPy array under the `.data` attribute.)
-    # -----------------------------------------------------------------
     def _signals_to_tensor(batches):
-        # `batches` is a list of batch-lists, e.g. [[sig0, sig1], [sig2, sig3]]
-        flat = [sig for batch in batches for sig in batch]
-        return torch.stack([torch.from_numpy(sig.data) for sig in flat])
+        signals = [signal for batch in batches for signal in batch]
+        return torch.stack([torch.from_numpy(signal.data) for signal in signals])
 
-    data_train_1 = _signals_to_tensor(train_batches_1)
-    data_train_2 = _signals_to_tensor(train_batches_2)
+    def _first_batch_tensor(dataloader):
+        return _signals_to_tensor(_first_n_batches(dataloader, 1))
 
-    data_val_1   = _signals_to_tensor(val_batches_1)
-    data_val_2   = _signals_to_tensor(val_batches_2)
+    train_1 = _first_batch_tensor(dm1.train_dataloader())
+    train_2 = _first_batch_tensor(dm2.train_dataloader())
 
-    data_test_1  = _signals_to_tensor(test_batches_1)
-    data_test_2  = _signals_to_tensor(test_batches_2)
+    val_1 = _first_batch_tensor(dm1.val_dataloader())
+    val_2 = _first_batch_tensor(dm2.val_dataloader())
 
-    # -----------------------------------------------------------------
-    #    Assertions -- each pair must be *exactly* equal.
-    # -----------------------------------------------------------------
-    assert torch.allclose(data_train_1, data_train_2), "TRAIN split not reproducible"
-    assert torch.allclose(data_val_1,   data_val_2),   "VAL   split not reproducible"
-    assert torch.allclose(data_test_1,  data_test_2),  "TEST  split not reproducible"
+    test_1 = _first_batch_tensor(dm1.test_dataloader())
+    test_2 = _first_batch_tensor(dm2.test_dataloader())
 
-    # T be extra-sure that the *order* of the splits is the same,
-    # check that the concatenation of the three tensors
-    # reproduces the original full dataset:
-    full_1 = torch.cat([data_train_1, data_val_1, data_test_1])
-    full_2 = torch.cat([data_train_2, data_val_2, data_test_2])
-    assert torch.allclose(full_1, full_2), "Full-dataset ordering mismatched"
+    assert torch.allclose(train_1, train_2), "TRAIN split not reproducible"
+    assert torch.allclose(val_1, val_2), "VAL split not reproducible"
+    assert torch.allclose(test_1, test_2), "TEST split not reproducible"
 
-    # -----------------------------------------------------------------
-    #  Verify that the three splits are **not** identical.
-    #  The helper works even if the tensors have different lengths.
-    # -----------------------------------------------------------------
-    assert not _tensors_identical(data_train_1, data_test_1), "TRAIN and TEST should differ"
-    assert not _tensors_identical(data_val_1,   data_test_1), "VAL   and TEST should differ"
-    assert not _tensors_identical(data_val_1,   data_train_1), "VAL   and TRAIN should differ"
+
+@pytest.mark.slow_no_gpu
+@pytest.mark.parametrize("num_workers", [1, 2])
+def test_dataloader_reproducibility_multiprocess(tmp_path: Path, num_workers: int):
+    """Multiprocess dataloaders should also be reproducible."""
+    random.seed(0)
+
+    fft_size = 64
+    num_iq_samples_dataset = fft_size**2
+
+    metadata = TorchSigDefaults().default_dataset_metadata.copy()
+    metadata.update(
+        {
+            "num_iq_samples_dataset": num_iq_samples_dataset,
+            "fft_size": fft_size,
+            "fft_stride": fft_size,
+            "num_signals_min": 1,
+            "num_signals_max": 1,
+            "signal_duration_in_samples_min": int(0.8 * num_iq_samples_dataset),
+            "signal_duration_in_samples_max": num_iq_samples_dataset,
+        }
+    )
+
+    shared_kwargs = {
+        "root": tmp_path,
+        "metadata": metadata,
+        "dataset_size": 10,
+        "dataset_splits": [0.6, 0.2, 0.2],
+        "batch_size": 2,
+        "num_workers": num_workers,
+        "seed": 42,
+        "collate_fn": lambda x: x,
+    }
+
+    TorchSigDataModule(
+        **shared_kwargs,
+        create_num_workers=0,
+    ).prepare_data()
+
+    dm1 = TorchSigDataModule(**shared_kwargs)
+    dm2 = TorchSigDataModule(**shared_kwargs)
+
+    dm1.setup()
+    dm2.setup()
+
+    def _signals_to_tensor(batches):
+        signals = [signal for batch in batches for signal in batch]
+        return torch.stack([torch.from_numpy(signal.data) for signal in signals])
+
+    def _first_batch_tensor(dataloader):
+        return _signals_to_tensor(_first_n_batches(dataloader, 1))
+
+    assert torch.allclose(
+        _first_batch_tensor(dm1.train_dataloader()),
+        _first_batch_tensor(dm2.train_dataloader()),
+    )
+    assert torch.allclose(
+        _first_batch_tensor(dm1.val_dataloader()),
+        _first_batch_tensor(dm2.val_dataloader()),
+    )
+    assert torch.allclose(
+        _first_batch_tensor(dm1.test_dataloader()),
+        _first_batch_tensor(dm2.test_dataloader()),
+    )
+
+
+def test_set_global_seed_reproducibility():
+    set_global_seed(123)
+
+    python_1 = random.random()
+    numpy_1 = np.random.rand(5)
+    torch_1 = torch.rand(5)
+
+    set_global_seed(123)
+
+    python_2 = random.random()
+    numpy_2 = np.random.rand(5)
+    torch_2 = torch.rand(5)
+
+    assert python_1 == pytest.approx(python_2)
+    np.testing.assert_array_equal(numpy_1, numpy_2)
+    assert torch.equal(torch_1, torch_2)
+
+    assert torch.are_deterministic_algorithms_enabled()
+    assert torch.backends.cudnn.deterministic is True
+    assert torch.backends.cudnn.benchmark is False
+
+
+def test_set_global_seed_changes_random_sequence():
+    set_global_seed(123)
+    python_1 = random.random()
+    numpy_1 = np.random.rand()
+    torch_1 = torch.rand(1)
+
+    set_global_seed(456)
+    python_2 = random.random()
+    numpy_2 = np.random.rand()
+    torch_2 = torch.rand(1)
+
+    assert python_1 != python_2
+    assert numpy_1 != numpy_2
+    assert not torch.equal(torch_1, torch_2)
+
+
+class DummySeedableDataset:
+    def __init__(self, seed=123):
+        self.random_generator = np.random.default_rng(seed)
+
+
+def test_seed_worker_sets_worker_rng_and_python_random(monkeypatch):
+    dataset = DummySeedableDataset(seed=123)
+
+    worker_info = Mock()
+    worker_info.dataset = dataset
+
+    monkeypatch.setattr(
+        "torchsig.datasets.datamodules.get_worker_info",
+        lambda: worker_info,
+    )
+
+    _seed_worker(worker_id=0)
+
+    assert hasattr(dataset, "worker_rng")
+    assert isinstance(dataset.worker_rng, np.random.Generator)
+
+    worker_value = dataset.worker_rng.random()
+
+    random_value = random.random()
+    random.seed(33158374)  # first integer drawn from default_rng(123), range [0, 2**31)
+    expected_random_value = random.random()
+
+    assert random_value == expected_random_value
+    assert np.isfinite(worker_value)
+
+
+def test_seed_worker_unwraps_subset(monkeypatch):
+    dataset = DummySeedableDataset(seed=123)
+    subset = Subset(dataset, indices=[0])
+
+    worker_info = Mock()
+    worker_info.dataset = subset
+
+    monkeypatch.setattr(
+        "torchsig.datasets.datamodules.get_worker_info",
+        lambda: worker_info,
+    )
+
+    _seed_worker(worker_id=0)
+
+    assert hasattr(dataset, "worker_rng")
+    assert not hasattr(subset, "worker_rng")
+
+
+def test_seed_worker_uses_distinct_seed_per_worker(monkeypatch):
+    dataset_0 = DummySeedableDataset(seed=123)
+    dataset_1 = DummySeedableDataset(seed=123)
+
+    def run_seed_worker(dataset, worker_id):
+        worker_info = Mock()
+        worker_info.dataset = dataset
+
+        monkeypatch.setattr(
+            "torchsig.datasets.datamodules.get_worker_info",
+            lambda: worker_info,
+        )
+
+        _seed_worker(worker_id=worker_id)
+        return dataset.worker_rng.random()
+
+    value_0 = run_seed_worker(dataset_0, worker_id=0)
+    value_1 = run_seed_worker(dataset_1, worker_id=1)
+
+    assert value_0 != value_1

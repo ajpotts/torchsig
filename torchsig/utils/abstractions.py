@@ -123,7 +123,7 @@ class HierarchicalMetadataObject(Seedable):
         """
         return self.__class__(
             parent=self.parent if preserve_parent else None,
-            seed=self.seed,
+            seed=self.rng_seed,
             metadata=self._metadata.copy(),
         )
 

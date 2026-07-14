@@ -2,12 +2,12 @@
 
 # TorchSig
 # Built-In
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar, Final
 
 from torchsig.signals.signal_utils import check_signal_class
 
-__all__ = ["CLASS_FAMILY_DICT", "SIGNALS_SHARED_LIST", "FAMILY_SHARED_LIST", "TORCHSIG_NUM_SIGNALS", "TORCHSIG_NUM_FAMILIES", "TorchSigSignalLists"]
+__all__ = ["CLASS_FAMILY_DICT", "FAMILY_SHARED_LIST", "SIGNALS_SHARED_LIST", "TORCHSIG_NUM_FAMILIES", "TORCHSIG_NUM_SIGNALS", "TorchSigSignalLists"]
 
 # Signal class to signal family mapping
 CLASS_FAMILY_DICT: Final[dict[str, str]] = {
@@ -96,26 +96,25 @@ class TorchSigSignalLists:
         chirpss_signals: Chirp spread-spectrum signal.
         tone_signals: Tone signal.
     """
-
     all_signals: ClassVar[list[str]] = SIGNALS_SHARED_LIST
     family_dict: ClassVar[dict[str, str]] = CLASS_FAMILY_DICT
     family_list: ClassVar[list[str]] = FAMILY_SHARED_LIST
 
-    fsk_signals: ClassVar[list[str]] = []
-    ofdm_signals: ClassVar[list[str]] = []
-    constellation_signals: ClassVar[list[str]] = []
-    am_signals: ClassVar[list[str]] = []
-    fm_signals: ClassVar[list[str]] = []
-    lfm_signals: ClassVar[list[str]] = []
-    chirpss_signals: ClassVar[list[str]] = []
-    tone_signals: ClassVar[list[str]] = []
+    fsk_signals: list[str] = field(default_factory=list)
+    ofdm_signals: list[str] = field(default_factory=list)
+    constellation_signals: list[str] = field(default_factory=list)
+    am_signals: list[str] = field(default_factory=list)
+    fm_signals: list[str] = field(default_factory=list)
+    lfm_signals: list[str] = field(default_factory=list)
+    chirpss_signals: list[str] = field(default_factory=list)
+    tone_signals: list[str] = field(default_factory=list)
 
-    # Signal family identifiers
     fsk_names: ClassVar[list[str]] = ["fsk", "msk"]
     ofdm_names: ClassVar[list[str]] = ["ofdm"]
     constellation_names: ClassVar[list[str]] = ["ask", "qam", "psk", "ook"]
     am_names: ClassVar[list[str]] = ["am-"]
-    lfm_names: ClassVar[list[str]] = ["lfm_"]
+    lfm_names: ClassVar[list[str]] = ["lfm-"]
+
     ofdm_subcarrier_modulations: ClassVar[list[str]] = [
         "bpsk",
         "qpsk",

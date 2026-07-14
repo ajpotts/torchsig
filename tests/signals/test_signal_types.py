@@ -311,3 +311,22 @@ def test_signal_copy_preserves_nested_component_structure():
     copied.component_signals[0].component_signals[0].class_index = 99
 
     assert grandchild.class_index == 0
+
+
+def test_signal_preserves_explicit_duration_in_samples():
+    signal = Signal(
+        data=np.zeros(100, dtype=np.complex64),
+        duration_in_samples=25,
+        num_iq_samples_dataset=100,
+    )
+
+    assert signal.duration_in_samples == 25
+
+
+def test_signal_defaults_duration_in_samples_to_data_length():
+    signal = Signal(
+        data=np.zeros(100, dtype=np.complex64),
+        num_iq_samples_dataset=100,
+    )
+
+    assert signal.duration_in_samples == 100

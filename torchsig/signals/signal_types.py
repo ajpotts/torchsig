@@ -270,7 +270,8 @@ class Signal(SignalMetadataObject):
         """
         super().__init__(**kwargs)
         self.data = np.array([]) if data is None else np.asarray(data)
-        self["duration_in_samples"] = len(self.data)
+        if "duration_in_samples" not in self.keys():
+            self["duration_in_samples"] = len(self.data)
         self.component_signals = (
             list(component_signals)
             if component_signals is not None

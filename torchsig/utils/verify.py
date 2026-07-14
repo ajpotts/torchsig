@@ -307,7 +307,7 @@ def verify_numpy_array(
         np.ndarray: The verified NumPy array `n`.
     """
     if isinstance(n, (list, tuple)):
-        n = np.narray(n)
+        n = np.array(n)
     elif not isinstance(n, np.ndarray):
         raise TypeError(f"{name} is not a numpy array: {type(n)}")
 

@@ -117,7 +117,7 @@ class WorkerSeedingDataLoader(DataLoader, Seedable):
             )  # just pick a random seed if none is given
         DataLoader.__init__(self, dataset, **kwargs)
         Seedable.__init__(self, seed=seed)
-        dataset.seed(seed)
+
         if self.worker_init_fn:
             raise ValueError(
                 "No worker_init_fn should be given to WorkerSeedingDataLoader; "
