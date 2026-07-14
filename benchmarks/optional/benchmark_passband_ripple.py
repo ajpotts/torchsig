@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+from torchsig.transforms import functional
 from torchsig.transforms.functional import passband_ripple
 
 # Constants
@@ -15,16 +16,16 @@ def _safe_log10(x):
 # Benchmark test cases
 @pytest.mark.benchmark
 @pytest.mark.parametrize(
-    ("num_taps","max_ripple_db","coefficient_decay_rate","signal_length"),
+    ("num_taps", "max_ripple_db", "signal_length"),
     [
-        (3, 2.0, 1.0, 1000),       # Small filter, short signal
-        (10, 1.0, 0.5, 10000),     # Medium filter, medium signal
-        (32, 0.5, 1.0, 100000),    # Large filter, long signal
-        (50, 0.1, 2.0, 50000),     # Very selective filter
+        (3, 2.0, 1_000),
+        (10, 1.0, 10_000),
+        (32, 0.5, 100_000),
+        (50, 0.1, 50_000),
     ],
 )
 def test_passband_ripple_benchmark(
-    benchmark, num_taps, max_ripple_db, coefficient_decay_rate, signal_length
+    benchmark, num_taps, max_ripple_db, signal_length
 ):
     """Benchmark the passband_ripple function with various configurations."""
     # Generate random test data
@@ -37,7 +38,6 @@ def test_passband_ripple_benchmark(
         data,
         num_taps=num_taps,
         max_ripple_db=max_ripple_db,
-        coefficient_decay_rate=coefficient_decay_rate,
         rng=rng,
     )
 
@@ -49,9 +49,13 @@ def test_passband_ripple_benchmark(
 
 # Additional benchmark for the worst-case scenario (when filter can't be found)
 @pytest.mark.benchmark
-def test_passband_ripple_worst_case_benchmark(benchmark):
-    """Benchmark the worst-case scenario where filter can't be found."""
-    # Use parameters that are very hard to satisfy
+def test_passband_ripple_worst_case_benchmark(benchmark, monkeypatch):
+    """Benchmark fallback when filter construction fails."""
+    def fail_filter(*_args, **_kwargs):
+        raise RuntimeError("injected filter construction failure")
+
+    monkeypatch.setattr(functional, "_fft_filter", fail_filter)
+
     rng = np.random.default_rng(42)
     data = rng.normal(0, 1, 1000) + 1j * rng.normal(0, 1, 1000)
 
@@ -59,12 +63,9 @@ def test_passband_ripple_worst_case_benchmark(benchmark):
         passband_ripple,
         data,
         num_taps=50,
-        max_ripple_db=0.01,  # Very strict requirement
-        coefficient_decay_rate=0.1,
-        max_counter=100,     # Limited attempts
+        max_ripple_db=0.01,
         fallback="original",
         rng=rng,
     )
 
-    # In this case, it should return the original signal
-    assert np.array_equal(result, data.astype(np.complex64))
+    assert result is data
