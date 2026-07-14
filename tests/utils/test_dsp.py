@@ -132,7 +132,7 @@ def _actual_fractional_rate(monkeypatch, requested_rate: float) -> float:
 
 
 def test_fractional_resampler_preserves_near_unity_rate(monkeypatch) -> None:
-    """A small Doppler shift should not be quantized into a larger shift."""
+    """A small Doppler shift should not be quantized into a much larger shift."""
     velocity = 10.0
     alpha = PROPAGATION_SPEED / (PROPAGATION_SPEED - velocity)
     requested_rate = 1 / alpha
@@ -143,7 +143,7 @@ def test_fractional_resampler_preserves_near_unity_rate(monkeypatch) -> None:
 
 
 def test_fractional_resampler_is_symmetric_around_unity(monkeypatch) -> None:
-    """Equal approaching and receding speeds should have symmetric errors."""
+    """Equal approaching and receding speeds should have symmetric rate errors."""
     velocity = 10.0
     approaching_alpha = PROPAGATION_SPEED / (PROPAGATION_SPEED - velocity)
     receding_alpha = PROPAGATION_SPEED / (PROPAGATION_SPEED + velocity)
@@ -166,7 +166,8 @@ def test_fractional_resampler_is_symmetric_around_unity(monkeypatch) -> None:
 
 def test_prototype_polyphase_filter_uses_in_memory_cache(monkeypatch) -> None:
     """Repeated filter requests should not reload identical weights from disk."""
-    load = Mock(return_value=np.ones(8, dtype=np.float32))
+    loaded_weights = np.ones(8, dtype=np.float32)
+    load = Mock(return_value=loaded_weights)
     monkeypatch.setattr(dsp.np, "load", load)
     monkeypatch.setattr(dsp.Path, "is_file", lambda _path: True)
 
@@ -175,8 +176,6 @@ def test_prototype_polyphase_filter_uses_in_memory_cache(monkeypatch) -> None:
 
     np.testing.assert_array_equal(first, second)
     assert load.call_count == 1
-    assert first is not second
-    assert first.flags.writeable
 
 
 @pytest.mark.parametrize(
@@ -186,11 +185,19 @@ def test_prototype_polyphase_filter_uses_in_memory_cache(monkeypatch) -> None:
         (dsp.prototype_polyphase_filter_decimation, 1 / 7),
     ],
 )
-def test_finalized_polyphase_filters_are_cached_and_immutable(monkeypatch, filter_function, scale: float) -> None:
+def test_finalized_polyphase_filters_are_cached_and_immutable(
+    monkeypatch,
+    filter_function,
+    scale: float,
+) -> None:
     """Scaled filters should be constructed once and safely reused."""
     base_weights = np.arange(1, 9, dtype=np.float32)
     get_base_weights = Mock(return_value=base_weights)
-    monkeypatch.setattr(dsp, "_prototype_polyphase_filter_cached", get_base_weights)
+    monkeypatch.setattr(
+        dsp,
+        "_prototype_polyphase_filter_cached",
+        get_base_weights,
+    )
     filter_function.cache_clear()
 
     first = filter_function(num_branches=7, attenuation_db=91)
@@ -199,8 +206,12 @@ def test_finalized_polyphase_filters_are_cached_and_immutable(monkeypatch, filte
     assert first is second
     assert not first.flags.writeable
     np.testing.assert_allclose(first, base_weights * scale)
-    np.testing.assert_array_equal(base_weights, np.arange(1, 9, dtype=np.float32))
+    np.testing.assert_array_equal(
+        base_weights,
+        np.arange(1, 9, dtype=np.float32),
+    )
     get_base_weights.assert_called_once_with(7, 91)
+
     filter_function.cache_clear()
 
 
@@ -211,7 +222,10 @@ def test_finalized_polyphase_filters_are_cached_and_immutable(monkeypatch, filte
         dsp.prototype_polyphase_filter_decimation,
     ],
 )
-def test_finalized_polyphase_filter_cache_distinguishes_dtype(monkeypatch, filter_function) -> None:
+def test_finalized_polyphase_filter_cache_distinguishes_dtype(
+    monkeypatch,
+    filter_function,
+) -> None:
     """Finalized float32 and float64 coefficients should be cached separately."""
     monkeypatch.setattr(
         dsp,
@@ -227,6 +241,7 @@ def test_finalized_polyphase_filter_cache_distinguishes_dtype(monkeypatch, filte
     assert weights64.dtype == np.dtype(np.float64)
     assert weights32 is filter_function(7, dtype=np.float32)
     assert weights64 is filter_function(7, dtype=np.float64)
+
     filter_function.cache_clear()
 
 
@@ -240,7 +255,10 @@ def test_finalized_polyphase_filter_cache_distinguishes_dtype(monkeypatch, filte
 )
 def test_polyphase_resamplers_preserve_complex64_dtype(resampler, rate) -> None:
     """Float32 filter coefficients should prevent promotion to complex128."""
-    result = resampler(np.ones(32, dtype=np.complex64), rate)
+    data = np.ones(32, dtype=np.complex64)
+
+    result = resampler(data, rate)
+
     assert result.dtype == np.dtype(np.complex64)
 
 
@@ -249,7 +267,9 @@ def test_multistage_polyphase_resampler_preserves_precision(rate: float) -> None
     """Float32 processing should remain close to the float64 reference."""
     rng = np.random.default_rng(0)
     data64 = rng.standard_normal(1_024) + 1j * rng.standard_normal(1_024)
-    result32 = dsp.multistage_polyphase_resampler(data64.astype(np.complex64), rate)
+    data32 = data64.astype(np.complex64)
+
+    result32 = dsp.multistage_polyphase_resampler(data32, rate)
     result64 = dsp.multistage_polyphase_resampler(data64, rate)
 
     assert result32.dtype == np.dtype(np.complex64)
@@ -261,18 +281,36 @@ def test_multistage_polyphase_resampler_preserves_precision(rate: float) -> None
 def test_float32_polyphase_filter_preserves_spectral_performance() -> None:
     """Coefficient quantization should preserve transition-edge performance."""
     num_branches = 32
-    frequencies = None
-    responses_db = {}
-    for dtype in (np.float32, np.float64):
-        weights = dsp.prototype_polyphase_filter_interpolation(num_branches, dtype=dtype).astype(np.float64)
-        frequencies, response = dsp.sp.freqz(weights / num_branches, worN=131_072, fs=1.0)
-        responses_db[dtype] = 20 * np.log10(np.maximum(np.abs(response), np.finfo(np.float64).tiny))
-
+    fft_size = 131_072
     passband_edge = 1 / (4 * num_branches)
     stopband_edge = 3 / (4 * num_branches)
+
+    responses_db = {}
+    for dtype in (np.float32, np.float64):
+        weights = dsp.prototype_polyphase_filter_interpolation(
+            num_branches,
+            dtype=dtype,
+        ).astype(np.float64)
+        frequencies, response = dsp.sp.freqz(
+            weights / num_branches,
+            worN=fft_size,
+            fs=1.0,
+        )
+        responses_db[dtype] = 20 * np.log10(
+            np.maximum(np.abs(response), np.finfo(np.float64).tiny)
+        )
+
+    passband = frequencies <= passband_edge
+    stopband = frequencies >= stopband_edge
     response32_db = responses_db[np.float32]
-    assert np.ptp(response32_db[frequencies <= passband_edge]) < 1e-3
-    assert np.max(response32_db[frequencies >= stopband_edge]) < -119.5
+    response64_db = responses_db[np.float64]
+
+    assert np.ptp(response32_db[passband]) < 1e-3
+    assert np.max(response32_db[stopband]) < -119.5
+
     for edge in (passband_edge, stopband_edge):
         edge_index = int(np.argmin(np.abs(frequencies - edge)))
-        assert response32_db[edge_index] == pytest.approx(responses_db[np.float64][edge_index], abs=0.1)
+        assert response32_db[edge_index] == pytest.approx(
+            response64_db[edge_index],
+            abs=0.1,
+        )

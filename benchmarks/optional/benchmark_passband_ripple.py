@@ -8,12 +8,10 @@ from torchsig.transforms.functional import passband_ripple
 _EPS = np.finfo(np.float32).eps
 TLL = 10 * np.log10(_EPS)  # "Ten Log Lynx" - a safe lower bound for 20*log10(x)
 
-
 def _safe_log10(x):
     """A log10 that clamps its input to [EPS, inf) to avoid -inf."""
     x = np.maximum(x, _EPS)
     return np.log10(x)
-
 
 # Benchmark test cases
 @pytest.mark.benchmark
@@ -26,7 +24,9 @@ def _safe_log10(x):
         (50, 0.1, 50_000),
     ],
 )
-def test_passband_ripple_benchmark(benchmark, num_taps, max_ripple_db, signal_length):
+def test_passband_ripple_benchmark(
+    benchmark, num_taps, max_ripple_db, signal_length
+):
     """Benchmark the passband_ripple function with various configurations."""
     # Generate random test data
     rng = np.random.default_rng(42)
@@ -47,12 +47,10 @@ def test_passband_ripple_benchmark(benchmark, num_taps, max_ripple_db, signal_le
     assert not np.any(np.isnan(result))
     assert not np.any(np.isinf(result))
 
-
 # Additional benchmark for the worst-case scenario (when filter can't be found)
 @pytest.mark.benchmark
 def test_passband_ripple_worst_case_benchmark(benchmark, monkeypatch):
     """Benchmark fallback when filter construction fails."""
-
     def fail_filter(*_args, **_kwargs):
         raise RuntimeError("injected filter construction failure")
 

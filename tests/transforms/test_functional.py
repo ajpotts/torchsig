@@ -25,6 +25,7 @@ from torchsig.transforms.functional import (
     cut_out,
     digital_agc,
     doppler,
+    doppler_batch,
     drop_samples,
     fading,
     interleave_complex,
@@ -696,6 +697,160 @@ def test_doppler(params: dict, expected: bool | AttributeError, is_error: bool) 
         assert (len(data) == len(data_test)) == expected
         assert (type(data) == type(data_test)) == expected
         assert (data.dtype == TorchSigComplexDataType) == expected
+
+
+@pytest.mark.parametrize("velocity", [10.0, 1e6])
+def test_doppler_preserves_length_for_long_inputs(velocity: float) -> None:
+    """Doppler resampling should not shorten long input signals."""
+    num_samples = 65_536
+    data = np.ones(num_samples, dtype=TorchSigComplexDataType)
+
+    result = doppler(
+        data=data,
+        velocity=velocity,
+        propagation_speed=2.9979e8,
+    )
+
+    assert result.shape == data.shape
+
+
+def test_doppler_does_not_append_zeros_to_preserve_length() -> None:
+    """Length preservation should retain resampled signal content at the tail."""
+    data = np.ones(65_536, dtype=TorchSigComplexDataType)
+
+    result = doppler(
+        data=data,
+        velocity=10.0,
+        propagation_speed=2.9979e8,
+    )
+
+    assert np.count_nonzero(result[-5:]) == 5
+
+
+@pytest.mark.parametrize(
+    "velocity,propagation_speed",
+    [
+        (2.9979e8, 2.9979e8),
+        (2.9979e8 + 1, 2.9979e8),
+        (np.nan, 2.9979e8),
+        (1.0, 0.0),
+    ],
+)
+def test_doppler_rejects_invalid_physical_parameters(
+    velocity: float,
+    propagation_speed: float,
+) -> None:
+    """Invalid propagation speeds and velocities should raise a clear error."""
+    data = np.ones(16, dtype=TorchSigComplexDataType)
+
+    with pytest.raises(ValueError, match="velocity|propagation_speed"):
+        doppler(
+            data=data,
+            velocity=velocity,
+            propagation_speed=propagation_speed,
+        )
+
+
+def test_doppler_keeps_complex64_input_during_resampling(monkeypatch) -> None:
+    """Approaching-velocity padding should not promote complex64 input."""
+    resampler_input_dtype = None
+
+    def capture_resampler(data: np.ndarray, _rate: float) -> np.ndarray:
+        nonlocal resampler_input_dtype
+        resampler_input_dtype = data.dtype
+        return data
+
+    monkeypatch.setattr(
+        "torchsig.transforms.functional.multistage_polyphase_resampler",
+        capture_resampler,
+    )
+    data = np.ones(32, dtype=TorchSigComplexDataType)
+
+    doppler(
+        data=data,
+        velocity=1e6,
+        propagation_speed=2.9979e8,
+    )
+
+    assert resampler_input_dtype == np.dtype(TorchSigComplexDataType)
+
+
+def test_doppler_avoids_copy_when_resampler_returns_complex64(monkeypatch) -> None:
+    """The final dtype normalization should reuse complex64 resampler output."""
+    resampled = np.arange(32, dtype=TorchSigComplexDataType)
+
+    monkeypatch.setattr(
+        "torchsig.transforms.functional.multistage_polyphase_resampler",
+        lambda _data, _rate: resampled,
+    )
+
+    result = doppler(
+        data=resampled.copy(),
+        velocity=-1e6,
+        propagation_speed=2.9979e8,
+    )
+
+    assert result.dtype == np.dtype(TorchSigComplexDataType)
+    assert np.shares_memory(result, resampled)
+
+
+def test_doppler_rejects_multidimensional_input() -> None:
+    """Doppler should reject arrays without a single sample axis."""
+    data = np.ones((2, 16), dtype=TorchSigComplexDataType)
+
+    with pytest.raises(ValueError, match="one-dimensional"):
+        doppler(
+            data=data,
+            velocity=0.0,
+            propagation_speed=2.9979e8,
+        )
+
+
+@pytest.mark.parametrize("velocity", [-1e6, 10.0, 1e6])
+def test_doppler_batch_matches_scalar_processing(velocity: float) -> None:
+    """A shared-rate batch should match independently processed signals."""
+    rng = np.random.default_rng(0)
+    data = (
+        rng.standard_normal((4, 1_024))
+        + 1j * rng.standard_normal((4, 1_024))
+    ).astype(TorchSigComplexDataType)
+
+    result = doppler_batch(data, velocity, 2.9979e8)
+    expected = np.stack(
+        [doppler(signal, velocity, 2.9979e8) for signal in data]
+    )
+
+    assert result.shape == data.shape
+    assert result.dtype == np.dtype(TorchSigComplexDataType)
+    np.testing.assert_allclose(result, expected, rtol=1e-5, atol=1e-6)
+
+
+def test_doppler_batch_requires_two_dimensional_input() -> None:
+    """Batch Doppler should require explicit batch and sample axes."""
+    with pytest.raises(ValueError, match="two-dimensional"):
+        doppler_batch(np.ones(16, dtype=TorchSigComplexDataType))
+
+
+def test_doppler_skips_resampling_for_effective_unity_rate(monkeypatch) -> None:
+    """An effective 1:1 rate should bypass polyphase filtering."""
+    data = np.ones(32, dtype=TorchSigComplexDataType)
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("resampler should not be called for a 1:1 rate")
+
+    monkeypatch.setattr(
+        "torchsig.transforms.functional.multistage_polyphase_resampler",
+        fail_if_called,
+    )
+
+    result = doppler(
+        data=data,
+        velocity=10.0,
+        propagation_speed=2.9979e8,
+    )
+
+    np.testing.assert_array_equal(result, data)
+    assert result.dtype == TorchSigComplexDataType
 
 
 @pytest.mark.parametrize(

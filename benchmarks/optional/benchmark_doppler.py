@@ -13,7 +13,9 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from torchsig.transforms.functional import doppler
+from torchsig.datasets.datasets import TorchSigIterableDataset
+from torchsig.transforms.functional import doppler, doppler_batch
+from torchsig.transforms.transforms import Doppler
 from torchsig.utils.defaults import TorchSigDefaults
 from torchsig.utils.dsp import TorchSigComplexDataType
 
@@ -31,10 +33,32 @@ DOPPLER_IMPLEMENTATIONS: dict[str, Callable[..., np.ndarray]] = {
 }
 
 
+def _scalar_doppler_batch(
+    data: np.ndarray,
+    velocity: float,
+    propagation_speed: float,
+) -> np.ndarray:
+    """Apply scalar Doppler independently for an A/B batch baseline."""
+    return np.stack(
+        [
+            doppler(signal, velocity, propagation_speed)
+            for signal in data
+        ]
+    )
+
+
+DOPPLER_BATCH_IMPLEMENTATIONS: dict[str, Callable[..., np.ndarray]] = {
+    "scalar-loop": _scalar_doppler_batch,
+    "axis-batch": doppler_batch,
+}
+
+
 def _complex_noise(num_samples: int, seed: int = SEED) -> np.ndarray:
     """Return deterministic complex64 input for a benchmark case."""
     rng = np.random.default_rng(seed)
-    return (rng.standard_normal(num_samples) + 1j * rng.standard_normal(num_samples)).astype(TorchSigComplexDataType)
+    return (
+        rng.standard_normal(num_samples) + 1j * rng.standard_normal(num_samples)
+    ).astype(TorchSigComplexDataType)
 
 
 @pytest.mark.benchmark
@@ -83,6 +107,42 @@ def test_benchmark_doppler_functional(
     assert np.all(np.isfinite(result))
 
 
+@pytest.mark.benchmark
+@pytest.mark.parametrize("num_samples", [1_024, 8_192, 65_536])
+@pytest.mark.parametrize("batch_size", [4, 16])
+@pytest.mark.parametrize(
+    ("implementation_name", "implementation"),
+    DOPPLER_BATCH_IMPLEMENTATIONS.items(),
+    ids=DOPPLER_BATCH_IMPLEMENTATIONS,
+)
+def test_benchmark_doppler_batch(
+    benchmark,
+    implementation_name: str,
+    implementation: Callable[..., np.ndarray],
+    batch_size: int,
+    num_samples: int,
+) -> None:
+    """Compare shared-rate axis filtering against independent calls."""
+    del implementation_name
+    data = np.stack(
+        [_complex_noise(num_samples, SEED + index) for index in range(batch_size)]
+    )
+    kwargs = {
+        "data": data,
+        "velocity": 1e6,
+        "propagation_speed": PROPAGATION_SPEED,
+    }
+
+    warm_result = implementation(**kwargs)
+    assert warm_result.shape == data.shape
+
+    result = benchmark(implementation, **kwargs)
+
+    assert result.shape == data.shape
+    assert result.dtype == TorchSigComplexDataType
+    assert np.all(np.isfinite(result))
+
+
 def _dataset_metadata(num_samples: int) -> dict:
     """Create compact metadata suitable for repeatable generation benchmarks."""
     metadata = TorchSigDefaults().default_dataset_metadata
@@ -106,3 +166,66 @@ def _dataset_metadata(num_samples: int) -> dict:
         }
     )
     return metadata
+
+
+def _generate_dataset_samples(
+    num_samples: int,
+    samples_per_round: int,
+    apply_doppler: bool,
+) -> list[np.ndarray]:
+    """Generate a deterministic batch with or without the Doppler transform."""
+    transforms = []
+    if apply_doppler:
+        transforms.append(
+            Doppler(
+                velocity_range=(1e6, 1e6),
+                propagation_speed=PROPAGATION_SPEED,
+                seed=SEED,
+            )
+        )
+
+    dataset = TorchSigIterableDataset(
+        metadata=_dataset_metadata(num_samples),
+        signal_generators=["tone"],
+        transforms=transforms,
+        target_labels=[],
+        seed=SEED,
+    )
+    return [next(dataset) for _ in range(samples_per_round)]
+
+
+@pytest.mark.benchmark
+@pytest.mark.parametrize("num_samples", [1_024, 8_192], ids=lambda value: f"n={value}")
+@pytest.mark.parametrize(
+    "apply_doppler",
+    [False, True],
+    ids=["dataset-baseline", "dataset-with-doppler"],
+)
+def test_benchmark_doppler_in_dataset_generation(
+    benchmark,
+    num_samples: int,
+    apply_doppler: bool,
+) -> None:
+    """Measure Doppler overhead in seeded iterable-dataset generation."""
+    samples_per_round = 4
+
+    # Warm the complete path before timing. Recreating the seeded dataset in
+    # each measured call gives every implementation the same generated inputs.
+    warm_result = _generate_dataset_samples(
+        num_samples,
+        samples_per_round,
+        apply_doppler,
+    )
+    assert len(warm_result) == samples_per_round
+
+    result = benchmark(
+        _generate_dataset_samples,
+        num_samples,
+        samples_per_round,
+        apply_doppler,
+    )
+
+    assert len(result) == samples_per_round
+    assert all(sample.shape == (num_samples,) for sample in result)
+    assert all(sample.dtype == TorchSigComplexDataType for sample in result)
+    assert all(np.all(np.isfinite(sample)) for sample in result)
