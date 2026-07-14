@@ -323,7 +323,10 @@ class DatasetCreator:
             self.items_written = 0
             self._msg_timer = time()
 
-            with self.file_handler(root=self.root) as writer:
+            with self.file_handler(
+                root=self.root,
+                **self.kwargs,
+            ) as writer:
                 # Write initial YAMLs
                 write_dict_to_yaml(self.dataset_info_filepath, self.get_dataset_info_dict(
                     dataset_length=0, original_target_labels=orig_target_labels,

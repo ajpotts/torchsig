@@ -302,6 +302,7 @@ class HDF5Writer(FileWriter):
     """Write batches concurrently into multiple HDF5 shards."""
 
     filename = "hdf5_manifest.json"
+    manifest_filename = filename
 
     def __init__(
         self,
@@ -321,8 +322,10 @@ class HDF5Writer(FileWriter):
             raise ValueError("num_shards must be at least 1")
 
         super().__init__(root=root)
+
         self.datapath = self.root / self.filename
         self.manifest_path = self.datapath
+
         self.compression = compression
         self.compression_opts = compression_opts
         self.shuffle = shuffle
@@ -330,28 +333,21 @@ class HDF5Writer(FileWriter):
         self.chunk_cache_size = chunk_cache_size
         self.max_batches_in_memory = max_batches_in_memory
         self.num_shards = num_shards
+        self.multiprocessing_context = multiprocessing_context
+
         self._owner_pid = os.getpid()
         self._closed = False
-        self._context = mp.get_context(multiprocessing_context)
-        self._error_queue = self._context.Queue()
-        self._queues = [
-            self._context.Queue(maxsize=max_batches_in_memory)
-            for _ in range(num_shards)
-        ]
+
+        self._context = None
+        self._error_queue = None
+        self._queues = []
+        self._processes = []
+
         self._shard_paths = [
-            self.root / f"data-{i:05d}.h5" for i in range(num_shards)
-        ]
-        self._processes = [
-            self._context.Process(
-                target=_shard_process,
-                args=(self._config(i), self._queues[i], self._error_queue),
-                name=f"torchsig-hdf5-shard-{i}",
-                daemon=False,
-            )
+            self.root / f"data-{i:05d}.h5"
             for i in range(num_shards)
         ]
-        for process in self._processes:
-            process.start()
+
 
     def _config(self, shard_id: int) -> _ShardConfig:
         return _ShardConfig(
@@ -373,19 +369,31 @@ class HDF5Writer(FileWriter):
         return state
 
     def _raise_writer_error(self) -> None:
-        errors: list[tuple[int, str]] = []
+        """Raise a shard-writer failure in the calling process."""
+        if self._error_queue is None:
+            return
+
+        errors = []
         while True:
             try:
                 errors.append(self._error_queue.get_nowait())
             except queue.Empty:
                 break
+
         if errors:
-            details = "\n".join(f"Shard {i}:\n{tb}" for i, tb in errors)
-            raise RuntimeError(f"HDF5 shard writer failed:\n{details}")
+            details = "\n".join(
+                f"Shard {error['shard_id']} failed:\n{error['traceback']}"
+                for error in errors
+            )
+            raise RuntimeError(
+                f"HDF5 shard writer process failed:\n{details}"
+            )
+
         for shard_id, process in enumerate(self._processes):
             if process.exitcode not in (None, 0):
                 raise RuntimeError(
-                    f"HDF5 shard writer {shard_id} exited with {process.exitcode}"
+                    f"HDF5 shard writer {shard_id} exited with "
+                    f"code {process.exitcode}"
                 )
 
     def _prepare(self, signal: Signal) -> Signal:
@@ -398,7 +406,42 @@ class HDF5Writer(FileWriter):
             self._prepare(component)
         return signal
 
+    def setup(self) -> None:
+        """Prepare the directory and start shard writer processes."""
+        super().setup()
+
+        self._context = mp.get_context(self.multiprocessing_context)
+        self._error_queue = self._context.Queue()
+
+        self._queues = [
+            self._context.Queue(
+                maxsize=self.max_batches_in_memory,
+            )
+            for _ in range(self.num_shards)
+        ]
+
+        self._processes = [
+            self._context.Process(
+                target=_shard_process,
+                args=(
+                    self._config(shard_id),
+                    self._queues[shard_id],
+                    self._error_queue,
+                ),
+                name=f"torchsig-hdf5-shard-{shard_id}",
+                daemon=False,
+            )
+            for shard_id in range(self.num_shards)
+        ]
+
+        for process in self._processes:
+            process.start()
+
     def write(self, batch_idx: int, data: Sequence[Signal]) -> None:
+        if len(self._queues) != self.num_shards:
+            raise RuntimeError(
+                "HDF5Writer.setup() has not initialized all shard queues"
+            )
         if self._closed:
             raise RuntimeError("Cannot write after teardown")
         if batch_idx < 0:
