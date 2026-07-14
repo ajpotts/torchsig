@@ -1,0 +1,131 @@
+Proposal: Split the Doppler Optimization Commit into Multiple MRs
+
+The latest commit, e4af8c0, combines several distinct changes: fractional-
+resampler correctness, filter caching and dtype preservation, scalar Doppler
+fixes, a new batch API, benchmarks, and documentation artifacts. The proposed
+split is a stacked series of five MRs plus one unrelated cleanup MR.
+
+MR 1: Correct fractional resampling near unity
+
+Scope:
+
+- Add _polyphase_fractional_integer_rates.
+- Replace the asymmetric ceil rate selection with rounded integer-ratio
+  selection.
+- Add tests for near-unity rates, symmetry around unity, and effective
+  resampling-rate accuracy.
+
+Files:
+
+- torchsig/utils/dsp.py
+- A focused subset of tests/utils/test_dsp.py
+
+This is the foundational correctness fix and should merge first.
+
+MR 2: Cache polyphase filters and preserve input precision
+
+Scope:
+
+- Cache base prototype filters.
+- Cache finalized interpolation and decimation filters.
+- Keep the public prototype_polyphase_filter() result independently mutable.
+- Select float32 coefficients for float32 and complex64 input.
+- Preserve complex64 through interpolation, decimation, and fractional
+  resampling.
+- Add cache, immutability, dtype, numerical-precision, and spectral-response
+  tests.
+
+Files:
+
+- torchsig/utils/dsp.py
+- Remaining relevant portions of tests/utils/test_dsp.py
+
+This MR depends on MR 1. It carries most of the scalar performance improvement
+without changing the Doppler API.
+
+MR 3: Fix scalar Doppler correctness and validation
+
+Scope:
+
+- Add effective-rate calculation.
+- Fix padding and output length for long signals.
+- Bypass resampling when the selected rate is exactly unity.
+- Preserve input dtype while padding.
+- Avoid unnecessary final copies.
+- Validate propagation speed, velocity, and one-dimensional input.
+- Add scalar Doppler regression tests.
+
+Files:
+
+- torchsig/transforms/functional.py
+- Scalar Doppler portions of tests/transforms/test_functional.py
+- The effective-rate helper in torchsig/utils/dsp.py
+
+This MR depends on MRs 1 and 2.
+
+MR 4: Add batched Doppler support
+
+Scope:
+
+- Extend polyphase operations to work along the final array axis.
+- Replace one-dimensional slicing and len() checks with ellipsis slicing and
+  shape[-1].
+- Add and export doppler_batch.
+- Test batch/scalar equivalence, shape, dtype, invalid inputs, and multiple
+  velocities.
+
+Files:
+
+- torchsig/utils/dsp.py
+- torchsig/transforms/functional.py
+- Batch-related tests in both test modules
+
+This MR depends on MR 3. Keeping it separate makes the new public API easy to
+review independently.
+
+MR 5: Add Doppler performance benchmarks
+
+Scope:
+
+- Add benchmarks/optional/benchmark_doppler.py.
+- Cover scalar, batched, and dataset-generation behavior.
+- Document benchmark commands and expected comparisons in the MR description.
+
+This MR depends on MR 4 because it benchmarks both scalar and batch
+implementations.
+
+Do not commit performance.txt. Its useful results belong in the MR description
+or as benchmark artifacts. Likewise, mr.txt should be used as description
+material rather than as a repository file.
+
+Independent MR: Repair the passband-ripple benchmark
+
+The changes to benchmarks/optional/benchmark_passband_ripple.py are unrelated
+to Doppler.
+
+Scope:
+
+- Remove obsolete arguments.
+- Inject the fallback failure deterministically.
+- Correct the fallback assertion.
+
+This should be a small independent MR and does not need to depend on the Doppler
+stack.
+
+Recommended dependency chain
+
+Fractional-rate correctness
+    -> Filter cache and dtype preservation
+    -> Scalar Doppler correctness
+    -> Batched Doppler API
+    -> Doppler benchmarks
+
+Passband-ripple benchmark repair is independent.
+
+Implementation strategy
+
+Create each branch from its intended parent and use interactive rebase or git
+reset plus selective staging (git add -p) to reconstruct focused commits.
+Because several MRs touch the same functions, stack them sequentially instead
+of branching every MR directly from main. This will reduce conflicts while
+keeping every MR independently testable.
