@@ -1,8 +1,12 @@
 """TorchSig File Handlers"""
 
+from . import base_handler, hdf5, npy
 from .base_handler import BaseFileHandler, FileReader, FileWriter
-from .hdf5 import HDF5FileHandler, HDF5Reader, HDF5Writer
+from .hdf5 import HDF5Reader
+from .metadata_reader import MetadataIndexError, MetadataReader
 from .npy import NPYReader
+from .ogg import OGGReader
+from .wav import WAVReader
 
 __all__ = [
     "BaseFileHandler",
@@ -11,5 +15,12 @@ __all__ = [
     "HDF5FileHandler",
     "HDF5Reader",
     "HDF5Writer",
+    "MetadataIndexError",
+    "MetadataReader",
     "NPYReader",
+    "OGGReader",
+    "WAVReader",
+    "base_handler",
+    "hdf5",
+    "npy",
 ]

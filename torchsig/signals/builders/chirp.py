@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
+__all__ = ["chirp"]
 
 def chirp(
     f0: float, f1: float, samples_per_symbol: int, phi: float = 0.0

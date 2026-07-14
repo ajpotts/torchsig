@@ -1,14 +1,13 @@
 """Metadata Transforms"""
 
-__all__ = [
-    "MetadataTransform",
-    "YOLOLabel"
-]
-
 from torchsig.signals.signal_types import Signal
 from torchsig.transforms.base_transforms import Transform
 from torchsig.utils.printing import generate_repr_str
 
+__all__ = [
+    "MetadataTransform",
+    "YOLOLabel"
+]
 
 ## Base/Helper Classes
 class MetadataTransform(Transform):
@@ -144,3 +143,5 @@ class YOLOLabel(MetadataTransform):
         yolo_label = (class_index, x_center, y_center, width, height)
         signal["yolo_label"] = yolo_label
         return signal
+
+__all__ = ["MetadataTransform", "YOLOLabel"]

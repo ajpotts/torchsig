@@ -1,10 +1,17 @@
 """Unit Tests: transforms/transforms.py"""
 
+# Built-In
+
+# Third Party
+import numpy as np
+import pytest
+from test_transforms_utils import generate_composite_signal, generate_test_signal
+
+from torchsig.signals.signal_types import Signal
 from torchsig.transforms.transforms import (
-    SignalTransform,
     AWGN,
-    AddSlope,
     AdditiveNoise,
+    AddSlope,
     AdjacentChannelInterference,
     CarrierFrequencyDrift,
     CarrierPhaseNoise,
@@ -27,6 +34,7 @@ from torchsig.transforms.transforms import (
     Quantize,
     RandomDropSamples,
     Shadowing,
+    SignalTransform,
     SpectralInversion,
     Spectrogram,
     SpectrogramDropSamples,
@@ -35,17 +43,7 @@ from torchsig.transforms.transforms import (
     TimeReversal,
     TimeVaryingNoise,
 )
-from torchsig.signals.signal_types import Signal
-from torchsig.utils.dsp import compute_spectrogram, low_pass, TorchSigComplexDataType, TorchSigRealDataType
-from test_transforms_utils import generate_test_signal, generate_composite_signal
-
-# Third Party
-import numpy as np
-import pytest
-
-# Built-In
-from typing import Union
-
+from torchsig.utils.dsp import TorchSigComplexDataType, TorchSigRealDataType, compute_spectrogram, low_pass
 
 RTOL = 1e-6
 TEST_SIGNAL = generate_test_signal(num_iq_samples=64, scale=1.0)
@@ -254,7 +252,7 @@ def test_AdditiveNoise(signal: Signal, params: dict, is_error: bool) -> None:
         ),
     ],
 )
-def test_AdjacentChannelInterference(signal: Signal, params: dict, expected: Union[bool, ValueError], is_error: bool) -> None:
+def test_AdjacentChannelInterference(signal: Signal, params: dict, expected: bool | ValueError, is_error: bool) -> None:
     """Test AdjacentChannelInterference transform with pytest.
 
     Args:
@@ -1017,49 +1015,37 @@ def test_NonlinearAmplifier(signal: Signal, params: dict, is_error: bool) -> Non
 
         assert signal.data.dtype == TorchSigComplexDataType
 
+@pytest.fixture
+def test_signal():
+    return new_test_signal()
 
-@pytest.mark.parametrize(
-    "signal, params, is_error",
-    [
-        (
-            new_test_signal(),
-            {
-                "max_ripple_db": (1, 2),
-                "num_taps": [2, 3],
-                "coefficient_decay_rate": (1, 5),
-            },
-            False,
-        ),
-    ],
-)
-def test_PassbandRipple(signal: Signal, params: dict, is_error: bool) -> None:
-    """Test PassbandRipple transform with pytest.
+@pytest.mark.parametrize("max_ripple_db", [(1, 2)])
+@pytest.mark.parametrize("ripple_freq", [(2, 10)])
+@pytest.mark.parametrize("num_taps", [[65, 1025]])
+@pytest.mark.parametrize("passband_fuzz", ["smooth","random"])
+@pytest.mark.parametrize("stopband_fuzz", ["smooth","random"])
+def test_PassbandRipple(
+    test_signal: Signal,
+    max_ripple_db: tuple,
+    ripple_freq: tuple,
+    num_taps: list,
+    passband_fuzz: str,
+    stopband_fuzz: str,
+) -> None:
+    """Test PassbandRipple transform with pytest."""
+    signal_test = test_signal.copy()
+    T = PassbandRipple(
+        max_ripple_db=max_ripple_db,
+        ripple_freq=ripple_freq,
+        num_taps=num_taps,
+        passband_fuzz=passband_fuzz,
+        stopband_fuzz=stopband_fuzz
+    )
+    signal_out = T(test_signal)
 
-    Args:
-        signal (Signal): Input signal to transform.
-        is_error (bool): Is a test error expected.
-
-    Raises:
-        AssertionError: If unexpected test outcome.
-
-    """
-    max_ripple_db = params["max_ripple_db"]
-    num_taps = params["num_taps"]
-    coefficient_decay_rate = params["coefficient_decay_rate"]
-
-    if is_error:
-        with pytest.raises(Exception, match=r".*"):
-            T = PassbandRipple(max_ripple_db=max_ripple_db, num_taps=num_taps, coefficient_decay_rate=coefficient_decay_rate)
-            signal = T(signal)
-    else:
-        signal_test = signal.copy()
-        T = PassbandRipple(max_ripple_db=max_ripple_db, num_taps=num_taps, coefficient_decay_rate=coefficient_decay_rate)
-        signal = T(signal)
-
-        assert isinstance(T, PassbandRipple)
-
-        assert type(signal.data) == type(signal_test.data)
-        assert signal.data.dtype == TorchSigComplexDataType
+    assert isinstance(T, PassbandRipple)
+    assert type(signal_out.data) == type(signal_test.data)
+    assert signal_out.data.dtype == TorchSigComplexDataType
 
 
 @pytest.mark.parametrize(
@@ -1503,7 +1489,7 @@ def test_TimeReversal_spectral_inversion_flips() -> None:
 @pytest.mark.parametrize(
     "signal, params, is_error",
     [
-        (new_test_signal(), {"noise_power_low": (2.0, 3.0), "noise_power_high": (3.0, 4.0), "inflections": [int(0), int(10)], "random_regions": False}, False),
+        (new_test_signal(), {"noise_power_low": (2.0, 3.0), "noise_power_high": (3.0, 4.0), "inflections": [0, 10], "random_regions": False}, False),
     ],
 )
 def test_TimeVaryingNoise(signal: Signal, params: dict, is_error: bool) -> None:

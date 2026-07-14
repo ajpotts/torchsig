@@ -2,6 +2,7 @@
 
 import numpy as np
 
+__all__ = ["remove_corners", "all_symbol_maps"]
 
 def remove_corners(const):
     """Removes corners from 'cross' modulations.

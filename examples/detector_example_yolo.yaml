@@ -52,8 +52,8 @@ names:
   50: am-dsb
   51: am-lsb
   52: am-usb
-  53: lfm_data
-  54: lfm_radar
+  53: lfm-data
+  54: lfm-radar
   55: chirpss
   56: tone
 nc: 57

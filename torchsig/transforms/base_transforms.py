@@ -329,3 +329,5 @@ class RandAugment(Transform):
             signal = t(signal)
 
         return signal
+
+__all__ = ["Transform", "Compose", "Lambda", "Normalize", "RandomApply", "RandAugment"]

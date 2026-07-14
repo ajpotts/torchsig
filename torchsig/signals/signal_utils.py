@@ -6,6 +6,7 @@ import numpy as np
 
 from torchsig.utils.dsp import low_pass_iterative_design
 
+__all__ = ["check_signal_class", "random_limiting_filter_design"]
 
 def check_signal_class(name: str, possible_names: list[str]) -> bool:
     """Check if the provided signal name matches any of the possible signal names.

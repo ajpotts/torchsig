@@ -1,5 +1,20 @@
 """Transforms on Signal objects."""
 
+import os
+import secrets
+import time
+import warnings
+from copy import copy
+from typing import Literal
+
+import numpy as np
+import numpy.typing as npt
+
+import torchsig.transforms.functional as F
+from torchsig.signals.signal_types import Signal
+from torchsig.transforms.base_transforms import Transform
+from torchsig.utils.dsp import TorchSigComplexDataType, TorchSigRealDataType, low_pass
+
 __all__ = [
     "AWGN",
     "AddSlope",
@@ -37,16 +52,106 @@ __all__ = [
     "TimeVaryingNoise",
 ]
 
-from copy import copy
+def transform_crash_logger(transform_func, data, **kwargs):
+    """Wraps a transformation function to ensure deterministic random number generation
+    and save complete state upon failure for debugging and reproduction of errors.
 
-import numpy as np
-import numpy.typing as npt
+    This function performs the following:
+    1. Creates a dedicated random number generator (RNG) with a known seed for each call,
+       ensuring reproducible stochastic behavior.
+    2. Adds the RNG to the provided kwargs (overwriting any existing 'rng' parameter).
+    3. Executes the transformation function.
+    4. If the transformation fails, saves the complete state (input data, random seed, and
+       all kwargs) to a timestamped .npz file.
+    5. Re-raises the original exception to halt the pipeline.
 
-import torchsig.transforms.functional as F
-from torchsig.signals.signal_types import Signal
-from torchsig.transforms.base_transforms import Transform
-from torchsig.utils.dsp import TorchSigComplexDataType, TorchSigRealDataType, low_pass
+    The saved state file can be used to exactly reproduce the failure conditions for
+    debugging purposes.
 
+    Parameters
+    ----------
+    transform_func : callable
+        The transformation function to execute (e.g., `F.clock_drift`). Must accept
+        `data` as the first argument and `**kwargs` where an 'rng' parameter will be
+        provided.
+    data : array-like
+        The input data to transform (typically a numpy array or torch tensor).
+    **kwargs : dict
+        Additional keyword arguments for the transformation function.
+        Note: Any 'rng' value in kwargs will be overwritten with a dedicated RNG.
+
+    Returns
+    -------
+    array-like
+        The transformed data as returned by `transform_func`.
+
+    Raises
+    ------
+    Exception
+        Any exception raised by `transform_func` is re-raised after saving state.
+
+    Examples
+    --------
+    >>> # Example usage in a SignalTransform class (like ClockDrift):
+    >>> class ClockDrift(SignalTransform):
+    ...     def __init__(self, drift_ppm=(1, 10), **kwargs):
+    ...         super().__init__(required_metadata=[], **kwargs)
+    ...         self.drift_ppm = drift_ppm
+    ...         self.drift_dist = self.get_distribution(drift_ppm, "log10")
+    ...
+    ...     def apply(self, signal):
+    ...         drift_ppm = self.drift_dist()
+    ...         # transform_crash_logger will override rng with its own deterministic RNG
+    ...         signal.data = transform_crash_logger(
+    ...             F.clock_drift,
+    ...             data=signal.data,
+    ...             drift_ppm=drift_ppm,
+    ...             rng=self.random_generator  # This gets replaced internally
+    ...         )
+    ...         return signal
+
+    When a failure occurs:
+    - A file like "crash_clock_drift_1678901234567.npz" is created containing:
+      * data: The original input tensor
+      * seed: The exact random seed used
+      * kwargs: Including drift_ppm and all other parameters
+    - The original exception is re-raised to stop the pipeline
+
+    Notes
+    -----
+    To reproduce a saved failure:
+    >>> with np.load("crash_clock_drift_1678901234567.npz") as f:
+    ...     data = f['data']
+    ...     seed = f['seed']
+    ...     kwargs = f['kwargs']
+    >>> rng = np.random.default_rng(seed)
+    >>> result = F.clock_drift(data, **kwargs, rng=rng)  # Reproduces exact failure
+    """
+    # 1. Create a dedicated RNG for this call
+    seed = secrets.randbelow(2**32)
+    rng = np.random.default_rng(seed)
+    kwargs["rng"] = rng
+
+    try:
+        return transform_func(data, **kwargs)
+    except Exception as e:
+        # 2. Clean kwargs: remove non-serializable objects (CRITICAL FIX)
+        kwargs_to_save = {k: v for k, v in kwargs.items() if k != "rng"}
+
+        # 3. Generate UNIQUE filename (CRITICAL FIX FOR COLLISIONS)
+        timestamp = int(time.time() * 1000)
+        filename = f"crash_{transform_func.__name__}_{timestamp}.npz"
+        counter = 0
+        while os.path.exists(filename):
+            counter += 1
+            filename = f"crash_{transform_func.__name__}_{timestamp}_{counter}.npz"
+
+        # 4. Save state (now safe because we removed rng)
+        np.savez(filename, data=data, seed=seed, kwargs=kwargs_to_save)
+
+        print(f"!!! Transform failed. State saved to {filename}")
+        print(f"Error: {e}")
+        raise e  # Re-raise original exception
 
 class SignalTransform(Transform):
     """Base class for performing transforms on Signal objects.
@@ -1383,27 +1488,40 @@ class PassbandRipple(SignalTransform):
     """Models analog filter passband ripple response for a signal.
 
     Attributes:
-        max_ripple_db: Range for maximum allowable ripple to simulate. Defaults to (1,2).
-        num_taps: List of number of taps in simulated filter. Defaults to [2,3].
-        coefficient_decay_rate: Range for the rate at which the simulated
-            impulse response goes to zero. Defaults to (1, 5).
+        max_ripple_db: Range (min, max) for maximum allowable ripple in dB. Defaults to (1, 2).
+        ripple_freq: Range (min, max) for the randomized ripple frequency. Defaults to (2, 10).
+        num_taps: List of possible number of taps in simulated filter. Defaults to [1025].
     """
 
     def __init__(
         self,
         max_ripple_db: tuple[float] = (1, 2),
-        num_taps: list[int] = [2, 3],
-        coefficient_decay_rate: tuple[float] = (1, 5),
+        ripple_freq: tuple[float] = (2, 10),
+        num_taps: list[int] = [65],
+        passband_fuzz: Literal["smooth", "random"] = "smooth",
+        stopband_fuzz: Literal["smooth", "random"] = "smooth",
         **kwargs,
     ):
         """Initialize the PassbandRipple transform.
 
         Args:
-            max_ripple_db: Range for maximum allowable ripple to simulate. Defaults to (1, 2).
-            num_taps: List of number of taps in simulated filter. Defaults to [2, 3].
-            coefficient_decay_rate: Range for the rate at which the simulated impulse response goes to zero. Defaults to (1, 5).
+            max_ripple_db: Range (min, max) for maximum allowable ripple in dB. Defaults to (1, 2).
+            ripple_freq: Range (min, max) for the randomized ripple frequency. Defaults to (2, 10).
+            num_taps: List of possible values for the number of taps. Defaults to [65].
+            passband_fuzz (Literal["smooth", "random"]): If "smooth", the passband
+                has zero phase. If "random", each bin is assigned a random phase.
+            stopband_fuzz (Literal["smooth", "random"]): If "smooth", the stopband
+                has zero phase. If "random", each bin is assigned a random phase.
             **kwargs: Additional keyword arguments passed to the parent class.
         """
+        # Check for the deprecated argument
+        if "coefficient_decay_rate" in kwargs:
+            warnings.warn(
+                "The 'coefficient_decay_rate' argument is deprecated and will be removed in a future version.",
+                DeprecationWarning,
+                stacklevel=2
+            )
+
         super().__init__(
             required_metadata=[], data_dtype=TorchSigComplexDataType, **kwargs
         )
@@ -1411,10 +1529,10 @@ class PassbandRipple(SignalTransform):
         self.max_ripple_db_distribution = self.get_distribution(self.max_ripple_db)
         self.num_taps = num_taps
         self.num_taps_distribution = self.get_distribution(self.num_taps)
-        self.coefficient_decay_rate = coefficient_decay_rate
-        self.coefficient_decay_rate_distribution = self.get_distribution(
-            coefficient_decay_rate
-        )
+        self.ripple_freq = ripple_freq
+        self.ripple_freq_distribution = self.get_distribution(self.ripple_freq)
+        self.passband_fuzz = passband_fuzz
+        self.stopband_fuzz = stopband_fuzz
 
     def __apply__(self, signal: Signal) -> Signal:
         """Apply passband ripple to the signal.
@@ -1426,14 +1544,16 @@ class PassbandRipple(SignalTransform):
             Signal with passband ripple applied.
         """
         max_ripple_db = self.max_ripple_db_distribution()
+        ripple_freq = self.ripple_freq_distribution()
         num_taps = int(np.round(self.num_taps_distribution()))
-        coefficient_decay_rate = self.coefficient_decay_rate_distribution()
 
         signal.data = F.passband_ripple(
             data=signal.data,
             num_taps=num_taps,
             max_ripple_db=max_ripple_db,
-            coefficient_decay_rate=coefficient_decay_rate,
+            ripple_freq=ripple_freq,
+            passband_fuzz=self.passband_fuzz,
+            stopband_fuzz = self.stopband_fuzz,
             rng=self.random_generator,
         )
 
@@ -2137,3 +2257,5 @@ class Spurs(SignalTransform):
         )
 
         return signal
+
+__all__ = ["AWGN", "AddSlope", "AdditiveNoise", "AdjacentChannelInterference", "CarrierFrequencyDrift", "CarrierPhaseNoise", "CarrierPhaseOffset", "ChannelSwap", "ClockDrift", "ClockJitter", "CoarseGainChange", "CochannelInterference", "ComplexTo2D", "CutOut", "DigitalAGC", "Doppler", "Fading", "IQImbalance", "InterleaveComplex", "IntermodulationProducts", "NonlinearAmplifier", "PassbandRipple", "PatchShuffle", "Quantize", "RandomDropSamples", "Shadowing", "SignalTransform", "SpectralInversion", "Spectrogram", "SpectrogramDropSamples", "SpectrogramImage", "Spurs", "TimeReversal", "TimeVaryingNoise"]

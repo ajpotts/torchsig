@@ -7,6 +7,7 @@ from typing import Any
 
 from torchsig.utils.random import Seedable
 
+__all__ = ["MetadataAttributeError", "HierarchicalMetadataObject"]
 
 class MetadataAttributeError(AttributeError):
     """Custom exception for metadata attribute errors.
@@ -99,20 +100,31 @@ class HierarchicalMetadataObject(Seedable):
         """
         return self._metadata.keys()
 
-    def copy(self) -> HierarchicalMetadataObject:
-        """Create a copy of the object.
+    def copy(
+        self,
+        *,
+        preserve_parent: bool = True,
+    ) -> HierarchicalMetadataObject:
+        """Create a copy of the metadata object.
+
+        Creates a new instance of the same class with a shallow copy of its
+        metadata. By default, the copied object preserves the same parent
+        relationship as the original, but this behavior can be disabled to
+        create a detached copy with no parent.
+
+        Args:
+            preserve_parent: If ``True`` (default), preserve the parent
+                relationship in the copied object. If ``False``, the copied
+                object is created without a parent.
 
         Returns:
-            A new instance of the same class with the same metadata and parent.
-
-        Example:
-            >>> obj = HierarchicalMetadataObject(metadata={"key": "value"})
-            >>> copy_obj = obj.copy()
-            >>> copy_obj["key"]
-            'value'
+            A new instance of the same class with copied metadata and the
+            requested parent relationship.
         """
         return self.__class__(
-            parent=self.parent, seed=self.seed, metadata=self._metadata
+            parent=self.parent if preserve_parent else None,
+            seed=self.seed,
+            metadata=self._metadata.copy(),
         )
 
     def __getitem__(self, key: str) -> Any:

@@ -16,6 +16,7 @@ from torchsig.utils.dsp import (
     slice_head_tail_to_length,
 )
 
+__all__ = ["get_symbol_map", "chirpss_modulator_baseband", "chirpss_modulator", "ChirpSSSignalGenerator"]
 
 def get_symbol_map() -> np.ndarray:
     """Generates the symbol mapping for ChirpSS.

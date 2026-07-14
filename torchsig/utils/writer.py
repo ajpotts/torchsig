@@ -16,14 +16,13 @@ from tqdm.auto import tqdm
 
 from torchsig.utils.file_handlers.hdf5 import HDF5Writer
 
-# TorchSig
-from torchsig.utils.yaml import write_dict_to_yaml
-
 if TYPE_CHECKING:
     from torch.utils.data import DataLoader
 
     from torchsig.utils.file_handlers.base_handler import FileWriter
 
+
+__all__ = ["default_collate_fn", "identity_collate_fn", "DatasetCreator"]
 
 def default_collate_fn(batch):
     """Collates a batch by zipping its elements together. Note: not pickle-safe for complex
@@ -296,6 +295,8 @@ class DatasetCreator:
         Raises:
             ValueError: If the dataset is already generated and `overwrite` is set to False.
         """
+        from torchsig.utils.yaml import write_dict_to_yaml
+
         ds = self.dataloader.dataset
         orig_target_labels = getattr(ds, "target_labels", None)
         orig_collate_fn = getattr(self.dataloader, "collate_fn", None)

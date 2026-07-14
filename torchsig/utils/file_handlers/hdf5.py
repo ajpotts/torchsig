@@ -14,13 +14,13 @@ import h5py
 # Third Party
 import numpy as np
 
-from torchsig import __version__ as torchsig_version
-
 # TorchSig
+from torchsig.utils.dsp import torchsig_cache_version
 from torchsig.signals.signal_types import Signal
 from torchsig.utils.abstractions import HierarchicalMetadataObject
-from torchsig.utils.file_handlers import BaseFileHandler, FileReader, FileWriter
+from torchsig.utils.file_handlers.base_handler import BaseFileHandler, FileReader, FileWriter
 
+__all__ = ["populate_hdf5_group_with_metadata", "populate_hdf5_group_with_signal_data", "populate_hdf5_group_with_component_signals", "populate_hdf5_group_with_signal", "populate_hdf5_group_with_signals", "HDF5Writer", "handle_bytes_as_string", "load_value_from_group", "fill_object_metadata_from_group_and_id", "load_signal_from_group_by_id", "load_signal_from_group_by_index", "HDF5Reader", "HDF5FileHandler"]
 
 def _hdf5_key(obj) -> str:
     """Return the HDF5 group key to use for *obj*.
@@ -234,7 +234,7 @@ class HDF5Writer(FileWriter):
         )
 
         # Set global attributes
-        self._file.attrs["torchsig_version"] = torchsig_version
+        self._file.attrs["torchsig_version"] = torchsig_cache_version()
         self._file.attrs["compression"] = self.compression
         self._file.attrs["created_by"] = "TorchSig HDF5FileHandler"
         self._file.create_group("data")

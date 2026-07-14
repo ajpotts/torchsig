@@ -24,6 +24,7 @@ from torchsig.utils.dsp import (
     upper_freq_from_center_freq_bandwidth,
 )
 
+__all__ = ["SignalMetadataObject", "Signal"]
 
 class SignalMetadataObject(HierarchicalMetadataObject):
     """Represents metadata associated with a signal.
@@ -124,16 +125,21 @@ class SignalMetadataObject(HierarchicalMetadataObject):
         Raises:
             ValueError: If center_freq or bandwidth are not available.
         """
+        if hasattr(self, "_upper_frequency") and self._upper_frequency is not None:
+            return self._upper_frequency
+
         try:
             self["_upper_frequency"] = upper_freq_from_center_freq_bandwidth(
-                self.center_freq, self.bandwidth
+                self.center_freq,
+                self.bandwidth,
             )
         except (AttributeError, KeyError) as e:
             raise ValueError(
                 "Cannot calculate upper frequency: missing center_freq or bandwidth"
             ) from e
-        else:
-            return self._upper_frequency
+
+        return self._upper_frequency
+
 
     @upper_freq.setter
     def upper_freq(self, new_upper_freq: float) -> None:
@@ -143,13 +149,19 @@ class SignalMetadataObject(HierarchicalMetadataObject):
             new_upper_freq: Upper frequency in Hz.
         """
         self["_upper_frequency"] = new_upper_freq
+
         if hasattr(self, "_lower_frequency") and self._lower_frequency is not None:
+            lower_freq = self._lower_frequency
+
             self["bandwidth"] = bandwidth_from_lower_upper_freq(
-                new_upper_freq, self.lower_freq
+                lower_freq,
+                new_upper_freq,
             )
             self["center_freq"] = center_freq_from_lower_upper_freq(
-                new_upper_freq, self.lower_freq
+                lower_freq,
+                new_upper_freq,
             )
+
 
     @property
     def lower_freq(self) -> float:
@@ -161,16 +173,21 @@ class SignalMetadataObject(HierarchicalMetadataObject):
         Raises:
             ValueError: If center_freq or bandwidth are not available.
         """
+        if hasattr(self, "_lower_frequency") and self._lower_frequency is not None:
+            return self._lower_frequency
+
         try:
             self["_lower_frequency"] = lower_freq_from_center_freq_bandwidth(
-                self.center_freq, self.bandwidth
+                self.center_freq,
+                self.bandwidth,
             )
         except (AttributeError, KeyError) as e:
             raise ValueError(
                 "Cannot calculate lower frequency: missing center_freq or bandwidth"
             ) from e
-        else:
-            return self._lower_frequency
+
+        return self._lower_frequency
+
 
     @lower_freq.setter
     def lower_freq(self, new_lower_freq: float) -> None:
@@ -180,13 +197,19 @@ class SignalMetadataObject(HierarchicalMetadataObject):
             new_lower_freq: Lower frequency in Hz.
         """
         self["_lower_frequency"] = new_lower_freq
+
         if hasattr(self, "_upper_frequency") and self._upper_frequency is not None:
+            upper_freq = self._upper_frequency
+
             self["bandwidth"] = bandwidth_from_lower_upper_freq(
-                self.upper_freq, new_lower_freq
+                new_lower_freq,
+                upper_freq,
             )
             self["center_freq"] = center_freq_from_lower_upper_freq(
-                self.upper_freq, new_lower_freq
+                new_lower_freq,
+                upper_freq,
             )
+
 
     @property
     def oversampling_rate(self) -> float:
@@ -197,24 +220,27 @@ class SignalMetadataObject(HierarchicalMetadataObject):
         """
         return self.sample_rate / self.bandwidth
 
+
     def to_dict(self) -> dict[str, Any]:
-        """Returns SignalMetadataExternal as a full dictionary.
+        """Return signal metadata as a dictionary.
 
         Returns:
-            Dict[str, Any]: Dictionary containing all metadata attributes.
+            Dict[str, Any]: Dictionary containing metadata fields, excluding transient/internal
+            fields that should not be serialized as signal metadata.
         """
-        attributes_original = self.__dict__.copy()  # Start with the instance variables
-        attributes = attributes_original.copy()
-        # exclude certain variables
-        for var in attributes_original:
-            if var in [
-                "applied_transforms",
-                "dataset_metadata",
-                "_dataset_metadata",
-                "_center_freq_set",
-            ]:
-                del attributes[var]
-        return attributes
+        excluded_fields = {
+            "applied_transforms",
+            "dataset_metadata",
+            "_dataset_metadata",
+            "_center_freq_set",
+        }
+
+        metadata = dict(self.metadata)
+
+        for field in excluded_fields:
+            metadata.pop(field, None)
+
+        return metadata
 
 
 class Signal(SignalMetadataObject):
@@ -232,7 +258,7 @@ class Signal(SignalMetadataObject):
     def __init__(
         self,
         data: np.ndarray | None = None,
-        component_signals: list[Signal] = [],
+        component_signals: list[Signal] | None = None,
         **kwargs: Any,
     ) -> None:
         """Initializes the Signal with data and metadata.
@@ -245,7 +271,11 @@ class Signal(SignalMetadataObject):
         super().__init__(**kwargs)
         self.data = np.array([]) if data is None else np.asarray(data)
         self["duration_in_samples"] = len(self.data)
-        self.component_signals = component_signals
+        self.component_signals = (
+            list(component_signals)
+            if component_signals is not None
+            else []
+        )
 
     def __repr__(self) -> str:
         """Returns a string representation of the Signal.
@@ -255,17 +285,33 @@ class Signal(SignalMetadataObject):
         """
         return f"{self.__class__.__name__}(data={type(self.data)}. metadata={self.metadata}, component_signals={self.component_signals})"
 
-    def copy(self) -> Signal:
-        """Returns a copy of the Signal.
+    def copy(
+        self,
+        *,
+        preserve_parent: bool = True,
+    ) -> Signal:
+        """Create a deep copy of the signal.
 
-        Note:
-            Parent relationships are not guaranteed to be preserved across copies.
+        Creates a new ``Signal`` with copied IQ data, component signals,
+        and metadata. By default, the copy retains the same parent metadata
+        relationship as the original, but this can be disabled to create a
+        detached copy.
+
+        Args:
+            preserve_parent: If ``True`` (default), preserve the parent
+                relationship in the copied signal. If ``False``, the copy
+                is created without a parent.
 
         Returns:
-            Signal: A new Signal instance with copied data and metadata.
+            Signal: A new ``Signal`` instance with copied data, metadata,
+            and component signals.
         """
         return Signal(
-            metadata=self.get_full_metadata(),
             data=self.data.copy(),
-            component_signals=[sig.copy() for sig in self.component_signals],
+            component_signals=[
+                sig.copy(preserve_parent=preserve_parent)
+                for sig in self.component_signals
+            ],
+            parent=self.parent if preserve_parent else None,
+            **self.get_full_metadata(),
         )

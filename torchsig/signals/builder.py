@@ -7,6 +7,7 @@ from torchsig.utils.abstractions import HierarchicalMetadataObject
 if TYPE_CHECKING:
     from torchsig.signals import Signal
 
+__all__ = ["BaseSignalGenerator", "ConcatSignalGenerator"]
 
 class BaseSignalGenerator(HierarchicalMetadataObject):
     """Defines a callable object which takes no arguments and returns a Signal.
@@ -37,13 +38,30 @@ class BaseSignalGenerator(HierarchicalMetadataObject):
         if not hasattr(self, "class_name"):
             self["class_name"] = name
 
-    def copy(self) -> BaseSignalGenerator:
-        """Creates a deep copy of the SignalGenerator with copied transforms.
+    def copy(
+        self,
+        *,
+        preserve_parent: bool = True,
+    ) -> BaseSignalGenerator:
+        """Create a deep copy of the signal generator.
+
+        Creates a new signal generator with copied metadata and transform
+        instances. By default, the copy retains the same parent metadata
+        relationship as the original, but this can be disabled to create a
+        detached copy.
+
+        Args:
+            preserve_parent: If ``True`` (default), preserve the parent
+                relationship in the copied object. If ``False``, the copy
+                is created without a parent.
 
         Returns:
-            A new instance of the SignalGenerator with copied metadata and transforms.
+            A new signal generator with copied metadata and transforms.
         """
-        cpy = HierarchicalMetadataObject.copy(self)
+        cpy = HierarchicalMetadataObject.copy(
+            self,
+            preserve_parent=preserve_parent,
+        )
         cpy.transforms = [transform.copy() for transform in self.transforms]
         return cpy
 
@@ -155,15 +173,34 @@ class ConcatSignalGenerator(BaseSignalGenerator):
         except AttributeError:
             pass  # there is no validate function; ignore and assume the best; a user who doesn't write a validate function does so at their own risk
 
-    def copy(self) -> ConcatSignalGenerator:
-        """Creates a deep copy of the ConcatSignalGenerator with copied signal generators.
+    def copy(
+        self,
+        *,
+        preserve_parent: bool = True,
+    ) -> ConcatSignalGenerator:
+        """Create a deep copy of the concatenated signal generator.
+
+        Creates a new ``ConcatSignalGenerator`` with copied metadata,
+        transforms, and child signal generators. By default, the copy
+        retains the same parent metadata relationship as the original,
+        but this can be disabled to create a detached copy.
+
+        Args:
+            preserve_parent: If ``True`` (default), preserve the parent
+                relationship in the copied object. If ``False``, the copy
+                is created without a parent.
 
         Returns:
-            A new instance of ConcatSignalGenerator with copied metadata and signal generators.
+            A new ``ConcatSignalGenerator`` with copied metadata,
+            transforms, and signal generators.
         """
-        cpy = BaseSignalGenerator.copy(self)
+        cpy = BaseSignalGenerator.copy(
+            self,
+            preserve_parent=preserve_parent,
+        )
         cpy.signal_generators = [
-            signal_generator.copy() for signal_generator in self.signal_generators
+            signal_generator.copy(preserve_parent=preserve_parent)
+            for signal_generator in self.signal_generators
         ]
         return cpy
 

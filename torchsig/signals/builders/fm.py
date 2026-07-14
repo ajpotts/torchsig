@@ -12,6 +12,7 @@ from torchsig.utils.dsp import (
     low_pass_iterative_design,
 )
 
+__all__ = ["fm_modulator", "FMSignalGenerator"]
 
 def fm_modulator(
     bandwidth: float,

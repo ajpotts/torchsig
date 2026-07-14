@@ -1,17 +1,18 @@
 """Functional transforms for reuse and custom fine-grained control."""
 
+import logging
+import warnings
 from copy import copy
-from typing import Literal
+from enum import Enum
+from typing import Final, Literal
 
 import cv2
-
-# Third Party
 import numpy as np
+import numpy.typing as npt
 from scipy import signal as sp
 from scipy.constants import c as speed_of_light
 from scipy.interpolate import interp1d as sp_interp1d
 
-# TorchSig
 from torchsig.utils import dsp
 from torchsig.utils.dsp import (
     TorchSigComplexDataType,
@@ -19,8 +20,21 @@ from torchsig.utils.dsp import (
     is_even,
     multistage_polyphase_resampler,
     prototype_polyphase_filter,
-    sampling_clock_impairments
+    sampling_clock_impairments,
 )
+
+# Prefer the numba-accelerated sampling clock impairments (used by clock_drift /
+# clock_jitter). Fall back to the pure-NumPy implementation if numba is missing.
+try:
+    from torchsig.utils.dsp_numba import (
+        digital_agc_numba as _digital_agc_numba,
+    )
+    from torchsig.utils.dsp_numba import (
+        sampling_clock_impairments_numba_wrapper as _sampling_clock_impairments,
+    )
+except Exception:  # pragma: no cover - exercised only when numba is unavailable
+    _sampling_clock_impairments = sampling_clock_impairments
+    _digital_agc_numba = None
 
 __all__ = [
     "add_slope",
@@ -60,6 +74,15 @@ __all__ = [
     "time_varying_noise",
 ]
 
+
+log = logging.getLogger(__name__)
+
+
+class FallbackMode(str, Enum):
+    """Behaviour when a requirement cannot be satisfied."""
+
+    ORIGINAL = "original"
+    RAISE = "raise"
 
 def add_slope(data: np.ndarray) -> np.ndarray:
     """Add slope between each sample and its preceding sample is added to every sample.
@@ -242,7 +265,7 @@ def clock_drift(
     pfb_prototype_filter = pfb_prototype_filter.astype(TorchSigRealDataType)
 
     # call the impairment
-    data_with_drift = sampling_clock_impairments(
+    data_with_drift = _sampling_clock_impairments(
         h=pfb_prototype_filter,
         x=data,
         uprate=uprate,
@@ -316,7 +339,7 @@ def clock_jitter(
     pfb_prototype_filter = pfb_prototype_filter.astype(TorchSigRealDataType)
 
     # call the impairment
-    data_with_jitter = sampling_clock_impairments(
+    data_with_jitter = _sampling_clock_impairments(
         h=pfb_prototype_filter,
         x=data,
         uprate=uprate,
@@ -420,7 +443,7 @@ def cut_out(
     data: np.ndarray,
     cut_start: float,
     cut_duration: float,
-    cut_type: str,
+    cut_type: Literal["zeros", "ones", "low_noise", "avg_noise", "high_noise"],
     rng: np.random.Generator | None = None,
 ) -> np.ndarray:
     """Performs CutOut: replacing values with fill.
@@ -520,6 +543,37 @@ def digital_agc(
     Returns:
         IQ data adjusted sample-by-sample by the AGC algorithm.
     """
+    args = (
+        initial_gain_db,
+        alpha_smooth,
+        alpha_track,
+        alpha_overflow,
+        alpha_acquire,
+        ref_level_db,
+        track_range_db,
+        low_level_db,
+        high_level_db,
+    )
+    if _digital_agc_numba is not None:
+        output = _digital_agc_numba(data, *args)
+    else:  # pragma: no cover - exercised only when numba is unavailable
+        output = _digital_agc_python(data, *args)
+    return output.astype(TorchSigComplexDataType)
+
+
+def _digital_agc_python(
+    data: np.ndarray,
+    initial_gain_db: float,
+    alpha_smooth: float,
+    alpha_track: float,
+    alpha_overflow: float,
+    alpha_acquire: float,
+    ref_level_db: float,
+    track_range_db: float,
+    low_level_db: float,
+    high_level_db: float,
+) -> np.ndarray:
+    """Pure-NumPy reference for :func:`digital_agc` (fallback when numba is absent)."""
     output = np.zeros_like(data)
     gain_db = initial_gain_db
     level_db = 0.0
@@ -547,7 +601,7 @@ def digital_agc(
         gain_db += diff_db * alpha_adjust
         output[sample_idx] = sample * np.exp(gain_db)
 
-    return output.astype(TorchSigComplexDataType)
+    return output
 
 
 def doppler(
@@ -581,7 +635,7 @@ def drop_samples(
     data: np.ndarray,
     drop_starts: np.ndarray,
     drop_sizes: np.ndarray,
-    fill: str,
+    fill: Literal["ffill", "bfill", "mean", "zero"],
 ) -> np.ndarray:
     """Drop samples at given locations/durations with fill technique.
 
@@ -1035,58 +1089,272 @@ def normalize(
     return np.multiply(data, 1.0 / norm).astype(TorchSigComplexDataType)
 
 
-def passband_ripple(
-    data: np.ndarray,
-    num_taps: int = 2,
-    max_ripple_db: float = 2.0,
-    coefficient_decay_rate: float = 1,
-    rng: np.random.Generator | None = None,
-) -> np.ndarray:
-    """Functional for passband ripple transforms.
+_EPS: Final[float] = 1e-12           # tiny value to avoid log10(0)
 
-    This function applies a passband ripple effect to the input data by designing a filter
-    with specified ripple characteristics and applying it to the data.
+def _safe_log10(x: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
+    """Return ``log10`` of *x* without ever producing ``-inf``."""
+    return np.log10(np.clip(x, _EPS, None))
+
+
+def _fft_filter(freq_profile: np.ndarray,
+               trim_tol: float = 1e-6,
+               fit_metric: str = "rms") -> tuple[np.ndarray, float]:
+    """Convert a frequency domain profile into real-valued FIR filter taps.
+
+    The function performs an Inverse Fast Fourier Transform (IFFT) to move to the
+    time domain, applies a hard-thresholding mask to trim small coefficients
+    (noise reduction/sparsity), and then calculates the reconstruction error
+    by transforming the trimmed taps back to the frequency domain.
 
     Args:
-        data: Complex valued IQ data samples.
-        num_taps: Number of taps in simulated filter. Defaults to 2.
-        max_ripple_db: Maximum allowed ripple in the simulated filter (in dB). Defaults to 2.0.
-        coefficient_decay_rate: The decay rate of the exponential weighting in the filter. Defaults to 1.0.
-        rng: Random number generator. Defaults to np.random.default_rng(seed=None).
-
-    Raises:
-        ValueError: When filter cannot meet ripple spec within a set number of iterations.
+        freq_profile (np.ndarray): The desired frequency response. Should be
+            provided in standard FFT order [DC, positive frequencies, negative frequencies].
+        trim_tol (float): Absolute threshold for trimming taps. Any tap with
+            |value| <= trim_tol is set to 0.0. Defaults to 1e-6.
+        fit_metric (str): The metric used to quantify the reconstruction error
+            between the original profile and the trimmed response.
+            Supported values: "rms" (Root Mean Square), "max" (Maximum Absolute Error),
+            or "mse" (Mean Squared Error). Defaults to "rms".
 
     Returns:
-        Filtered data with passband ripple applied.
+        tuple[np.ndarray, float]: A tuple containing:
+            - taps_trim (np.ndarray): The resulting real-valued FIR filter coefficients.
+            - fit_error (float): The scalar error calculated via the chosen fit_metric.
+
+    Raises:
+        ValueError: If an unsupported fit_metric is provided.
     """
+    freq = np.asarray(freq_profile, dtype=complex)
+    num_taps = freq.shape[0]
+    # ensure it is odd
+    num_taps += 1 - (num_taps % 2)
+
+
+    taps = np.fft.ifft(freq, n=num_taps)
+    taps_real = np.real(taps)
+    # create mirror
+    taps_shift = np.fft.fftshift(taps_real)
+
+    peak_idx = np.argmax(taps_shift)
+    taps_shift[:peak_idx] = taps_shift[peak_idx+1:][::-1]
+    taps_real = np.fft.fftshift(taps_shift)
+
+    mask = np.abs(taps_real) > trim_tol
+    taps_trim = np.where(mask, taps_real, 0.0)
+
+    recon = np.fft.fft(taps_trim, n=num_taps)
+    diff = np.abs(recon) - np.abs(freq)
+    if fit_metric == "rms":
+        fit_error = np.sqrt(np.mean(np.abs(diff) ** 2))
+    elif fit_metric == "max":
+        fit_error = np.max(np.abs(diff))
+    elif fit_metric == "mse":
+        fit_error = np.mean(np.abs(diff) ** 2)
+    else:
+        raise ValueError(f"fit_metric must be 'rms','max' or 'mse', got {fit_metric!r}")
+
+    return taps_trim, float(fit_error)
+
+
+def _build_full_profile(
+    num_taps: int = 1025,
+    ripple_amp: float = 0.1,
+    ripple_freq: float = 5.0,
+    passband_fuzz: Literal["smooth", "random"] = "smooth",
+    stopband_fuzz: Literal["smooth", "random"] = "smooth",
+    rng: np.random.Generator | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Generate a complex frequency response profile for an FIR filter.
+
+    The profile consists of a passband with a cosine ripple and a stopband
+    that ramps down to zero. The function ensures the resulting profile
+    has Hermitian symmetry, which guarantees that the final time-domain
+    filter taps will be real-valued.
+
+    Args:
+        num_taps (int): The desired length of the final filter (and the
+            number of points in the frequency profile). Should ideally be odd.
+        ripple_amp (float): The peak amplitude of the cosine ripple in the passband.
+        ripple_freq (float): The frequency of the cosine ripple.
+        passband_fuzz (Literal["smooth", "random"]): If "smooth", the passband
+            has zero phase. If "random", each bin is assigned a random phase.
+        stopband_fuzz (Literal["smooth", "random"]): If "smooth", the stopband
+            has zero phase. If "random", each bin is assigned a random phase.
+        rng (np.random.Generator, optional): Random number generator for
+            boundary and phase randomization.
+
+    Returns:
+        np.ndarray: A complex array of length `num_taps` representing the
+            frequency response in standard FFT order [DC, positive freqs, negative freqs].
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+
+    # 1. Create frequencies from 0 to pi
+    n_pos = (num_taps - 1) // 2
+    freq_pos = np.linspace(0, np.pi, n_pos + 1, endpoint=False)
+
+    # 2. Determine Passband Boundary
+    w = rng.uniform(np.pi/2, np.pi)
+    pass_mask = freq_pos <= w
+    stop_mask = ~pass_mask
+
+    half_profile = np.zeros(n_pos + 1, dtype=complex)
+
+    # 3. Passband Logic
+    x = (freq_pos[pass_mask] + w) / (2.0 * w)
+    mag_pass = 1.0 + ripple_amp * np.cos(2.0 * np.pi * ripple_freq * x)
+
+    if passband_fuzz == "smooth":
+        half_profile[pass_mask] = mag_pass + 0j
+    elif passband_fuzz == "random":
+        mag_fuzz = rng.normal(1, .03, size=len(mag_pass))
+        half_profile[pass_mask] = np.clip(mag_fuzz, .1, 2.0) * mag_pass
+
+    # Force DC to be strictly real
+    half_profile[0] = np.abs(half_profile[0]) + 0j
+
+    # 4. Stopband Logic
+    denom = np.pi - w
+    if denom > 0:
+        mag_edge = 1.0 + ripple_amp     # because cos(0)=1
+        ramp = mag_edge * (np.pi - freq_pos[stop_mask]) / denom
+
+        if stopband_fuzz == "smooth":
+            half_profile[stop_mask] = ramp + 0j
+        elif stopband_fuzz == "random":
+            mag_fuzz = rng.normal(0, .3, size=len(ramp))
+            half_profile[stop_mask] = ramp * np.clip(mag_fuzz, .1, 2.0)
+
+    # 5. Construct full profile using Hermitian Symmetry
+
+    return np.concatenate([
+        half_profile,
+        np.conj(half_profile[1:][::-1])
+    ])
+
+
+def _build_profile_freq_grid(num_taps):
+    """Return the frequency grid corresponding to
+    an output generated by _build_full_profile.
+    """
+    return np.fft.fftshift(np.fft.fftfreq(num_taps, d=1/(2*np.pi)))
+
+
+def passband_ripple(
+    data: np.ndarray,
+    num_taps: int = 65,
+    max_ripple_db: float = 2.0,
+    ripple_freq: float = 5.0,
+    rng: np.random.Generator | None = None,
+    passband_fuzz: Literal["smooth", "random"] = "random",
+    stopband_fuzz: Literal["smooth", "random"] = "smooth",
+    fallback: FallbackMode = "original",
+    **kwargs,
+) -> np.ndarray:
+    """Apply a randomized frequency-domain ripple to a signal.
+
+    This function simulates an imperfect filter response by designing a
+    frequency profile with a cosine ripple in the passband and a linear ramp
+    in the stopband. The profile is converted to real FIR taps and convolved
+    with the input data.
+
+    Args:
+        data (np.ndarray): The input signal to be filtered.
+        num_taps (int): The number of coefficients for the FIR filter.
+            If an even number is provided, it is incremented by 1 to maintain
+            symmetry. Defaults to 65.
+        max_ripple_db (float): The maximum peak-to-peak ripple in the
+            passband expressed in decibels. Defaults to 2.0.
+        ripple_freq (float): The ripple frequency. Defaults to 5.0.
+        rng (np.random.Generator, optional): Random number generator used to
+            determine the ripple frequency and phase randomization.
+        passband_fuzz (Literal["smooth", "random"]): Phase characteristics of
+            the passband. "smooth" results in zero phase; "random" assigns a
+            random phase to each frequency bin. Defaults to "random".
+        stopband_fuzz (Literal["smooth", "random"]): Phase characteristics of
+            the stopband. "smooth" results in zero phase; "random" assigns a
+            random phase to each frequency bin. Defaults to "smooth".
+        fallback (Literal["original", "raise"]): Behavior when filter
+            generation fails. "original" returns the input data unchanged;
+            "raise" raises a RuntimeError. Defaults to "original".
+        **kwargs: Additional arguments (e.g., coefficient_decay_rate, fft_len)
+            are deprecated and will trigger a warning.
+
+    Returns:
+        np.ndarray: The filtered signal, cast to the original input data type.
+
+    Raises:
+        RuntimeError: If the filtering process fails and `fallback` is set to "raise".
+    """
+    # --- Deprecation Warnings ---
+    for arg in ["coefficient_decay_rate", "max_counter", "fft_len"]:
+        if arg in kwargs:
+            warnings.warn(
+                f"The argument '{arg}' is deprecated and will be removed in a future version. "
+                "Use the new filter design parameters.",
+                DeprecationWarning,
+                stacklevel=2
+            )
+
+    # --- Validation Block ---
+    allowed_fuzzes = {"smooth", "random"}
+    allowed_fallbacks = {"original", "raise"}
+
+    if passband_fuzz not in allowed_fuzzes:
+        raise ValueError(f"Invalid passband_fuzz: {passband_fuzz!r}. Expected one of {allowed_fuzzes}")
+
+    if stopband_fuzz not in allowed_fuzzes:
+        raise ValueError(f"Invalid stopband_fuzz: {stopband_fuzz!r}. Expected one of {allowed_fuzzes}")
+
+    if fallback not in allowed_fallbacks:
+        raise ValueError(f"Invalid fallback: {fallback!r}. Expected one of {allowed_fallbacks}")
+
+    if num_taps <= 0:
+        raise ValueError(f"num_taps must be a positive integer, got {num_taps}")
+
+    if max_ripple_db < 0:
+        # Usually ripples are expressed as positive dB deviations
+        raise ValueError(f"max_ripple_db should be non-negative, got {max_ripple_db}")
+
+    if ripple_freq < 0:
+        raise ValueError(f"ripple_freq should be non-negative, got {ripple_freq}.")
+    # ------------------------
+
     rng = rng or np.random.default_rng()
-    # counter avoids infinite loop
-    counter = 0
-    max_counter = 1000
-    # initialize estimate such that it always enters loop
-    estimate_ripple_db = max_ripple_db + 1
+    data = np.asarray(data)
 
-    while estimate_ripple_db > max_ripple_db and counter < 1000:
-        # designs the weights: complex gaussian with exponential decay
-        gaussian = rng.normal(0, 1, num_taps) + 1j * rng.normal(0, 1, num_taps)
-        decay = np.exp(-coefficient_decay_rate * np.arange(0, num_taps))
-        weights = gaussian * decay
-        # scale weights to have average 0 dB level
-        weights /= np.max(np.abs(weights))
-        # determine if passband ripple meets spec
-        fft_db = 20 * np.log10(np.abs(np.fft.fftshift(np.fft.fft(weights, 1024))))
-        estimate_ripple_db = np.max(fft_db) - np.min(fft_db)
-        # increment counter
-        counter += 1
+    try:
+        # Convert dB ripple to linear amplitude for the cosine ripple
+        # ratio = 1 + 2*amp -> amp = (ratio - 1) / 2
+        # However, usually ripple_amp in _build_full_profile is the peak deviation from 1.0
+        ratio = 10**(max_ripple_db / 20.0)
+        linear_amp = (ratio - 1.0) / 2.0
 
-    if counter >= max_counter:
-        raise ValueError("Passband ripple was unable to meet ripple specs.")
+        # Ensure num_taps is ODD for symmetry
+        if num_taps % 2 == 0:
+            num_taps += 1
 
-    # apply filter
-    data = dsp.convolve(data, weights)
+        # Generate the frequency profile [DC, pos..., neg...]
+        profile = _build_full_profile(
+            num_taps=num_taps,
+            rng=rng,
+            ripple_amp=linear_amp,
+            ripple_freq=ripple_freq,
+            passband_fuzz=passband_fuzz,
+            stopband_fuzz=stopband_fuzz,
+        )
 
-    return data.astype(TorchSigComplexDataType)
+        # Get raw taps
+        taps, _ = _fft_filter(profile, trim_tol=1e-9)
+
+        # Convolve
+        return sp.convolve(data, taps, mode="same").astype(data.dtype)
+
+    except Exception as e:
+        if fallback == "raise":
+            raise RuntimeError(f"Filter failed: {e}") from e
+        return data
 
 
 def patch_shuffle(
@@ -1139,7 +1407,7 @@ def quantize(
     data: np.ndarray,
     num_bits: int,
     ref_level_adjustment_db: float = 0.0,
-    rounding_mode: str = "floor",
+    rounding_mode: Literal["floor", "ceiling"] = "floor",
 ) -> np.ndarray:
     """Quantize input to number of levels specified.
 
@@ -1327,7 +1595,7 @@ def spectrogram(data: np.ndarray, fft_size: int, fft_stride: int) -> np.ndarray:
 
 
 def spectrogram_drop_samples(
-    data: np.ndarray, drop_starts: np.ndarray, drop_sizes: np.ndarray, fill: str
+    data: np.ndarray, drop_starts: np.ndarray, drop_sizes: np.ndarray, fill: Literal["ffill", "bfill", "mean", "zero", "max", "low", "ones"]
 ) -> np.ndarray:
     """Drop samples at given locations/durations with fill technique.
 
@@ -1506,15 +1774,24 @@ def spurs(
         noise_floor_db = np.min(data_fft_db)
 
     # generate spurs
+    num_samples = len(data)
     for spur_index, center_freq in enumerate(center_freqs_array):
         # create the spur
         spur = np.exp(
-            2j * np.pi * (center_freq / sample_rate) * np.arange(0, len(data))
+            2j * np.pi * (center_freq / sample_rate) * np.arange(0, num_samples)
         )
-        # compute FFT of spur
-        spur_fft_db = 20 * np.log10(np.abs(np.fft.fft(spur)))
-        # calculate peak value
-        spur_max_db = np.max(spur_fft_db)
+        # The spur is a pure complex tone, so its spectrum is a Dirichlet kernel
+        # whose peak magnitude is known in closed form. Compute it analytically
+        # instead of taking an FFT of the spur (which only existed to find this peak).
+        bin_offset = (center_freq / sample_rate) * num_samples
+        frac = bin_offset - np.round(bin_offset)  # distance to nearest DFT bin
+        if np.isclose(frac, 0.0):
+            spur_max = float(num_samples)  # on-bin: all samples add coherently
+        else:
+            spur_max = np.abs(
+                np.sin(np.pi * frac) / np.sin(np.pi * frac / num_samples)
+            )
+        spur_max_db = 20 * np.log10(spur_max)
         # calculate change to set spur power properly
         gain_change_db = (noise_floor_db - spur_max_db) + relative_power_db_array[
             spur_index
@@ -1598,3 +1875,5 @@ def time_varying_noise(
         data
         + (10.0 ** (noise_power / 20.0)) * (real_noise + 1j * imag_noise) / np.sqrt(2)
     ).astype(TorchSigComplexDataType)
+
+__all__ = ["add_slope", "additive_noise", "adjacent_channel_interference", "awgn", "carrier_frequency_drift", "carrier_phase_noise", "channel_swap", "clock_drift", "clock_jitter", "coarse_gain_change", "cochannel_interference", "complex_to_2d", "cut_out", "digital_agc", "doppler", "drop_samples", "fading", "interleave_complex", "intermodulation_products", "iq_imbalance", "nonlinear_amplifier", "nonlinear_amplifier_table", "normalize", "passband_ripple", "patch_shuffle", "phase_offset", "quantize", "shadowing", "spectral_inversion", "spectrogram", "spectrogram_drop_samples", "spectrogram_image", "spurs", "time_reversal", "time_varying_noise"]

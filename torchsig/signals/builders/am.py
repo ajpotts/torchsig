@@ -14,6 +14,7 @@ from torchsig.utils.dsp import (
     polyphase_decimator,
 )
 
+__all__ = ["am_modulator", "AMSignalGenerator"]
 
 def am_modulator(
     am_mode: str,

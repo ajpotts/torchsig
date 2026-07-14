@@ -6,6 +6,7 @@ from typing import Any
 
 from torchsig.utils.printing import generate_repr_str
 
+__all__ = ["reset_folder", "FileWriter", "FileReader", "BaseFileHandler"]
 
 def reset_folder(path: str) -> None:
     """Resets a folder by deleting it if it exists and recreating it.
@@ -47,7 +48,7 @@ class FileWriter:
         Args:
             root (str): Location on disk to write dataset.
         """
-        self.root: pathlib.Path = pathlib.Path(root)
+        self.root: pathlib.Path = pathlib.Path(root).resolve()
 
     def _setup(self) -> None:
         """Hook for subclasses to perform setup after folder reset."""
@@ -121,7 +122,7 @@ class FileReader:
         Args:
             root (str): Dataset location on disk.
         """
-        self.root = pathlib.Path(root)
+        self.root = pathlib.Path(root).resolve()
         self.dataset_info_filepath = self.root.joinpath("dataset_info.yaml")
 
     def read(self, idx: int) -> Any:

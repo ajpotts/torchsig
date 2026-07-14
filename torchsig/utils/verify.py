@@ -2,17 +2,6 @@
 
 from __future__ import annotations
 
-__all__ = [
-    "verify_dict",
-    "verify_distribution_list",
-    "verify_float",
-    "verify_int",
-    "verify_list",
-    "verify_metadata_transforms",
-    "verify_numpy_array",
-    "verify_str",
-    "verify_transforms",
-]
 
 # Third Party
 from collections import Counter
@@ -26,6 +15,17 @@ if TYPE_CHECKING:
     from torchsig.transforms.base_transforms import Transform
     from torchsig.transforms.target_transforms import MetadataTransform
 
+__all__ = [
+    "verify_dict",
+    "verify_distribution_list",
+    "verify_float",
+    "verify_int",
+    "verify_list",
+    "verify_metadata_transforms",
+    "verify_numpy_array",
+    "verify_str",
+    "verify_transforms",
+]
 
 def verify_bounds(
     a: float,
@@ -439,3 +439,5 @@ def verify_metadata_transforms(
             )
 
     return tt
+
+__all__ = ["verify_bounds", "verify_int", "verify_float", "verify_str", "verify_distribution_list", "verify_list", "verify_numpy_array", "verify_dict", "verify_transforms", "verify_metadata_transforms"]

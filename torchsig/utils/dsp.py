@@ -2,14 +2,14 @@
 
 from copy import copy
 from pathlib import Path
+from functools import lru_cache
+from importlib.metadata import PackageNotFoundError, version as package_version
 from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
 import torchaudio
 from scipy import signal as sp
-
-from torchsig import __version__ as torchsig_version
 
 # data types to be used internally within torchsig
 TorchSigComplexDataType = np.complex64
@@ -18,6 +18,17 @@ TorchSigRealDataType = np.float32
 if TYPE_CHECKING:
     from torchsig.datasets.datasets import TorchSigIterableDataset
     from torchsig.signals.signal_types import Signal
+
+__all__ = ["TorchSigComplexDataType", "TorchSigRealDataType", "bandwidth_from_lower_upper_freq", "center_freq_from_lower_upper_freq", "compute_spectrogram", "convolve", "design_half_band_filter", "estimate_filter_length", "estimate_tone_bandwidth", "frequency_shift", "gaussian_taps", "interpolate_power_of_2_resampler", "is_even", "is_multiple_of_4", "is_odd", "low_pass", "low_pass_iterative_design", "lower_freq_from_center_freq_bandwidth", "multistage_polyphase_decimator", "multistage_polyphase_interpolator", "multistage_polyphase_resampler", "noise_generator", "pad_head_tail_to_length", "partition_polyphase", "polyphase_decimator", "polyphase_fractional_resampler", "polyphase_integer_interpolator", "prototype_polyphase_filter", "prototype_polyphase_filter_decimation", "prototype_polyphase_filter_interpolation", "sampling_clock_impairments", "slice_head_tail_to_length", "slice_tail_to_length", "srrc_taps", "upconversion_anti_aliasing_filter", "update_signal_snr_bandwidth", "upper_freq_from_center_freq_bandwidth", "upsample"]
+
+
+@lru_cache(maxsize=1)
+def torchsig_cache_version() -> str:
+    """Return installed package version without importing torchsig."""
+    try:
+        return package_version("torchsig")
+    except PackageNotFoundError:
+        return "dev"
 
 
 def slice_tail_to_length(input_signal: np.ndarray, num_samples: int) -> np.ndarray:
@@ -615,7 +626,7 @@ def prototype_polyphase_filter(
     pfb_weights_directory_path.mkdir(parents=True, exist_ok=True)
 
     # formating for the weights filename
-    pfb_weights_filename = f"torchsig_{torchsig_version}_pfb_weights_num_branches_{num_branches}_attenuation_db_{attenuation_db:0.0f}.npy"
+    pfb_weights_filename = f"torchsig_{torchsig_cache_version()}_pfb_weights_num_branches_{num_branches}_attenuation_db_{attenuation_db:0.0f}.npy"
 
     # create path to weights file
     path_to_file = pfb_weights_directory_path / pfb_weights_filename
@@ -822,38 +833,34 @@ def sampling_clock_impairments(
     input_idx = 0
     output_idx = 0
     clock_drift = 0.0
-    idx_stop = len(input_padded) - taps_per_phase
 
     # Generate random jitter and drift
     jitter_std = jitter_ppm * 1e-6
     drift_std = drift_ppm * 1e-6
 
     # Run the resampler
-    while input_idx < idx_stop:
-        # Update commutator position
+    max_start = len(input_padded) - taps_per_phase
+
+    while input_idx <= max_start:
         while q_step >= uprate:
             q_step -= uprate
             input_idx += 1
 
-        delay_slice = input_padded[input_idx:input_idx + taps_per_phase]
-
-        if q_step >= uprate:
+        if input_idx > max_start:
             break
 
-        # Get filter weights from PFB
+        delay_slice = input_padded[input_idx:input_idx + taps_per_phase]
+
         phase = int(q_step)
         h_phase = h_pfb[phase][:taps_per_phase]
 
-        # Multiply and accumulate
         acc_re = np.sum(h_phase * delay_slice[::-1].real)
         acc_im = np.sum(h_phase * delay_slice[::-1].imag)
         pfb_out = acc_re + 1j * acc_im
 
-        # Store output sample
         output_samples[output_idx] = pfb_out
         output_idx += 1
 
-        # Update commutator with jitter and drift
         if jitter_ppm != 0.0 or drift_ppm != 0.0:
             clock_jitter = rng.normal(0.0, jitter_std)
             clock_drift += rng.normal(0.0, drift_std)
@@ -862,7 +869,7 @@ def sampling_clock_impairments(
             q_step += drate
 
     # Return properly sized output
-    return output_samples[:output_idx-1] if output_idx > 0 else np.array([], dtype=TorchSigComplexDataType)
+    return output_samples[:output_idx] if output_idx > 0 else np.array([], dtype=TorchSigComplexDataType)
 
 
 

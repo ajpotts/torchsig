@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,10 +21,17 @@ from torchsig.utils.file_handlers.hdf5 import HDF5Reader
 from torchsig.utils.random import Seedable
 from torchsig.utils.signal_building import lookup_signal_generator_by_string
 
+from .pipeline_failover import PipelineFailOverEnabled
+
+log = logging.getLogger(__name__)
+
+
 # Type checking imports
 if TYPE_CHECKING:
     from torchsig.transforms.base_transforms import Transform
 
+__all__ = ["StaticTorchSigDataset", "TorchSigDatasetConfig", "TorchSigIterableDataset", "apply_label_to_signal", "apply_transforms_and_labels_to_signal"]
+"""Dataset Base Classes for creation and static loading."""
 
 @dataclass(frozen=True)
 class TorchSigDatasetConfig:
@@ -60,10 +68,23 @@ def apply_label_to_signal(sample: Signal, target_label: str) -> list:
         A list of values corresponding to the label specified in the sample and its component signals.
     """
     values = []
-    if hasattr(sample, target_label):
-        values += [getattr(sample, target_label)]
-    for component_signal in sample.component_signals:
-        values += apply_label_to_signal(component_signal, target_label)
+
+    for component in sample.component_signals:
+        metadata = component.get_full_metadata()
+
+        if target_label == "class_index":
+            if "class_name" in component.keys():
+                class_names = metadata["class_names"]
+                class_name = component["class_name"]
+                values.append(int(list(class_names).index(class_name)))
+            elif "class_index" in component.keys():
+                values.append(component["class_index"])
+        elif target_label in component.keys():
+            values.append(component[target_label])
+
+    if not sample.component_signals and target_label in sample.keys():
+        values.append(sample[target_label])
+
     return values
 
 
@@ -147,8 +168,8 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         self.validate_init = validate_init
         self.signal_generators = []
         self.signal_likelihoods = []
-        self.signal_probabilities = []
-        self.total_likelihood = 0
+        self.signal_probabilities = np.array([], dtype=float)
+        self._signal_probability_mode = "likelihood"
         self.target_labels = target_labels
         self.transforms = transforms
         self.component_transforms = component_transforms
@@ -171,6 +192,79 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         for generator in signal_generators:
             self.init_signal_generator(generator)
 
+
+    @staticmethod
+    def _validate_positive_weight(value: float, parameter_name: str) -> float:
+        """Validate a likelihood/probability value used for class selection."""
+        if not isinstance(value, (int, float, np.integer, np.floating)):
+            raise TypeError(
+                f"{parameter_name} must be a real number, got {type(value).__name__}"
+            )
+        value = float(value)
+        if not np.isfinite(value):
+            raise ValueError(f"{parameter_name} must be finite")
+        if value <= 0.0:
+            raise ValueError(f"{parameter_name} must be > 0")
+
+        return value
+
+
+    def _validate_signal_sampling_configuration(self, require_complete: bool = True) -> None:
+        """Validate the dataset's configured class-selection distribution."""
+        if len(self.signal_generators) == 0:
+            return
+
+        if self._signal_probability_mode == "probability":
+            probabilities = np.asarray(self.signal_probabilities, dtype=float)
+            if probabilities.shape[0] != len(self.signal_generators):
+                raise ValueError(
+                    "signal probability count does not match number of generators"
+                )
+            if np.any(probabilities <= 0.0):
+                raise ValueError("all signal probabilities must be > 0")
+
+            probability_sum = float(np.sum(probabilities))
+            if probability_sum > 1.0 + 1e-8:
+                raise ValueError(
+                    f"signal probabilities must sum to 1.0, found {probability_sum}"
+                )
+            if require_complete and not np.isclose(
+                probability_sum, 1.0, atol=1e-8
+            ):
+                raise ValueError(
+                    "signal probabilities must sum to 1.0 before sampling, "
+                    f"found {probability_sum}"
+                )
+            return
+
+        likelihoods = np.asarray(self.signal_likelihoods, dtype=float)
+        if likelihoods.shape[0] != len(self.signal_generators):
+            raise ValueError(
+                "signal likelihood count does not match number of generators"
+            )
+        if np.any(likelihoods <= 0.0):
+            raise ValueError("all signal likelihoods must be > 0")
+
+
+    def _refresh_signal_probabilities(self) -> None:
+        """Recompute normalized sampling probabilities from configured weights."""
+        if len(self.signal_generators) == 0:
+            self.signal_probabilities = np.array([], dtype=float)
+            return
+
+        self._validate_signal_sampling_configuration(require_complete=False)
+
+        if self._signal_probability_mode == "probability":
+            self.signal_probabilities = np.asarray(
+                self.signal_probabilities,
+                dtype=float,
+            )
+            return
+
+        likelihoods = np.asarray(self.signal_likelihoods, dtype=float)
+        self.signal_probabilities = likelihoods / np.sum(likelihoods)
+
+
     def init_signal_generator(self, signal_generator: str | callable) -> None:
         """Initializes the signal generator.
 
@@ -192,22 +286,56 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         signal_generator: callable,
         class_name: str | None = None,
         class_index: int | None = None,
-        likelihood: int = 1,
+        likelihood: float | None = None,
+        probability: float | None = None,
     ) -> None:
         """Adds a signal generator to this dataset.
 
         Args:
             signal_generator: A callable object which takes no arguments and returns a Signal.
-            class_name: (optional) A name for this signal class in the dataset. If None, the signal will be generated and added to the data, but no labels will be made for the signal.
-            likelihood: (optional) The relative likelihood of this signal type in the dataset. Doubling the likelihood will make this signal twice as likely to be placed in the data.
+            class_name: (optional) A name for this signal class in the dataset. 
+                If None, the signal will be generated and added to the data, 
+                but no labels will be made for the signal.
+            likelihood: (optional) Relative sampling weight for this signal class. 
+                If no explicit probabilities are provided anywhere, omitted
+                likelihoods default to 1.0 which yields uniform class sampling.
+            probability: (optional) Explicit probability for this signal class.
+                When any generator is added with ``probability=``, every
+                generator added to the dataset must also use explicit
+                probabilities, and the final probabilities must sum to 1.0
+                before sampling.
         """
+        # validate sampling configuration
+        if probability is not None and likelihood is not None:
+            raise ValueError(
+                "Specify only one of likelihood or probability for a signal generator"
+            )
+        if probability is not None:
+            self._signal_probability_mode = "probability"
+            probability = self._validate_positive_weight(probability, "probability")
+
+            candidate_probabilities = np.append(
+                np.asarray(self.signal_probabilities, dtype=float),
+                probability,
+            )
+            if float(np.sum(candidate_probabilities)) > (1.0 + 1e-8):
+                raise ValueError(
+                    "signal probabilities must sum to 1.0 or less while "
+                    f"configuring the dataset, found {probability_sum}"
+                )
+        else:
+            self._signal_probability_mode = "likelihood"
+            if likelihood is None:
+                likelihood = 1.0
+            likelihood = self._validate_positive_weight(likelihood, "likelihood")
+
         if isinstance(signal_generator, Seedable):
             signal_generator.add_parent(self)
         try:
             if self.validate_init:
                 signal_generator.validate_metadata_fields()
         except AttributeError:
-            pass  # there is no validate function; ignore and assume the best; a user who doesn't write a validate function does so at their own risk
+            pass  # proceed without a validation function at own risk
         signal_generator["class_index"] = len(self.signal_generators)
         if class_index is None:
             signal_generator["class_index"] = len(self.signal_generators)
@@ -221,14 +349,16 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
             and signal_generator["class_name"] is not None
         ):
             self["class_names"] += [signal_generator["class_name"]]
-        self.signal_likelihoods += [likelihood]
-        self.total_likelihood += likelihood
-        self.signal_probabilities = np.array(
-            [
-                likelihood / self.total_likelihood
-                for likelihood in self.signal_likelihoods
-            ]
-        )
+
+        if self._signal_probability_mode == "probability":
+            self.signal_probabilities = np.append(
+                np.asarray(self.signal_probabilities, dtype=float),
+                probability,
+            )
+        else:
+            self.signal_likelihoods += [likelihood]
+        self._refresh_signal_probabilities()
+
 
     def validate_metadata_fields(self) -> bool:
         """Validates signal metadata for each signal generators.
@@ -508,10 +638,126 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         return has_overlap
 
     def _random_signal_generator(self) -> BaseSignalGenerator:
-        """Randomly selects which signal generator to use next"""
+        """Randomly selects which signal generator to use next."""
+        if len(self.signal_generators) == 0:
+            raise ValueError("cannot sample from a dataset with no signal generators")
+
+        self._validate_signal_sampling_configuration(require_complete=True)
+        self._refresh_signal_probabilities()
         return self.random_generator.choice(
             self.signal_generators, p=self.signal_probabilities
         )
+
+class SafeTorchSigIterableDataset(
+    PipelineFailOverEnabled, TorchSigIterableDataset
+):
+    """A fault-tolerant version of TorchSigIterableDataset with automatic error recovery.
+
+    This class behaves exactly like :class:`TorchSigIterableDataset` but adds
+    built-in recovery mechanisms for when transforms fail during data generation.
+    It's designed to prevent dataset generation from stopping due to transform errors
+    by either retrying failed operations or falling back to safe outputs.
+
+    The class maintains full compatibility with the parent class API while adding
+    configurable error handling through the ``pipeline_fallback`` and
+    ``pipeline_max_retries`` attributes.
+
+    Example:
+        >>> ds = SafeTorchSigIterableDataset(
+        ...     signal_generators="all",
+        ...     transforms=[MyTransform()],
+        ...     target_labels=["class_index"]
+        ... )
+        >>> # Configure fallback behavior
+        >>> ds.pipeline_fallback = "retry"
+        >>> ds.pipeline_max_retries = 3
+        >>> # Dataset will now retry failed transforms up to 3 times
+        >>> sample = next(ds)
+    """
+
+    def __next__(self) -> Any:
+        """Generate the next dataset sample with pipeline fault tolerance.
+
+        Sample creation is performed in two stages:
+
+        1. Generate a raw signal, including any component-level transforms.
+        2. Apply whole-signal transforms and target label generation.
+
+        Each stage is executed through the configured failover mechanism. If a
+        stage raises an exception, the behavior is controlled by
+        ``pipeline_fallback``:
+
+        - ``"original"``: Return the original raw signal when available.
+        - ``"zero"``: Return a zero-filled signal with matching shape.
+        - ``"retry"``: Retry the failed stage up to
+        ``pipeline_max_retries`` times before falling back.
+
+        If failure occurs during raw signal generation, no original signal exists
+        and only retry or zero fallbacks are possible. If failure occurs during
+        whole-signal transforms or label generation, the generated raw signal can
+        be used as the fallback result.
+
+        Returns:
+            A successfully generated sample, or a fallback sample if recovery
+            logic is triggered.
+
+        Note:
+            All pipeline failures are logged to aid debugging and monitoring.
+        """
+        # Stage 1: generation + component_transforms
+        # If this fails, no raw/original sample exists yet.
+        def generate_raw_signal():
+            return self.__generate_new_signal__()
+
+        raw_signal = self._run_with_fallback(
+            generate_raw_signal,
+            fallback_raw_signal=None,
+        )
+
+        # Stage 2: whole-signal transforms + labels
+        # If this fails, raw_signal exists, so original fallback is possible.
+        def transform_raw_signal():
+            return apply_transforms_and_labels_to_signal(
+                raw_signal,
+                self.transforms,
+                self.target_labels,
+            )
+
+        return self._run_with_fallback(
+            transform_raw_signal,
+            fallback_raw_signal=raw_signal,
+        )
+
+
+    def set_fallback_policy(
+        self,
+        fallback: Literal["original", "zero", "retry"] = "original",
+        max_retries: int | None = None,
+    ) -> None:
+        """Configure the dataset's error recovery behavior.
+
+        Args:
+            fallback: The recovery strategy to use when transforms fail:
+                - "original": Return the untransformed signal
+                - "zero": Return a zero-filled array of matching shape
+                - "retry": Attempt the transform again (requires max_retries)
+
+            max_retries: Maximum number of retry attempts when fallback="retry".
+                Must be a positive integer. Ignored for other fallback modes.
+
+        Raises:
+            ValueError: If max_retries is provided with a fallback mode other than "retry"
+
+        Example:
+            >>> ds = SafeTorchSigIterableDataset(...)
+            >>> # Configure to retry failed transforms up to 5 times
+            >>> ds.set_fallback_policy(fallback="retry", max_retries=5)
+        """
+        self.pipeline_fallback = fallback
+        if max_retries is not None:
+            if fallback != "retry":
+                raise ValueError("max_retries is only allowed with fallback='retry'")
+            self.pipeline_max_retries = max_retries
 
 
 class StaticTorchSigDataset(Dataset, Seedable):

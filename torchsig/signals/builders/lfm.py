@@ -18,6 +18,7 @@ from torchsig.utils.dsp import (
     slice_head_tail_to_length,
 )
 
+__all__ = ["get_symbol_map", "lfm_modulator_baseband", "lfm_modulator", "LFMSignalGenerator"]
 
 def get_symbol_map() -> OrderedDict[str, np.ndarray]:
     """Generates symbol maps for LFM signals.

@@ -5,6 +5,7 @@ rectangles, and to detect overlaps between rectangles using line-segment interse
 and containment tests.
 """
 
+__all__ = ["Coordinate", "Rectangle", "counter_clock_wise", "line_intersection", "is_within_range", "is_corner_in_rectangle", "is_rectangle_inside_rectangle", "is_rectangle_overlap"]
 
 # class object to contain (x, y) coordinates
 class Coordinate:

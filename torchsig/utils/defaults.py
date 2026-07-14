@@ -1,8 +1,11 @@
-from torchsig.datasets.datasets import TorchSigIterableDataset
+from __future__ import annotations
+
 from torchsig.transforms.impairments import Impairments
 from torchsig.utils.data_loading import WorkerSeedingDataLoader
 from torchsig.utils.writer import default_collate_fn
 
+
+__all__ = ["TorchSigDefaults", "default_dataset", "default_dataloader"]
 
 class TorchSigDefaults:
     """A class for managing default values used in TorchSig.
@@ -63,6 +66,8 @@ def default_dataset(
     Returns:
         TorchSigIterableDataset: A configured dataset instance.
     """
+    from torchsig.datasets.datasets import TorchSigIterableDataset
+
     defaults_to_use = TorchSigDefaults()
     dataset_metadata = defaults_to_use.default_dataset_metadata
     if impairment_level is not None:

@@ -11,56 +11,104 @@ from torchsig.signals.builders.lfm import LFMSignalGenerator
 from torchsig.signals.builders.ofdm import OFDMSignalGenerator
 from torchsig.signals.builders.tone import ToneSignalGenerator
 
+__all__ = ["family_names", "lookup_signal_generator_by_string", "num_subcarrier_values", "signal_generator_lookup_table"]
+
 # Stores generator class and metadata for generators to make per label
-signal_generator_lookup_table: dict[str,
-    tuple[type, dict[str, any]] |
-    tuple[type, list[tuple[type, dict[str, Any]]], dict[str, Any]]
-] = {}
+SignalGeneratorSpec = (
+    tuple[type, dict[str, Any]]
+    | tuple[type, list[tuple[type, dict[str, Any]]], dict[str, Any]]
+)
+
+signal_generator_lookup_table: dict[str, SignalGeneratorSpec] = {}
+
+
+def _add_signal_generator(
+    name: str,
+    generator_cls: type,
+    metadata: dict[str, Any],
+) -> None:
+    signal_generator_lookup_table[name] = (generator_cls, metadata)
+
+
+def _family_name(signal_name: str) -> str | None:
+    """Return the modulation family for a concrete signal generator name."""
+    if signal_name.startswith("ofdm-"):
+        return "ofdm"
+    if signal_name.startswith("am-"):
+        return "am"
+    if signal_name.startswith("lfm-"):
+        return "lfm"
+    if signal_name.startswith("fm-"):
+        return "fm"
+    if signal_name.endswith("fsk") or signal_name.endswith("gfsk"):
+        return "fsk"
+    if signal_name.endswith("msk") or signal_name.endswith("gmsk"):
+        return "msk"
+    if "psk" in signal_name:
+        return "psk"
+    if "qam" in signal_name:
+        return "qam"
+    if "ask" in signal_name:
+        return "ask"
+    return None
+
 
 # Initialize lookup table with signal generators
-signal_generator_lookup_table["tone"] = (ToneSignalGenerator, {})
+_add_signal_generator("tone", ToneSignalGenerator, {})
+
 num_subcarrier_values = [64, 72, 128, 180, 256, 300, 512, 600, 900, 1024, 1200, 2048]
 for num_subcarriers in num_subcarrier_values:
-    signal_generator_lookup_table["ofdm-" + str(num_subcarriers)] = (
+    _add_signal_generator(
+        f"ofdm-{num_subcarriers}",
         OFDMSignalGenerator,
         {"num_subcarriers": num_subcarriers},
     )
-signal_generator_lookup_table["lfm-data"] = (LFMSignalGenerator, {"lfm_type": "data"})
-signal_generator_lookup_table["lfm-radar"] = (LFMSignalGenerator, {"lfm_type": "radar"})
+
+_add_signal_generator("lfm-data", LFMSignalGenerator, {"lfm_type": "data"})
+_add_signal_generator("lfm-radar", LFMSignalGenerator, {"lfm_type": "radar"})
+
 for fsk_type in ["fsk", "gfsk", "msk", "gmsk"]:
     for constellation_size in [2, 4, 8, 16]:
-        signal_generator_lookup_table[str(constellation_size) + str(fsk_type)] = (
+        _add_signal_generator(
+            f"{constellation_size}{fsk_type}",
             FSKSignalGenerator,
             {"fsk_type": fsk_type, "constellation_size": constellation_size},
         )
-signal_generator_lookup_table["fm"] = (FMSignalGenerator, {})
+
+_add_signal_generator("fm-data", FMSignalGenerator, {})
+
 for constellation_name in all_symbol_maps:
-    signal_generator_lookup_table[constellation_name] = (
+    _add_signal_generator(
+        constellation_name,
         ConstellationSignalGenerator,
         {"constellation_name": constellation_name},
     )
-signal_generator_lookup_table["chirpss"] = (ChirpSSSignalGenerator, {})
+
+_add_signal_generator("chirpss", ChirpSSSignalGenerator, {})
+
 for am_mode in ["dsb", "dsb-sc", "usb", "lsb"]:
-    signal_generator_lookup_table["am-" + am_mode] = (
+    _add_signal_generator(
+        f"am-{am_mode}",
         AMSignalGenerator,
         {"am_mode": am_mode},
     )
+
+concrete_generator_names = list(signal_generator_lookup_table)
+
 signal_generator_lookup_table["all"] = (
     ConcatSignalGenerator,
-    [
-        signal_generator_lookup_table[key]
-        for key in signal_generator_lookup_table
-    ],
+    [signal_generator_lookup_table[name] for name in concrete_generator_names],
     {},
 )
+
 family_names = ["ofdm", "am", "fm", "fsk", "psk", "qam", "ask", "lfm", "msk"]
 for family_name in family_names:
     signal_generator_lookup_table[family_name] = (
         ConcatSignalGenerator,
         [
-            signal_generator_lookup_table[key]
-            for key in signal_generator_lookup_table
-            if family_name in key
+            signal_generator_lookup_table[name]
+            for name in concrete_generator_names
+            if _family_name(name) == family_name
         ],
         {"family_name": family_name},
     )

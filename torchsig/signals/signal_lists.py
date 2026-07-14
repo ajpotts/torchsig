@@ -7,6 +7,8 @@ from typing import ClassVar, Final
 
 from torchsig.signals.signal_utils import check_signal_class
 
+__all__ = ["CLASS_FAMILY_DICT", "SIGNALS_SHARED_LIST", "FAMILY_SHARED_LIST", "TORCHSIG_NUM_SIGNALS", "TORCHSIG_NUM_FAMILIES", "TorchSigSignalLists"]
+
 # Signal class to signal family mapping
 CLASS_FAMILY_DICT: Final[dict[str, str]] = {
     "ook": "ook",
@@ -62,8 +64,8 @@ CLASS_FAMILY_DICT: Final[dict[str, str]] = {
     "am-dsb": "am",
     "am-lsb": "am",
     "am-usb": "am",
-    "lfm_data": "chirp",
-    "lfm_radar": "chirp",
+    "lfm-data": "chirp",
+    "lfm-radar": "chirp",
     "chirpss": "chirp",
     "tone": "tone",
 }

@@ -31,6 +31,7 @@ from torchsig.transforms.transforms import (
     TimeReversal,
 )
 
+__all__ = ["Impairments"]
 
 class Impairments(Transform):
     """Applies signal and dataset transformations at specific impairment levels.
