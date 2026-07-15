@@ -22,14 +22,20 @@ from torchsig.signals.signal_types import Signal
 from torchsig.utils.abstractions import HierarchicalMetadataObject
 from torchsig.utils.dsp import torchsig_cache_version
 from torchsig.utils.file_handlers.base_handler import FileReader, FileWriter
+from torchsig.utils.file_handlers.hdf5_schema import (
+    PackedHDF5Schema,
+    default_packed_schema,
+    read_schema,
+    write_schema,
+)
 
 __all__ = ["BatchedHDF5Reader", "BatchedHDF5Writer"]
 
-_NO_PARENT = np.iinfo(np.int64).max
 _RECORD_DTYPE = np.dtype(
     [
         ("data_offset", np.uint64),
         ("data_length", np.uint64),
+        ("dtype_id", np.uint32),
         ("shape_offset", np.uint64),
         ("shape_count", np.uint16),
         ("component_offset", np.uint64),
@@ -114,6 +120,26 @@ def _append(dataset: h5py.Dataset, values: Any) -> int:
     return start
 
 
+def _validate_declared_datasets(
+    file: h5py.File, schema: PackedHDF5Schema
+) -> None:
+    """Ensure required logical specifications and physical paths exist."""
+    required = set(default_packed_schema().datasets)
+    missing_specs = required - set(schema.datasets)
+    if missing_specs:
+        raise ValueError(
+            "Packed HDF5 schema is missing dataset specifications: "
+            f"{sorted(missing_specs)}"
+        )
+    missing_paths = [
+        item.path for item in schema.datasets.values() if item.path not in file
+    ]
+    if missing_paths:
+        raise ValueError(
+            "Packed HDF5 file is missing declared paths: " f"{missing_paths}"
+        )
+
+
 class BatchedHDF5Writer(FileWriter):
     """Write signals into a small set of appendable HDF5 datasets."""
 
@@ -136,10 +162,12 @@ class BatchedHDF5Writer(FileWriter):
         self.chunk_cache_size = chunk_cache_size
         self.max_batches_in_memory = max_batches_in_memory
         self._file: h5py.File | None = None
-        self._data: h5py.Dataset | None = None
+        self._data: dict[int, h5py.Dataset] = {}
+        self._dtype_ids: dict[str, int] = {}
         self._batch_buffer: list[tuple[int, list[Signal]]] = []
         self._parent_ids: dict[tuple[str, int], int] = {}
         self._lock = threading.Lock()
+        self.schema = default_packed_schema()
 
     def _setup(self) -> None:
         self._file = h5py.File(
@@ -150,39 +178,71 @@ class BatchedHDF5Writer(FileWriter):
             rdcc_w0=0.75,
         )
         self._file.attrs["torchsig_version"] = torchsig_cache_version()
-        self._file.attrs["format"] = "torchsig-packed-v2"
+        self._file.attrs["format"] = self.schema.format
         self._file.attrs["compression"] = self.compression or "none"
+        write_schema(self._file, self.schema)
         string_dtype = h5py.string_dtype(encoding="utf-8")
+        spec = self.schema.datasets
+        self._data_group = self._file.create_group(spec["data"].path)
+        self._dtypes = self._file.create_dataset(
+            spec["dtypes"].path,
+            shape=(0,),
+            maxshape=(None,),
+            dtype=string_dtype,
+            chunks=True,
+        )
         self._records = self._file.create_dataset(
-            "records", shape=(0,), maxshape=(None,), dtype=_RECORD_DTYPE, chunks=True
+            spec["records"].path,
+            shape=(0,),
+            maxshape=(None,),
+            dtype=_RECORD_DTYPE,
+            chunks=True,
         )
         self._metadata = self._file.create_dataset(
-            "metadata", shape=(0,), maxshape=(None,), dtype=string_dtype, chunks=True
+            spec["metadata"].path,
+            shape=(0,),
+            maxshape=(None,),
+            dtype=string_dtype,
+            chunks=True,
         )
         self._components = self._file.create_dataset(
-            "components", shape=(0,), maxshape=(None,), dtype=np.uint64, chunks=True
+            spec["components"].path,
+            shape=(0,),
+            maxshape=(None,),
+            dtype=np.uint64,
+            chunks=True,
         )
         self._shapes = self._file.create_dataset(
-            "shapes", shape=(0,), maxshape=(None,), dtype=np.uint64, chunks=True
+            spec["shapes"].path,
+            shape=(0,),
+            maxshape=(None,),
+            dtype=np.uint64,
+            chunks=True,
         )
         self._index = self._file.create_dataset(
-            "index", shape=(0,), maxshape=(None,), dtype=np.uint64, chunks=True
+            spec["index"].path,
+            shape=(0,),
+            maxshape=(None,),
+            dtype=np.uint64,
+            chunks=True,
         )
         self._parent_records = self._file.create_dataset(
-            "parent_records",
+            spec["parent_records"].path,
             shape=(0,),
             maxshape=(None,),
             dtype=_PARENT_DTYPE,
             chunks=True,
         )
         self._parent_metadata = self._file.create_dataset(
-            "parent_metadata",
+            spec["parent_metadata"].path,
             shape=(0,),
             maxshape=(None,),
             dtype=string_dtype,
             chunks=True,
         )
         self._parent_ids.clear()
+        self._dtype_ids.clear()
+        self._data.clear()
 
     def _data_kwargs(self) -> dict[str, Any]:
         kwargs: dict[str, Any] = {"chunks": True}
@@ -196,24 +256,28 @@ class BatchedHDF5Writer(FileWriter):
             kwargs["fletcher32"] = True
         return kwargs
 
-    def _ensure_data(self, dtype: np.dtype) -> None:
-        if self._data is None:
-            self._data = self._file.create_dataset(
-                "data",
+    def _data_for_dtype(self, dtype: np.dtype) -> tuple[int, h5py.Dataset]:
+        dtype_string = dtype.str
+        if dtype_string in self._dtype_ids:
+            dtype_id = self._dtype_ids[dtype_string]
+        else:
+            if dtype.hasobject:
+                raise TypeError("Packed HDF5 does not support object signal dtypes")
+            dtype_id = len(self._dtypes)
+            _append(self._dtypes, [dtype_string])
+            self._dtype_ids[dtype_string] = dtype_id
+            self._data[dtype_id] = self._data_group.create_dataset(
+                str(dtype_id),
                 shape=(0,),
                 maxshape=(None,),
                 dtype=dtype,
                 **self._data_kwargs(),
             )
-        elif self._data.dtype != dtype:
-            raise TypeError(
-                "Packed HDF5 requires one signal dtype per file: "
-                f"expected {self._data.dtype}, got {dtype}"
-            )
+        return dtype_id, self._data[dtype_id]
 
     def _store_parent(self, parent: HierarchicalMetadataObject | None) -> int:
         if parent is None:
-            return int(_NO_PARENT)
+            return self.schema.sentinels["no_parent"]
         parent_parent_id = self._store_parent(parent.parent)
         encoded_metadata = _encode_metadata(parent)
         parent_key = (encoded_metadata, parent_parent_id)
@@ -243,39 +307,40 @@ class BatchedHDF5Writer(FileWriter):
         if not flattened:
             return
 
-        dtype = np.asarray(flattened[0].data).dtype
-        self._ensure_data(dtype)
-        arrays = []
+        arrays_by_dtype: dict[int, list[np.ndarray]] = {}
+        offsets_by_dtype: dict[int, int] = {}
         records = np.empty(len(flattened), dtype=_RECORD_DTYPE)
         metadata = []
         links: list[int] = []
         shapes: list[int] = []
-        data_offset = len(self._data)
         component_offset = len(self._components)
         shape_offset = len(self._shapes)
         for idx, signal in enumerate(flattened):
             array = np.asarray(signal.data)
-            if array.dtype != dtype:
-                raise TypeError(
-                    f"All signals in a batch must use {dtype}, got {array.dtype}"
-                )
-            arrays.append(array.reshape(-1))
+            dtype_id, data = self._data_for_dtype(array.dtype)
+            if dtype_id not in offsets_by_dtype:
+                offsets_by_dtype[dtype_id] = len(data)
+                arrays_by_dtype[dtype_id] = []
+            data_offset = offsets_by_dtype[dtype_id]
+            arrays_by_dtype[dtype_id].append(array.reshape(-1))
             children = component_ids[idx]
             records[idx] = (
                 data_offset,
                 array.size,
+                dtype_id,
                 shape_offset + len(shapes),
                 array.ndim,
                 component_offset + len(links),
                 len(children),
                 self._store_parent(signal.parent),
             )
-            data_offset += array.size
+            offsets_by_dtype[dtype_id] += array.size
             shapes.extend(array.shape)
             links.extend(children)
             metadata.append(_encode_metadata(signal))
 
-        _append(self._data, np.concatenate(arrays))
+        for dtype_id, arrays in arrays_by_dtype.items():
+            _append(self._data[dtype_id], np.concatenate(arrays))
         _append(self._records, records)
         _append(self._metadata, metadata)
         if shapes:
@@ -314,7 +379,7 @@ class BatchedHDF5Writer(FileWriter):
         self._flush_buffer()
         self._file.close()
         self._file = None
-        self._data = None
+        self._data.clear()
 
 
 class BatchedHDF5Reader(FileReader):
@@ -328,18 +393,34 @@ class BatchedHDF5Reader(FileReader):
         self._parent_cache: dict[int, tuple[dict[str, Any], int]] = {}
         self._metadata_cache: dict[int, dict[str, Any]] = {}
         self._locking = False
+        self.schema: PackedHDF5Schema | None = None
 
     def _ensure_open(self) -> None:
         if self._file is None:
             self._file = h5py.File(self.datapath, "r", locking=self._locking)
-            self._records = self._file["records"]
-            self._metadata = self._file["metadata"]
-            self._components = self._file["components"]
-            self._shapes = self._file["shapes"]
-            self._index = self._file["index"]
-            self._data = self._file["data"]
-            self._parent_records = self._file["parent_records"]
-            self._parent_metadata = self._file["parent_metadata"]
+            try:
+                self.schema = read_schema(self._file)
+                spec = self.schema.datasets
+                _validate_declared_datasets(self._file, self.schema)
+                self._records = self._file[spec["records"].path]
+                self._metadata = self._file[spec["metadata"].path]
+                self._components = self._file[spec["components"].path]
+                self._shapes = self._file[spec["shapes"].path]
+                self._index = self._file[spec["index"].path]
+                self._data = self._file[spec["data"].path]
+                self._data_streams = {
+                    int(dtype_id): self._data[dtype_id] for dtype_id in self._data
+                }
+                self._dtypes = self._file[spec["dtypes"].path]
+                self._parent_records = self._file[spec["parent_records"].path]
+                self._parent_metadata = self._file[spec["parent_metadata"].path]
+                self._record_fields = spec["records"].fields
+                self._parent_fields = spec["parent_records"].fields
+                self._no_parent = self.schema.sentinels["no_parent"]
+            except Exception:
+                self._file.close()
+                self._file = None
+                raise
 
     def __len__(self) -> int:
         """Return the number of indexed top-level signals."""
@@ -349,13 +430,13 @@ class BatchedHDF5Reader(FileReader):
         return self._len_cache
 
     def _build_parent(self, parent_id: int) -> HierarchicalMetadataObject | None:
-        if parent_id == _NO_PARENT:
+        if parent_id == self._no_parent:
             return None
         try:
             metadata, ancestor_id = self._parent_cache[parent_id]
         except KeyError:
             record = self._parent_records[parent_id]
-            ancestor_id = int(record["parent_id"])
+            ancestor_id = int(record[self._parent_fields["parent_id"]])
             metadata = _decode_metadata(self._parent_metadata[parent_id])
             self._parent_cache[parent_id] = (metadata, ancestor_id)
         parent = HierarchicalMetadataObject(metadata=deepcopy(metadata))
@@ -366,13 +447,15 @@ class BatchedHDF5Reader(FileReader):
 
     def _read_record(self, record_id: int) -> Signal:
         record = self._records[record_id]
-        data_start = int(record["data_offset"])
-        data_stop = data_start + int(record["data_length"])
-        shape_start = int(record["shape_offset"])
-        shape_stop = shape_start + int(record["shape_count"])
+        fields = self._record_fields
+        data_start = int(record[fields["data_offset"]])
+        data_stop = data_start + int(record[fields["data_length"]])
+        dtype_id = int(record[fields["dtype_id"]])
+        shape_start = int(record[fields["shape_offset"]])
+        shape_stop = shape_start + int(record[fields["shape_count"]])
         shape = tuple(int(value) for value in self._shapes[shape_start:shape_stop])
-        component_start = int(record["component_offset"])
-        component_stop = component_start + int(record["component_count"])
+        component_start = int(record[fields["component_offset"]])
+        component_stop = component_start + int(record[fields["component_count"]])
         component_ids = self._components[component_start:component_stop]
         try:
             metadata = self._metadata_cache[record_id]
@@ -380,13 +463,13 @@ class BatchedHDF5Reader(FileReader):
             metadata = _decode_metadata(self._metadata[record_id])
             self._metadata_cache[record_id] = metadata
         signal = Signal(
-            data=self._data[data_start:data_stop].reshape(shape),
+            data=self._data_streams[dtype_id][data_start:data_stop].reshape(shape),
             component_signals=[
                 self._read_record(int(component_id)) for component_id in component_ids
             ],
             metadata=deepcopy(metadata),
         )
-        parent = self._build_parent(int(record["parent_id"]))
+        parent = self._build_parent(int(record[fields["parent_id"]]))
         if parent is not None:
             signal.add_parent(parent, register=False)
         return signal
@@ -403,5 +486,6 @@ class BatchedHDF5Reader(FileReader):
             self._file.close()
             self._file = None
         self._len_cache = None
+        self.schema = None
         self._parent_cache.clear()
         self._metadata_cache.clear()

@@ -65,18 +65,23 @@ def test_batched_hdf5_round_trip_components_and_metadata(tmp_path) -> None:
         reader.teardown()
 
 
-def test_batched_hdf5_rejects_mixed_signal_dtypes(tmp_path) -> None:
+def test_batched_hdf5_preserves_mixed_signal_dtypes(tmp_path) -> None:
     signals = [
         Signal(data=np.ones(4, dtype=np.complex64)),
-        Signal(data=np.ones(4, dtype=np.complex128)),
+        Signal(data=np.ones((2, 4), dtype=np.float32)),
     ]
-    writer = BatchedHDF5Writer(tmp_path, max_batches_in_memory=1)
-    writer.setup()
+    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+        writer.write(0, signals)
+
+    reader = BatchedHDF5Reader(tmp_path)
     try:
-        with pytest.raises(TypeError, match="All signals in a batch"):
-            writer.write(0, signals)
+        complex_signal = reader.read(0)
+        real_signal = reader.read(1)
+        assert complex_signal.data.dtype == np.complex64
+        assert real_signal.data.dtype == np.float32
+        assert real_signal.data.shape == (2, 4)
     finally:
-        writer.teardown()
+        reader.teardown()
 
 
 @pytest.mark.parametrize(
