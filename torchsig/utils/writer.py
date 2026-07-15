@@ -14,7 +14,15 @@ import yaml
 from torch.utils.data._utils.collate import default_collate as torch_default_collate
 from tqdm.auto import tqdm
 
-from torchsig.utils.file_handlers.hdf5 import HDF5Writer
+from torchsig.utils.file_handlers.hdf5 import HDF5Reader, HDF5Writer
+from torchsig.utils.file_handlers.packed_hdf5 import (
+    PackedHDF5Reader,
+    PackedHDF5Writer,
+)
+from torchsig.utils.file_handlers.homogeneous_hdf5 import (
+    HomogeneousHDF5Reader,
+    HomogeneousHDF5Writer,
+)
 
 if TYPE_CHECKING:
     from torch.utils.data import DataLoader
@@ -23,6 +31,57 @@ if TYPE_CHECKING:
 
 
 __all__ = ["default_collate_fn", "identity_collate_fn", "DatasetCreator"]
+
+_MISSING = object()
+_KNOWN_FILE_HANDLER_PAIRS = {
+    HDF5Writer: HDF5Reader,
+    PackedHDF5Writer: PackedHDF5Reader,
+    HomogeneousHDF5Writer: HomogeneousHDF5Reader,
+}
+
+
+def _resolve_file_reader(file_writer, file_reader):
+    expected_reader = _KNOWN_FILE_HANDLER_PAIRS.get(file_writer)
+    if file_reader is None:
+        return expected_reader
+    if expected_reader is not None and file_reader is not expected_reader:
+        raise ValueError(
+            f"Incompatible file handler pair: {file_writer.__name__} requires "
+            f"{expected_reader.__name__}, got {file_reader.__name__}"
+        )
+    return file_reader
+
+
+def _yaml_safe_value(value: Any) -> Any:
+    """Return a stable YAML-safe representation of a runtime option."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, type):
+        return f"{value.__module__}.{value.__qualname__}"
+    if isinstance(value, dict):
+        return {
+            str(key): _yaml_safe_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_yaml_safe_value(item) for item in value]
+    try:
+        yaml.safe_dump(value)
+    except yaml.YAMLError:
+        return repr(value)
+    return value
+
+
+def _qualified_name(value: Any) -> str:
+    """Return a stable qualified name for a class or callable."""
+    module = getattr(value, "__module__", None)
+    name = getattr(value, "__qualname__", getattr(value, "__name__", None))
+    if module is not None and name is not None:
+        return f"{module}.{name}"
+    return str(value)
+
 
 def default_collate_fn(batch):
     """Collates a batch by zipping its elements together. Note: not pickle-safe for complex
@@ -90,7 +149,10 @@ class DatasetCreator:
     This class generates a dataset if it does not already exist on disk.
     It processes the data in batches and saves it using a specified file handler.
     The class allows setting options like whether to overwrite existing datasets,
-    batch size, and number of worker threads.
+    batch size, and number of worker threads. Known HDF5 writers infer their
+    matching reader. ``HomogeneousHDF5Writer`` is an opt-in backend requiring
+    every top-level sample to share one shape and dtype; component counts,
+    component arrays, and effective metadata may vary.
 
     Attributes:
         dataloader (DataLoader): The DataLoader used to load data in batches.
@@ -108,6 +170,7 @@ class DatasetCreator:
         overwrite: bool = True,
         tqdm_desc: str | None = None,
         file_handler: FileWriter = HDF5Writer,
+        file_reader: type | None = None,
         multithreading: bool = True,
         max_inflight_futures: int = 32,
         **kwargs,
@@ -121,6 +184,9 @@ class DatasetCreator:
             overwrite (bool): Flag indicating whether to overwrite an existing dataset. Defaults to True.
             tqdm_desc (str): Description for the progress bar.
             file_handler (FileWriter): File handler used to write dataset. Defaults to HDF5Writer.
+            file_reader: Optional reader class paired with the writer for metadata.
+                Known HDF5 writer classes infer their matching reader and reject
+                incompatible explicit pairings.
             multithreading (bool): Whether to use multithreading for writing batches. Defaults to True.
             max_inflight_futures (int): Maximum number of concurrent futures when using multithreading. Defaults to 32.
             **kwargs: Additional arguments for the file handler.
@@ -129,8 +195,18 @@ class DatasetCreator:
         self.root = Path(root)
         self.dataset_info_filepath = self.root.joinpath("dataset_info.yaml")
         self.writer_info_filepath = self.root.joinpath("writer_info.yaml")
+        legacy_file_writer = kwargs.pop("file_writer", _MISSING)
+        if legacy_file_writer is not _MISSING:
+            if file_handler is not HDF5Writer and file_handler is not legacy_file_writer:
+                raise TypeError(
+                    "DatasetCreator received conflicting file_handler and "
+                    "file_writer arguments"
+                )
+            file_handler = legacy_file_writer
         self.file_handler = file_handler
+        self.file_reader = _resolve_file_reader(file_handler, file_reader)
         self.kwargs = dict(kwargs)
+        self.writer_info_kwargs = _yaml_safe_value(self.kwargs)
 
         self.overwrite = bool(overwrite)
         self.multithreading = bool(multithreading)
@@ -179,7 +255,7 @@ class DatasetCreator:
         """Instantiate writer without entering context to not enter setup, resetting folder."""
         maybe_data_file = None
         try:
-            writer = self.file_handler(root=self.root)
+            writer = self.file_handler(root=self.root, **self.kwargs)
             maybe_data_file = getattr(writer, "datapath", None)
             if isinstance(maybe_data_file, (str, Path)):
                 maybe_data_file = Path(maybe_data_file)
@@ -228,6 +304,13 @@ class DatasetCreator:
             "batch_size": None if self.batch_size is None else int(self.batch_size),
             "num_workers": None if self.num_workers is None else int(self.num_workers),
             "file_handler": getattr(self.file_handler, "__name__", str(self.file_handler)),
+            "file_handler_qualified": _qualified_name(self.file_handler),
+            "file_reader_qualified": (
+                None
+                if self.file_reader is None
+                else _qualified_name(self.file_reader)
+            ),
+            "file_handler_kwargs": self.writer_info_kwargs,
             "multithreading": bool(self.multithreading),
             "dataset_length_requested": int(self.dataset_length_requested),
             "items_written": int(self.items_written),
@@ -245,6 +328,34 @@ class DatasetCreator:
         with open(self.writer_info_filepath) as f:
             writer_disk = yaml.safe_load(f) or {}
         complete = bool(writer_disk.get("complete", False))
+        expected_handler = getattr(
+            self.file_handler, "__name__", str(self.file_handler)
+        )
+        if (
+            "file_handler" in writer_disk
+            and writer_disk["file_handler"] != expected_handler
+        ):
+            differences.append(
+                (
+                    "file_handler",
+                    writer_disk["file_handler"],
+                    expected_handler,
+                )
+            )
+        if (
+            "file_handler_kwargs" in writer_disk
+            and not _deep_equal(
+                writer_disk["file_handler_kwargs"],
+                self.writer_info_kwargs,
+            )
+        ):
+            differences.append(
+                (
+                    "file_handler_kwargs",
+                    writer_disk["file_handler_kwargs"],
+                    self.writer_info_kwargs,
+                )
+            )
 
         if not self.dataset_info_filepath.exists():
             differences.append(("dataset_info.yaml", "missing", "expected present"))
@@ -318,6 +429,11 @@ class DatasetCreator:
                     f"Dataset only partially exists in {self.root}. "
                     "Regenerate by setting overwrite=True."
                 )
+            if any(key == "file_handler" for key, _, _ in diffs):
+                raise RuntimeError(
+                    f"Dataset at {self.root} was created with a different "
+                    "file handler. Regenerate by setting overwrite=True."
+                )
             print(f"Dataset exists at {self.root} but differs from current dataset config. Using dataset on disk.")
             for k, disk_v, cur_v in diffs:
                 print(f"\t{k}: disk={disk_v} current={cur_v}")
@@ -329,7 +445,7 @@ class DatasetCreator:
             self.items_written = 0
             self._msg_timer = time()
 
-            with self.file_handler(root=self.root) as writer:
+            with self.file_handler(root=self.root, **self.kwargs) as writer:
                 # Write initial YAMLs
                 write_dict_to_yaml(self.dataset_info_filepath, self.get_dataset_info_dict(
                     dataset_length=0, original_target_labels=orig_target_labels,

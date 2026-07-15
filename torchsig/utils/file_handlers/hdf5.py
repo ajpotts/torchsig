@@ -1,6 +1,11 @@
-"""HDF5 File Handler for TorchSig datasets.
+"""Legacy object-per-record HDF5 handlers for TorchSig datasets.
 
-High-performance HDF5 storage with optimized compression and chunking.
+This module preserves TorchSig's original HDF5 layout for existing datasets.
+For newly created datasets, use
+:class:`~torchsig.utils.file_handlers.packed_hdf5.PackedHDF5Writer` when
+top-level array shapes or dtypes may vary, or
+:class:`~torchsig.utils.file_handlers.homogeneous_hdf5.HomogeneousHDF5Writer`
+when they are uniform.
 """
 
 from __future__ import annotations
@@ -43,8 +48,10 @@ def _hdf5_key(obj) -> str:
 
 
 def populate_hdf5_group_with_metadata(group, metadata_obj) -> bool:
-    """Makes sure this and all parent metadata objects are represented in the hdf5 group
-    (returns true iff a new group was added).
+    """Store an object's local metadata and recursively store its parents.
+
+    Returns ``True`` when a metadata group is created for ``metadata_obj`` and
+    ``False`` when its key already exists.
     """
     key = _hdf5_key(metadata_obj)
     # Persistent objects (generators, datasets) share a stable key across
@@ -68,8 +75,10 @@ def populate_hdf5_group_with_metadata(group, metadata_obj) -> bool:
     return True
 
 def populate_hdf5_group_with_signal_data(group, signal, dataset_kwargs=None):
-    """Makes sure this and all parent metadata objects are represented in the hdf5 group
-    (returns true iff a new group was added).
+    """Store one signal array under its object key.
+
+    ``dataset_kwargs`` are forwarded to :meth:`h5py.Group.create_dataset`.
+    Returns ``False`` when the signal key is already present.
     """
     key = _hdf5_key(signal)
     # Signal keys are unique counters so this check only fires for persistent
@@ -157,7 +166,12 @@ def populate_hdf5_group_with_signals(group, signals, index=True, data_dataset_kw
 
 
 class HDF5Writer(FileWriter):
-    """Handles writing Signal data to HDF5 files with specified compression and buffering."""
+    """Write Signals using TorchSig's legacy object-per-record HDF5 layout.
+
+    Each signal array, metadata object, and component relationship is stored
+    as a separate HDF5 object. Batches are buffered and committed in batch
+    index order.
+    """
 
     def __init__(
         self,
@@ -169,16 +183,17 @@ class HDF5Writer(FileWriter):
         chunk_cache_size: int = 1024 * 1024 * 10,  # 10MB cache
         max_batches_in_memory: int = 4,
     ):
-        """Initializes the HDF5FileHandler.
+        """Initialize the legacy HDF5 writer.
 
         Args:
-            root (str): Where to write dataset on disk.
-            compression (str, optional): Compression algorithm ('gzip', 'szip', 'lzf'). Defaults to 'lzf'.
-            compression_opts (int | None, optional): Compression level (0-9 for gzip). Defaults to None.
-            shuffle (bool, optional): Enable shuffle filter for better compression. Defaults to True.
-            fletcher32 (bool, optional): Enable Fletcher32 checksum filter. Defaults to True.
-            chunk_cache_size (int, optional): HDF5 chunk cache size in bytes. Defaults to 10MB.
-            max_batches_in_memory (int, optional): Maximum batches to keep in memory before flushing. Defaults to 4.
+            root: Directory in which ``data.h5`` is created.
+            compression: HDF5 compression filter name, or ``None``.
+            compression_opts: Options passed to the selected compression
+                filter.
+            shuffle: Whether to apply the HDF5 shuffle filter.
+            fletcher32: Whether to apply the Fletcher32 checksum filter.
+            chunk_cache_size: HDF5 raw chunk cache size in bytes.
+            max_batches_in_memory: Number of batches buffered before a flush.
         """
         # compression
         self.compression = compression
@@ -235,7 +250,7 @@ class HDF5Writer(FileWriter):
 
         # Set global attributes
         self._file.attrs["torchsig_version"] = torchsig_cache_version()
-        self._file.attrs["compression"] = self.compression
+        self._file.attrs["compression"] = self.compression or "none"
         self._file.attrs["created_by"] = "TorchSig HDF5FileHandler"
         self._file.create_group("data")
         self._file.create_group("metadata")
@@ -271,10 +286,10 @@ class HDF5Writer(FileWriter):
             self._assign_hdf5_keys(cs)
 
     def _write_batch_to_hdf5(self, data) -> None:
-        """Writes a batch of signals (as List[Signal]) to the file.
+        """Write a batch of signals to the open file.
 
         Args:
-            data (List[Signal]): The list of signals to write to the HDF5 file.
+            data: Signals to write to the HDF5 file.
         """
         # Assign stable write keys before touching HDF5 so the populate
         # helpers never fall back to id()-based keys for signal objects.
@@ -430,7 +445,7 @@ def load_signal_from_group_by_index(group, ind):
 
 
 class HDF5Reader(FileReader):
-    """Handles reading Signal data from HDF5 files."""
+    """Read Signals from TorchSig's legacy object-per-record HDF5 layout."""
 
     def __init__(self, root) -> None:
         """Initializes the HDF5Reader.
@@ -457,7 +472,7 @@ class HDF5Reader(FileReader):
         return self._len_cache
 
     def read(self, idx: int) -> Signal:
-        """Reads a single sample and its corresponding targets from the HDF5 file.
+        """Read one signal, including metadata and component signals.
 
         Args:
             idx (int): The index of the sample to read.
@@ -484,7 +499,7 @@ class HDF5Reader(FileReader):
 
 
 class HDF5FileHandler(BaseFileHandler):
-    """HDF5FileHandler creates a reader or writer for HDF5 files."""
+    """Create a legacy :class:`HDF5Reader` or :class:`HDF5Writer`."""
 
     reader_class: FileReader = HDF5Reader
     writer_class: FileWriter = HDF5Writer

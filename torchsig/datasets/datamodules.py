@@ -5,6 +5,7 @@ If dataset does exist, simply loaded it back in
 """
 from __future__ import annotations
 
+import inspect
 import random
 from collections.abc import Callable
 from pathlib import Path
@@ -27,6 +28,14 @@ from torchsig.transforms.metadata_transforms import YOLOLabel
 from torchsig.transforms.transforms import ComplexTo2D, Spectrogram
 from torchsig.utils.data_loading import WorkerSeedingDataLoader
 from torchsig.utils.file_handlers.hdf5 import HDF5Reader, HDF5Writer
+from torchsig.utils.file_handlers.packed_hdf5 import (
+    PackedHDF5Reader,
+    PackedHDF5Writer,
+)
+from torchsig.utils.file_handlers.homogeneous_hdf5 import (
+    HomogeneousHDF5Reader,
+    HomogeneousHDF5Writer,
+)
 from torchsig.utils.writer import DatasetCreator, identity_collate_fn
 from torchsig.utils.defaults import TorchSigDefaults
 from torchsig.utils.yaml import load_config_from_yaml
@@ -61,6 +70,46 @@ def set_global_seed(seed: int) -> None:
 # --------------------------------------------------------------
 #  DATA MODULE
 # --------------------------------------------------------------
+
+
+def _resolve_file_reader(file_writer, file_reader):
+    """Infer or validate known HDF5 writer/reader format pairs.
+
+    Homogeneous HDF5 is opt-in and requires fixed-shape, fixed-dtype top-level
+    samples. Component counts and component arrays may remain variable.
+    """
+    known_pairs = {
+        HDF5Writer: HDF5Reader,
+        PackedHDF5Writer: PackedHDF5Reader,
+        HomogeneousHDF5Writer: HomogeneousHDF5Reader,
+    }
+    expected_reader = known_pairs.get(file_writer)
+    if file_reader is None:
+        return expected_reader or HDF5Reader
+    if expected_reader is not None and file_reader is not expected_reader:
+        raise ValueError(
+            f"Incompatible file handler pair: {file_writer.__name__} requires "
+            f"{expected_reader.__name__}, got {file_reader.__name__}"
+        )
+    return file_reader
+
+
+def _validate_file_writer_kwargs(file_writer, options):
+    """Copy and validate keyword arguments accepted by a writer class."""
+    if options is None:
+        return {}
+    if not isinstance(options, dict):
+        raise TypeError("file_writer_kwargs must be a dictionary")
+    result = dict(options)
+    try:
+        inspect.signature(file_writer).bind_partial(root=Path("."), **result)
+    except ValueError:
+        return result
+    except TypeError as error:
+        raise TypeError(
+            f"Invalid options for {file_writer.__name__}: {error}"
+        ) from error
+    return result
 
 
 def _load_dataset_config(
@@ -192,7 +241,8 @@ class TorchSigDataModule(pl.LightningDataModule):
         create_batch_size: int = 8,
         create_num_workers: int = 4,
         file_writer: BaseFileHandler = HDF5Writer,
-        file_reader: BaseFileHandler = HDF5Reader,
+        file_reader: BaseFileHandler | None = None,
+        file_writer_kwargs: dict[str, Any] | None = None,
         overwrite: bool = False,
         # transforms
         impairment_level: int = 0,
@@ -214,6 +264,7 @@ class TorchSigDataModule(pl.LightningDataModule):
             create_num_workers: Workers used when creating the on-disk dataset. Defaults to 4.
             file_writer: FileWriter class for disk I/O.
             file_reader: FileReader class for disk I/O.
+            file_writer_kwargs: Options passed to the file writer constructor.
             overwrite: If True, existing data at `root` will be overwritten. Defaults to False.
             impairment_level: Level of synthetic impairment to apply. Defaults to 0 (no impairment).
             transforms: List of transforms applied to each sample's input. Defaults to [].
@@ -251,7 +302,10 @@ class TorchSigDataModule(pl.LightningDataModule):
         self.create_batch_size = create_batch_size
         self.create_num_workers = create_num_workers
         self.file_writer = file_writer
-        self.file_reader = file_reader
+        self.file_reader = _resolve_file_reader(file_writer, file_reader)
+        self.file_writer_kwargs = _validate_file_writer_kwargs(
+            file_writer, file_writer_kwargs
+        )
         self.overwrite = overwrite
 
         # ---- placeholders ------------------------------------------------
@@ -276,7 +330,8 @@ class TorchSigDataModule(pl.LightningDataModule):
         create_batch_size: int = 8,
         create_num_workers: int = 4,
         file_writer: type[BaseFileHandler] = HDF5Writer,
-        file_reader: type[BaseFileHandler] = HDF5Reader,
+        file_reader: type[BaseFileHandler] | None = None,
+        file_writer_kwargs: dict[str, Any] | None = None,
         overwrite: bool = False,
         shuffle: bool = True,
         collate_fn: Callable | None = None,
@@ -296,6 +351,7 @@ class TorchSigDataModule(pl.LightningDataModule):
             create_num_workers: Workers used when creating dataset (default: 4)
             file_writer: File writer class for disk I/O (default: HDF5Writer)
             file_reader: File reader class for disk I/O (default: HDF5Reader)
+            file_writer_kwargs: Options passed to the file writer constructor
             overwrite: Whether to overwrite existing data (default: False)
             shuffle: Whether to shuffle training data (default: True)
             collate_fn: Custom collate function for batching (default: None → identity function)
@@ -353,6 +409,7 @@ class TorchSigDataModule(pl.LightningDataModule):
             create_num_workers=create_num_workers,
             file_writer=file_writer,
             file_reader=file_reader,
+            file_writer_kwargs=file_writer_kwargs,
             overwrite=overwrite,
             shuffle=shuffle,
             collate_fn=collate_fn,
@@ -392,7 +449,9 @@ class TorchSigDataModule(pl.LightningDataModule):
             dataset_length=self.dataset_size,
             root=self.root,
             overwrite=self.overwrite,
-            file_writer=self.file_writer,
+            file_handler=self.file_writer,
+            file_reader=self.file_reader,
+            **self.file_writer_kwargs,
         )
         print(f"Full Dataset: Impairment Level {self.impairment_level}, "
               f"{self.dataset_size} samples")
@@ -528,7 +587,8 @@ class SplitTorchSigDataModule(pl.LightningDataModule):
         create_batch_size: int = 8,
         create_num_workers: int = 4,
         file_writer: type[BaseFileHandler] = HDF5Writer,
-        file_reader: type[BaseFileHandler] = HDF5Reader,
+        file_reader: type[BaseFileHandler] | None = None,
+        file_writer_kwargs: dict[str, Any] | None = None,
         overwrite: bool = False,
         shuffle: bool = True,
         collate_fn: Callable | None = None,
@@ -550,7 +610,10 @@ class SplitTorchSigDataModule(pl.LightningDataModule):
         self.create_num_workers = create_num_workers
 
         self.file_writer = file_writer
-        self.file_reader = file_reader
+        self.file_reader = _resolve_file_reader(file_writer, file_reader)
+        self.file_writer_kwargs = _validate_file_writer_kwargs(
+            file_writer, file_writer_kwargs
+        )
         self.overwrite = overwrite
 
         self.shuffle = shuffle
@@ -608,7 +671,9 @@ class SplitTorchSigDataModule(pl.LightningDataModule):
             dataset_length=int(cfg.dataset_length),
             root=split_root,
             overwrite=self.overwrite,
-            file_writer=self.file_writer,
+            file_handler=self.file_writer,
+            file_reader=self.file_reader,
+            **self.file_writer_kwargs,
         )
         creator.create()
 
