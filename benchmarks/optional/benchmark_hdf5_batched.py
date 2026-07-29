@@ -24,6 +24,8 @@ NUM_SAMPLES = 2_048
 BATCH_SIZE = 32
 READS_PER_ROUND = 64
 WRITE_BATCH_SIZES = (1, 8, 32, NUM_SIGNALS)
+VALIDATION_SIGNAL_COUNTS = (128, 1_024, 4_096)
+VALIDATION_NUM_SAMPLES = 16
 PACKED_WRITE_CONFIGS = {
     "uncompressed": {
         "compression": None,
@@ -58,15 +60,10 @@ READ_FORMATS: dict[str, tuple[Callable, Callable]] = {
 def signals() -> list[Signal]:
     """Create representative top-level and component signals."""
     rng = np.random.default_rng(0)
-    parent = HierarchicalMetadataObject(
-        metadata={"sample_rate": 1_000_000.0, "dataset_name": "packed-benchmark"}
-    )
+    parent = HierarchicalMetadataObject(metadata={"sample_rate": 1_000_000.0, "dataset_name": "packed-benchmark"})
     result = []
     for idx in range(NUM_SIGNALS):
-        data = (
-            rng.standard_normal(NUM_SAMPLES)
-            + 1j * rng.standard_normal(NUM_SAMPLES)
-        ).astype(np.complex64)
+        data = (rng.standard_normal(NUM_SAMPLES) + 1j * rng.standard_normal(NUM_SAMPLES)).astype(np.complex64)
         component = Signal(
             data=data[:256],
             class_name="component",
@@ -112,6 +109,30 @@ def _read(reader, indices: tuple[int, ...]) -> float:
     return sum(float(reader.read(idx).data[0].real) for idx in indices)
 
 
+def _open_and_validate(root: Path) -> int:
+    """Open a packed reader, trigger validation, and close it."""
+    reader = BatchedHDF5Reader(root)
+    try:
+        return len(reader)
+    finally:
+        reader.teardown()
+
+
+def _open_and_read_first(root: Path) -> tuple[int, ...]:
+    """Open and validate a packed reader, read one signal, and close it."""
+    reader = BatchedHDF5Reader(root)
+    try:
+        return reader.read(0).data.shape
+    finally:
+        reader.teardown()
+
+
+def _validation_signals(signal_count: int) -> list[Signal]:
+    """Create small signals which isolate validation cost from IQ reads."""
+    data = np.arange(VALIDATION_NUM_SAMPLES, dtype=np.complex64)
+    return [Signal(data=data, class_name="validation", sample_index=idx) for idx in range(signal_count)]
+
+
 @pytest.mark.benchmark
 @pytest.mark.parametrize(
     ("format_name", "writer_class"),
@@ -130,11 +151,7 @@ def test_benchmark_hdf5_format_write(
     root = tmp_path / "dataset"
     file_size = benchmark(_write, writer_class, root, signals)
     benchmark.extra_info["file_size_mib"] = file_size / (1024**2)
-    reader_class = (
-        BatchedHDF5Reader
-        if writer_class is BatchedHDF5Writer
-        else HDF5Reader
-    )
+    reader_class = BatchedHDF5Reader if writer_class is BatchedHDF5Writer else HDF5Reader
     reader = reader_class(root)
     try:
         assert len(reader) == NUM_SIGNALS
@@ -222,12 +239,7 @@ def test_benchmark_hdf5_format_warm_random_read(
     """Measure repeated random access after warming the selected records."""
     root = tmp_path_factory.mktemp(f"packed-reader-{format_name}")
     _write(writer_class, root, signals)
-    indices = tuple(
-        int(idx)
-        for idx in np.random.default_rng(1).integers(
-            0, NUM_SIGNALS, size=READS_PER_ROUND
-        )
-    )
+    indices = tuple(int(idx) for idx in np.random.default_rng(1).integers(0, NUM_SIGNALS, size=READS_PER_ROUND))
     reader = reader_class(root)
     try:
         assert np.isfinite(_read(reader, indices))
@@ -235,3 +247,55 @@ def test_benchmark_hdf5_format_warm_random_read(
         assert np.isfinite(result)
     finally:
         reader.teardown()
+
+
+@pytest.mark.benchmark
+@pytest.mark.parametrize("signal_count", VALIDATION_SIGNAL_COUNTS)
+def test_benchmark_packed_hdf5_cold_open_validation_scaling(
+    benchmark,
+    tmp_path,
+    signal_count: int,
+) -> None:
+    """Measure reader creation, full integrity validation, and close."""
+    root = tmp_path / "dataset"
+    signals = _validation_signals(signal_count)
+    file_size = _write(
+        BatchedHDF5Writer,
+        root,
+        signals,
+        batch_size=min(BATCH_SIZE, signal_count),
+        compression=None,
+    )
+
+    actual_count = benchmark(_open_and_validate, root)
+
+    assert actual_count == signal_count
+    benchmark.extra_info["signals"] = signal_count
+    benchmark.extra_info["records"] = signal_count
+    benchmark.extra_info["file_size_mib"] = file_size / (1024**2)
+
+
+@pytest.mark.benchmark
+@pytest.mark.parametrize("signal_count", VALIDATION_SIGNAL_COUNTS)
+def test_benchmark_packed_hdf5_cold_first_read_scaling(
+    benchmark,
+    tmp_path,
+    signal_count: int,
+) -> None:
+    """Measure cold open, full validation, first signal read, and close."""
+    root = tmp_path / "dataset"
+    signals = _validation_signals(signal_count)
+    file_size = _write(
+        BatchedHDF5Writer,
+        root,
+        signals,
+        batch_size=min(BATCH_SIZE, signal_count),
+        compression=None,
+    )
+
+    shape = benchmark(_open_and_read_first, root)
+
+    assert shape == (VALIDATION_NUM_SAMPLES,)
+    benchmark.extra_info["signals"] = signal_count
+    benchmark.extra_info["records"] = signal_count
+    benchmark.extra_info["file_size_mib"] = file_size / (1024**2)
