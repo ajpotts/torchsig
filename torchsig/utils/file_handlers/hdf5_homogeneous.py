@@ -41,6 +41,8 @@ _COMPONENT_DTYPE = np.dtype(
 def _append(dataset: h5py.Dataset, values: Any) -> int:
     """Append values to a one-dimensional extensible dataset."""
     start = len(dataset)
+    if len(values) == 0:
+        return start
     dataset.resize(start + len(values), axis=0)
     dataset[start:] = values
     return start
@@ -195,6 +197,56 @@ class HomogeneousHDF5Writer(FileWriter):
             )
             return dtype_id
 
+    def _append_components(self, signals: list[Signal]) -> None:
+        component_total = len(self._components)
+        shape_offset = len(self._component_shapes)
+        data_offsets: dict[int, int] = {}
+        data_by_dtype: dict[int, list[np.ndarray]] = {}
+        records = []
+        metadata = []
+        shapes = []
+        signal_offsets = []
+
+        for signal in signals:
+            for component in signal.component_signals:
+                array = np.asarray(component.data)
+                dtype_id = self._component_dtype_id(array.dtype)
+                if dtype_id not in data_offsets:
+                    data_offsets[dtype_id] = len(self._component_data[dtype_id])
+                    data_by_dtype[dtype_id] = []
+                records.append(
+                    (
+                        data_offsets[dtype_id],
+                        array.size,
+                        dtype_id,
+                        shape_offset,
+                        array.ndim,
+                    )
+                )
+                metadata.append(_encode_metadata(component))
+                shapes.extend(array.shape)
+                data_by_dtype[dtype_id].append(array.reshape(-1))
+                data_offsets[dtype_id] += array.size
+                shape_offset += array.ndim
+                component_total += 1
+            signal_offsets.append(component_total)
+
+        for dtype_id, arrays in data_by_dtype.items():
+            _append(self._component_data[dtype_id], np.concatenate(arrays))
+        _append(
+            self._component_shapes,
+            np.asarray(shapes, dtype=np.uint64),
+        )
+        _append(
+            self._components,
+            np.asarray(records, dtype=_COMPONENT_DTYPE),
+        )
+        _append(self._component_metadata, metadata)
+        _append(
+            self._component_offsets,
+            np.asarray(signal_offsets, dtype=np.uint64),
+        )
+
     def write(self, batch_idx: int, data: list[Signal]) -> None:
         """Append one sequentially indexed batch."""
         if self._file is None:
@@ -214,43 +266,7 @@ class HomogeneousHDF5Writer(FileWriter):
                 self._data.resize(start + len(arrays), axis=0)
                 self._data[start:] = np.stack(arrays)
             _append(self._metadata, [_encode_metadata(signal) for signal in data])
-
-            component_total = len(self._components)
-            new_offsets = []
-            for signal in data:
-                for component in signal.component_signals:
-                    array = np.asarray(component.data)
-                    dtype_id = self._component_dtype_id(array.dtype)
-                    data_offset = _append(
-                        self._component_data[dtype_id],
-                        array.reshape(-1),
-                    )
-                    shape_offset = _append(
-                        self._component_shapes,
-                        np.asarray(array.shape, dtype=np.uint64),
-                    )
-                    _append(
-                        self._components,
-                        np.array(
-                            [
-                                (
-                                    data_offset,
-                                    array.size,
-                                    dtype_id,
-                                    shape_offset,
-                                    array.ndim,
-                                )
-                            ],
-                            dtype=_COMPONENT_DTYPE,
-                        ),
-                    )
-                    _append(self._component_metadata, [_encode_metadata(component)])
-                    component_total += 1
-                new_offsets.append(component_total)
-            _append(
-                self._component_offsets,
-                np.asarray(new_offsets, dtype=np.uint64),
-            )
+            self._append_components(data)
             self._next_batch_idx += 1
         except Exception:
             self._failed = True

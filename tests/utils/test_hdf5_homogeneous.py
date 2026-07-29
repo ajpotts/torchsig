@@ -16,7 +16,10 @@ def _signals() -> list[Signal]:
     for idx, component_count in enumerate((0, 1, 3)):
         components = [
             Signal(
-                data=np.arange(2 + component_idx, dtype=np.float32),
+                data=np.arange(
+                    2 + component_idx,
+                    dtype=np.float32 if component_idx % 2 == 0 else np.int16,
+                ),
                 component_index=component_idx,
             )
             for component_idx in range(component_count)
