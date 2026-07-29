@@ -1,5 +1,7 @@
 """Integration tests for DatasetCreator with packed HDF5 storage."""
 
+from typing import ClassVar
+
 import h5py
 import numpy as np
 import pytest
@@ -12,6 +14,7 @@ from torchsig.transforms.transforms import Spectrogram
 from torchsig.utils.file_handlers import (
     BatchedHDF5Reader,
     BatchedHDF5Writer,
+    FileWriter,
 )
 from torchsig.utils.writer import DatasetCreator
 
@@ -41,6 +44,19 @@ class _FailingSignalDataset(_SignalDataset):
         if idx == 2:
             raise RuntimeError("injected generation failure")
         return super().__getitem__(idx)
+
+
+class _OptionRecordingWriter(FileWriter):
+    """Minimal writer recording options received by each construction."""
+
+    observed_options: ClassVar[list[object]] = []
+
+    def __init__(self, root, *, required_option: object) -> None:
+        super().__init__(root)
+        self.observed_options.append(required_option)
+
+    def write(self, batch_idx, data) -> None:
+        del batch_idx, data
 
 
 @pytest.mark.parametrize("multithreading", [False, True])
@@ -93,3 +109,74 @@ def test_dataset_creator_failure_leaves_packed_file_incomplete(tmp_path, multith
         BatchedHDF5Reader(tmp_path).read(0)
     writer_info = yaml.safe_load((tmp_path / "writer_info.yaml").read_text())
     assert writer_info["complete"] is False
+
+
+def test_dataset_creator_forwards_and_records_packed_writer_options(
+    tmp_path,
+) -> None:
+    options = {
+        "compression": None,
+        "shuffle": False,
+        "fletcher32": False,
+        "max_batches_in_memory": 1,
+    }
+    DatasetCreator(
+        dataloader=DataLoader(_SignalDataset(), batch_size=3),
+        root=tmp_path,
+        file_handler=BatchedHDF5Writer,
+        multithreading=False,
+        **options,
+    ).create()
+
+    with h5py.File(tmp_path / "data.h5", "r") as handle:
+        assert handle.attrs["compression"] == "none"
+        assert handle["data/0"].compression is None
+        assert not handle["data/0"].shuffle
+        assert not handle["data/0"].fletcher32
+    writer_info = yaml.safe_load((tmp_path / "writer_info.yaml").read_text())
+    assert writer_info["file_handler_kwargs"] == options
+
+
+def test_dataset_creator_forwards_options_to_every_writer_construction(
+    tmp_path,
+) -> None:
+    _OptionRecordingWriter.observed_options.clear()
+    DatasetCreator(
+        dataloader=DataLoader(_SignalDataset(), batch_size=3),
+        root=tmp_path,
+        file_handler=_OptionRecordingWriter,
+        multithreading=False,
+        required_option="forwarded",
+    ).create()
+
+    assert _OptionRecordingWriter.observed_options == [
+        "forwarded",
+        "forwarded",
+    ]
+    writer_info = yaml.safe_load((tmp_path / "writer_info.yaml").read_text())
+    assert writer_info["file_handler_kwargs"] == {"required_option": "forwarded"}
+
+
+def test_dataset_creator_normalizes_legacy_writer_alias_and_class_option(
+    tmp_path,
+) -> None:
+    _OptionRecordingWriter.observed_options.clear()
+    DatasetCreator(
+        dataloader=DataLoader(_SignalDataset(), batch_size=3),
+        root=tmp_path,
+        file_writer=_OptionRecordingWriter,
+        multithreading=False,
+        required_option=BatchedHDF5Writer,
+    ).create()
+
+    assert _OptionRecordingWriter.observed_options == [
+        BatchedHDF5Writer,
+        BatchedHDF5Writer,
+    ]
+    writer_info = yaml.safe_load((tmp_path / "writer_info.yaml").read_text())
+    assert writer_info["file_handler"] == "_OptionRecordingWriter"
+    assert writer_info["file_handler_kwargs"] == {
+        "required_option": (
+            "torchsig.utils.file_handlers.hdf5_batched.BatchedHDF5Writer"
+        )
+    }

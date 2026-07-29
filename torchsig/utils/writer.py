@@ -24,6 +24,31 @@ if TYPE_CHECKING:
 
 __all__ = ["default_collate_fn", "identity_collate_fn", "DatasetCreator"]
 
+_MISSING = object()
+
+
+def _yaml_safe_value(value: Any) -> Any:
+    """Return a stable YAML-safe representation of a runtime option."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, type):
+        return f"{value.__module__}.{value.__qualname__}"
+    if isinstance(value, dict):
+        return {
+            str(key): _yaml_safe_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_yaml_safe_value(item) for item in value]
+    try:
+        yaml.safe_dump(value)
+    except yaml.YAMLError:
+        return repr(value)
+    return value
+
+
 def default_collate_fn(batch):
     """Collates a batch by zipping its elements together. Note: not pickle-safe for complex
     nested structures, but works for typical (data, label) batches.
@@ -129,8 +154,17 @@ class DatasetCreator:
         self.root = Path(root)
         self.dataset_info_filepath = self.root.joinpath("dataset_info.yaml")
         self.writer_info_filepath = self.root.joinpath("writer_info.yaml")
+        legacy_file_writer = kwargs.pop("file_writer", _MISSING)
+        if legacy_file_writer is not _MISSING:
+            if file_handler is not HDF5Writer and file_handler is not legacy_file_writer:
+                raise TypeError(
+                    "DatasetCreator received conflicting file_handler and "
+                    "file_writer arguments"
+                )
+            file_handler = legacy_file_writer
         self.file_handler = file_handler
         self.kwargs = dict(kwargs)
+        self.writer_info_kwargs = _yaml_safe_value(self.kwargs)
 
         self.overwrite = bool(overwrite)
         self.multithreading = bool(multithreading)
@@ -179,7 +213,7 @@ class DatasetCreator:
         """Instantiate writer without entering context to not enter setup, resetting folder."""
         maybe_data_file = None
         try:
-            writer = self.file_handler(root=self.root)
+            writer = self.file_handler(root=self.root, **self.kwargs)
             maybe_data_file = getattr(writer, "datapath", None)
             if isinstance(maybe_data_file, (str, Path)):
                 maybe_data_file = Path(maybe_data_file)
@@ -228,6 +262,7 @@ class DatasetCreator:
             "batch_size": None if self.batch_size is None else int(self.batch_size),
             "num_workers": None if self.num_workers is None else int(self.num_workers),
             "file_handler": getattr(self.file_handler, "__name__", str(self.file_handler)),
+            "file_handler_kwargs": self.writer_info_kwargs,
             "multithreading": bool(self.multithreading),
             "dataset_length_requested": int(self.dataset_length_requested),
             "items_written": int(self.items_written),
@@ -329,7 +364,7 @@ class DatasetCreator:
             self.items_written = 0
             self._msg_timer = time()
 
-            with self.file_handler(root=self.root) as writer:
+            with self.file_handler(root=self.root, **self.kwargs) as writer:
                 # Write initial YAMLs
                 write_dict_to_yaml(self.dataset_info_filepath, self.get_dataset_info_dict(
                     dataset_length=0, original_target_labels=orig_target_labels,
