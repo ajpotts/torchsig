@@ -64,7 +64,19 @@ def _pack_value(value: Any) -> Any:  # noqa: PLR0911
     if isinstance(value, list):
         return [_pack_value(item) for item in value]
     if isinstance(value, dict):
-        return {str(key): _pack_value(item) for key, item in value.items()}
+        non_string_keys = [key for key in value if not isinstance(key, str)]
+        if non_string_keys:
+            raise TypeError(
+                "Packed HDF5 metadata dictionary keys must be strings; "
+                f"got {type(non_string_keys[0]).__name__}"
+            )
+        return {
+            "__torchsig_type__": "dict",
+            "items": {
+                key: _pack_value(item)
+                for key, item in value.items()
+            },
+        }
     if isinstance(value, bytes):
         return {
             "__torchsig_type__": "bytes",
@@ -98,13 +110,23 @@ def _unpack_value(value: Any) -> Any:  # noqa: PLR0911
         return base64.b64decode(value["data"])
     if value_type == "complex":
         return complex(value["real"], value["imag"])
+    if value_type == "dict":
+        return {
+            key: _unpack_value(item)
+            for key, item in value["items"].items()
+        }
     return {key: _unpack_value(item) for key, item in value.items()}
 
 
 def _encode_metadata(obj: HierarchicalMetadataObject) -> str:
     # HierarchicalMetadataObject is not iterable; its keys() API is required.
-    metadata = {key: _pack_value(obj[key]) for key in obj.keys()}  # noqa: SIM118
-    return json.dumps(metadata, separators=(",", ":"), allow_nan=True)
+    metadata = {key: obj[key] for key in obj.keys()}  # noqa: SIM118
+    return json.dumps(
+        _pack_value(metadata),
+        separators=(",", ":"),
+        sort_keys=True,
+        allow_nan=True,
+    )
 
 
 def _decode_metadata(value: str | bytes) -> dict[str, Any]:

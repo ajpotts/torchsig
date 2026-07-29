@@ -135,6 +135,73 @@ def test_batched_hdf5_rejects_invalid_batch_index(tmp_path, batch_idx) -> None:
         writer.write(batch_idx, [])
 
 
+def test_batched_hdf5_preserves_reserved_metadata_tags(tmp_path) -> None:
+    metadata = {
+        "__torchsig_type__": "complex",
+        "nested": {
+            "__torchsig_type__": "ndarray",
+            "data": "ordinary user metadata",
+        },
+    }
+    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+        writer.write(
+            0,
+            [Signal(data=np.ones(4, dtype=np.complex64), payload=metadata)],
+        )
+
+    reader = BatchedHDF5Reader(tmp_path)
+    try:
+        assert reader.read(0)["payload"] == metadata
+    finally:
+        reader.teardown()
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        b"\x00\xff",
+        1 + 2j,
+        (1, "two"),
+        np.int16(3),
+        np.array([[1, 2], [3, 4]], dtype=np.int32),
+    ],
+    ids=["bytes", "complex", "tuple", "numpy-scalar", "numpy-array"],
+)
+def test_batched_hdf5_round_trips_encoded_metadata_types(
+    tmp_path, value
+) -> None:
+    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+        writer.write(
+            0,
+            [Signal(data=np.ones(4, dtype=np.complex64), value=value)],
+        )
+
+    reader = BatchedHDF5Reader(tmp_path)
+    try:
+        actual = reader.read(0)["value"]
+        if isinstance(value, np.ndarray):
+            np.testing.assert_array_equal(actual, value)
+        else:
+            assert actual == value
+            assert type(actual) is type(value)
+    finally:
+        reader.teardown()
+
+
+def test_batched_hdf5_rejects_non_string_metadata_dictionary_key(
+    tmp_path,
+) -> None:
+    signal = Signal(
+        data=np.ones(4, dtype=np.complex64),
+        payload={1: "not allowed"},
+    )
+    writer = BatchedHDF5Writer(tmp_path, max_batches_in_memory=1)
+    writer.setup()
+    with pytest.raises(TypeError, match="keys must be strings"):
+        writer.write(0, [signal])
+    writer.teardown()
+
+
 @pytest.mark.parametrize(
     "transform",
     [ComplexTo2D(), Spectrogram(fft_size=8)],
