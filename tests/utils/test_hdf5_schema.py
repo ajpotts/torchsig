@@ -72,3 +72,25 @@ def test_batched_reader_rejects_missing_declared_path(tmp_path) -> None:
     reader = BatchedHDF5Reader(tmp_path)
     with pytest.raises(ValueError, match="missing declared paths"):
         reader.read(0)
+
+
+def test_batched_reader_rejects_incomplete_file(tmp_path) -> None:
+    _write_file(tmp_path)
+    with h5py.File(tmp_path / "data.h5", "r+") as handle:
+        handle.attrs["complete"] = False
+
+    reader = BatchedHDF5Reader(tmp_path)
+    with pytest.raises(ValueError, match="file is incomplete"):
+        reader.read(0)
+    assert reader._file is None  # noqa: SLF001
+
+
+def test_batched_reader_rejects_missing_completeness_marker(tmp_path) -> None:
+    _write_file(tmp_path)
+    with h5py.File(tmp_path / "data.h5", "r+") as handle:
+        del handle.attrs["complete"]
+
+    reader = BatchedHDF5Reader(tmp_path)
+    with pytest.raises(ValueError, match="missing completeness marker"):
+        reader.read(0)
+    assert reader._file is None  # noqa: SLF001

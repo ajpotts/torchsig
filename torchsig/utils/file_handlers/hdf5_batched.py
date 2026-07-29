@@ -162,6 +162,16 @@ def _validate_declared_datasets(
         )
 
 
+def _validate_complete_file(file: h5py.File) -> None:
+    """Reject files which were not finalized by a successful writer."""
+    if "complete" not in file.attrs:
+        raise ValueError(
+            "Invalid packed HDF5 file: missing completeness marker"
+        )
+    if not bool(file.attrs["complete"]):
+        raise ValueError("Packed HDF5 file is incomplete")
+
+
 class BatchedHDF5Writer(FileWriter):
     """Write signals into a small set of appendable HDF5 datasets."""
 
@@ -190,6 +200,7 @@ class BatchedHDF5Writer(FileWriter):
         self._next_batch_idx = 0
         self._parent_ids: dict[tuple[str, int], int] = {}
         self._lock = threading.Lock()
+        self._write_failed = False
         self.schema = default_packed_schema()
 
     def _setup(self) -> None:
@@ -203,6 +214,7 @@ class BatchedHDF5Writer(FileWriter):
         self._file.attrs["torchsig_version"] = torchsig_cache_version()
         self._file.attrs["format"] = self.schema.format
         self._file.attrs["compression"] = self.compression or "none"
+        self._file.attrs["complete"] = False
         write_schema(self._file, self.schema)
         string_dtype = h5py.string_dtype(encoding="utf-8")
         spec = self.schema.datasets
@@ -268,6 +280,7 @@ class BatchedHDF5Writer(FileWriter):
         self._data.clear()
         self._batch_buffer.clear()
         self._next_batch_idx = 0
+        self._write_failed = False
 
     def _data_kwargs(self) -> dict[str, Any]:
         kwargs: dict[str, Any] = {"chunks": True}
@@ -411,7 +424,11 @@ class BatchedHDF5Writer(FileWriter):
             self._batch_buffer[batch_idx] = data
             should_flush = len(self._batch_buffer) >= self.max_batches_in_memory
         if should_flush:
-            self._flush_buffer()
+            try:
+                self._flush_buffer()
+            except Exception:
+                self._write_failed = True
+                raise
 
     def __len__(self) -> int:
         """Return the number of indexed top-level signals."""
@@ -423,10 +440,28 @@ class BatchedHDF5Writer(FileWriter):
             return
         try:
             self._flush_buffer(final=True)
+            if not self._write_failed:
+                self._file.attrs["complete"] = True
+                self._file.flush()
+        except Exception:
+            self._write_failed = True
+            raise
         finally:
             self._file.close()
             self._file = None
             self._data.clear()
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        """Close the file while preserving an incomplete marker on failure."""
+        if exc_type is not None:
+            self._write_failed = True
+            if self._file is not None:
+                self._file.close()
+                self._file = None
+                self._data.clear()
+            return False
+        self.teardown()
+        return False
 
 
 class BatchedHDF5Reader(FileReader):
@@ -447,6 +482,7 @@ class BatchedHDF5Reader(FileReader):
             self._file = h5py.File(self.datapath, "r", locking=self._locking)
             try:
                 self.schema = read_schema(self._file)
+                _validate_complete_file(self._file)
                 spec = self.schema.datasets
                 _validate_declared_datasets(self._file, self.schema)
                 self._records = self._file[spec["records"].path]

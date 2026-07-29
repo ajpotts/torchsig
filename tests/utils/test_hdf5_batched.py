@@ -1,5 +1,6 @@
 """Tests for the experimental packed HDF5 format."""
 
+import h5py
 import numpy as np
 import pytest
 
@@ -124,6 +125,8 @@ def test_batched_hdf5_rejects_missing_batch_at_teardown(tmp_path) -> None:
     with pytest.raises(ValueError, match="missing batch index 0"):
         writer.teardown()
     assert writer._file is None  # noqa: SLF001
+    with h5py.File(tmp_path / "data.h5", "r") as handle:
+        assert not bool(handle.attrs["complete"])
 
 
 @pytest.mark.parametrize("batch_idx", [-1, 1.5, True])
@@ -200,6 +203,31 @@ def test_batched_hdf5_rejects_non_string_metadata_dictionary_key(
     with pytest.raises(TypeError, match="keys must be strings"):
         writer.write(0, [signal])
     writer.teardown()
+
+
+def test_batched_hdf5_marks_successful_file_complete(tmp_path) -> None:
+    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+        writer.write(0, [Signal(data=np.ones(4, dtype=np.complex64))])
+
+    with h5py.File(tmp_path / "data.h5", "r") as handle:
+        assert bool(handle.attrs["complete"])
+
+
+def test_batched_hdf5_context_exception_leaves_file_incomplete(tmp_path) -> None:
+    def fail_during_generation() -> None:
+        with BatchedHDF5Writer(
+            tmp_path, max_batches_in_memory=1
+        ) as writer:
+            writer.write(
+                1, [Signal(data=np.ones(4, dtype=np.complex64))]
+            )
+            raise RuntimeError("generation failed")
+
+    with pytest.raises(RuntimeError, match="generation failed"):
+        fail_during_generation()
+
+    with h5py.File(tmp_path / "data.h5", "r") as handle:
+        assert not bool(handle.attrs["complete"])
 
 
 @pytest.mark.parametrize(
