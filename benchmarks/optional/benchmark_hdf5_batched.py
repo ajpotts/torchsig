@@ -23,6 +23,24 @@ NUM_SIGNALS = 256
 NUM_SAMPLES = 2_048
 BATCH_SIZE = 32
 READS_PER_ROUND = 64
+WRITE_BATCH_SIZES = (1, 8, 32, NUM_SIGNALS)
+PACKED_WRITE_CONFIGS = {
+    "uncompressed": {
+        "compression": None,
+        "shuffle": False,
+        "fletcher32": False,
+    },
+    "lzf": {
+        "compression": "lzf",
+        "shuffle": False,
+        "fletcher32": False,
+    },
+    "lzf-shuffle-checksum": {
+        "compression": "lzf",
+        "shuffle": True,
+        "fletcher32": True,
+    },
+}
 
 WRITERS: dict[str, Callable] = {
     "current": HDF5Writer,
@@ -66,17 +84,25 @@ def signals() -> list[Signal]:
     return result
 
 
-def _write(writer_class: Callable, root: Path, signals: list[Signal]) -> int:
-    writer = writer_class(
-        root,
-        shuffle=False,
-        fletcher32=False,
-        max_batches_in_memory=4,
-    )
+def _write(
+    writer_class: Callable,
+    root: Path,
+    signals: list[Signal],
+    *,
+    batch_size: int = BATCH_SIZE,
+    **writer_kwargs,
+) -> int:
+    options = {
+        "shuffle": False,
+        "fletcher32": False,
+        "max_batches_in_memory": 4,
+    }
+    options.update(writer_kwargs)
+    writer = writer_class(root, **options)
     writer.setup()
     try:
-        for batch_idx, start in enumerate(range(0, len(signals), BATCH_SIZE)):
-            writer.write(batch_idx, signals[start : start + BATCH_SIZE])
+        for batch_idx, start in enumerate(range(0, len(signals), batch_size)):
+            writer.write(batch_idx, signals[start : start + batch_size])
     finally:
         writer.teardown()
     return (root / "data.h5").stat().st_size
@@ -113,6 +139,68 @@ def test_benchmark_hdf5_format_write(
     try:
         assert len(reader) == NUM_SIGNALS
         assert reader.read(NUM_SIGNALS - 1).data.shape == (NUM_SAMPLES,)
+    finally:
+        reader.teardown()
+
+
+@pytest.mark.benchmark
+@pytest.mark.parametrize("batch_size", WRITE_BATCH_SIZES)
+def test_benchmark_packed_hdf5_write_batch_size(
+    benchmark,
+    tmp_path,
+    signals: list[Signal],
+    batch_size: int,
+) -> None:
+    """Measure packed write performance as the generated batch size changes."""
+    root = tmp_path / "dataset"
+    file_size = benchmark(
+        _write,
+        BatchedHDF5Writer,
+        root,
+        signals,
+        batch_size=batch_size,
+        compression=None,
+    )
+    benchmark.extra_info["batch_size"] = batch_size
+    benchmark.extra_info["signals"] = len(signals)
+    benchmark.extra_info["file_size_mib"] = file_size / (1024**2)
+
+    reader = BatchedHDF5Reader(root)
+    try:
+        assert len(reader) == len(signals)
+    finally:
+        reader.teardown()
+
+
+@pytest.mark.benchmark
+@pytest.mark.parametrize(
+    ("configuration", "writer_kwargs"),
+    PACKED_WRITE_CONFIGS.items(),
+    ids=PACKED_WRITE_CONFIGS,
+)
+def test_benchmark_packed_hdf5_write_filters(
+    benchmark,
+    tmp_path,
+    signals: list[Signal],
+    configuration: str,
+    writer_kwargs: dict,
+) -> None:
+    """Measure packed write time and file size for common HDF5 filters."""
+    root = tmp_path / "dataset"
+    file_size = benchmark(
+        _write,
+        BatchedHDF5Writer,
+        root,
+        signals,
+        **writer_kwargs,
+    )
+    benchmark.extra_info["configuration"] = configuration
+    benchmark.extra_info["signals"] = len(signals)
+    benchmark.extra_info["file_size_mib"] = file_size / (1024**2)
+
+    reader = BatchedHDF5Reader(root)
+    try:
+        assert len(reader) == len(signals)
     finally:
         reader.teardown()
 
