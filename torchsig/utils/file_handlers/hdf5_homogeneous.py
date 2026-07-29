@@ -12,6 +12,7 @@ is intended for layout and performance evaluation.
 
 from __future__ import annotations
 
+from math import prod
 from typing import Any
 
 import h5py
@@ -27,6 +28,7 @@ from torchsig.utils.file_handlers.hdf5_batched import (
 __all__ = ["HomogeneousHDF5Reader", "HomogeneousHDF5Writer"]
 
 _FORMAT = "torchsig-homogeneous-prototype"
+_SCHEMA_VERSION = 1
 _TARGET_CHUNK_BYTES = 1024**2
 _LARGE_COMPRESSED_SAMPLE_BYTES = 64 * 1024
 _COMPONENT_DTYPE = np.dtype(
@@ -103,6 +105,7 @@ class HomogeneousHDF5Writer(FileWriter):
     def _setup(self) -> None:
         self._file = h5py.File(self.datapath, "w", libver="latest")
         self._file.attrs["format"] = _FORMAT
+        self._file.attrs["schema_version"] = _SCHEMA_VERSION
         self._file.attrs["complete"] = False
         self._file.attrs["compression"] = self.compression or "none"
         string_dtype = h5py.string_dtype(encoding="utf-8")
@@ -342,8 +345,102 @@ class HomogeneousHDF5Reader(FileReader):
     def _validate_file(self) -> None:
         if self._file.attrs.get("format") != _FORMAT:
             raise ValueError("Not a homogeneous HDF5 prototype file")
+        if self._file.attrs.get("schema_version") != _SCHEMA_VERSION:
+            raise ValueError(f"Unsupported homogeneous HDF5 schema version: {self._file.attrs.get('schema_version')!r}")
         if not bool(self._file.attrs.get("complete", False)):
             raise ValueError("Homogeneous HDF5 prototype file is incomplete")
+        self._validate_structure()
+        self._validate_integrity()
+
+    def _dataset(self, name: str, ndim: int | None = 1) -> h5py.Dataset:
+        if name not in self._file or not isinstance(
+            self._file[name],
+            h5py.Dataset,
+        ):
+            raise ValueError(f"Homogeneous HDF5 file is missing required dataset: {name}")
+        dataset = self._file[name]
+        if ndim is not None and dataset.ndim != ndim:
+            raise ValueError(f"Homogeneous HDF5 dataset {name!r} must have rank {ndim}")
+        return dataset
+
+    def _validate_structure(self) -> None:
+        data = self._dataset("data", ndim=None)
+        if data.ndim < 1:
+            raise ValueError("Homogeneous HDF5 dataset 'data' must have rank at least 1")
+        metadata = self._dataset("metadata")
+        component_offsets = self._dataset("component_offsets")
+        components = self._dataset("components")
+        component_metadata = self._dataset("component_metadata")
+        component_shapes = self._dataset("component_shapes")
+        component_dtypes = self._dataset("component_dtypes")
+        if "component_data" not in self._file:
+            raise ValueError("Homogeneous HDF5 file is missing required group: component_data")
+        if not isinstance(self._file["component_data"], h5py.Group):
+            raise TypeError("Homogeneous HDF5 object 'component_data' must be a group")
+        if h5py.check_string_dtype(metadata.dtype) is None:
+            raise ValueError("Homogeneous HDF5 dataset 'metadata' must contain strings")
+        if h5py.check_string_dtype(component_metadata.dtype) is None:
+            raise ValueError("Homogeneous HDF5 dataset 'component_metadata' must contain strings")
+        if h5py.check_string_dtype(component_dtypes.dtype) is None:
+            raise ValueError("Homogeneous HDF5 dataset 'component_dtypes' must contain strings")
+        if component_offsets.dtype != np.dtype(np.uint64):
+            raise ValueError("Homogeneous HDF5 dataset 'component_offsets' must use uint64")
+        if component_shapes.dtype != np.dtype(np.uint64):
+            raise ValueError("Homogeneous HDF5 dataset 'component_shapes' must use uint64")
+        if components.dtype != _COMPONENT_DTYPE:
+            raise ValueError("Homogeneous HDF5 dataset 'components' has an invalid dtype")
+
+    def _component_streams(self) -> dict[int, h5py.Dataset]:
+        dtype_values = self._file["component_dtypes"][:]
+        group = self._file["component_data"]
+        streams = {}
+        for dtype_id, encoded_dtype in enumerate(dtype_values):
+            name = str(dtype_id)
+            if name not in group or not isinstance(group[name], h5py.Dataset):
+                raise ValueError(f"Homogeneous HDF5 component data stream is missing for dtype ID {dtype_id}")
+            try:
+                dtype = np.dtype(encoded_dtype.decode() if isinstance(encoded_dtype, bytes) else encoded_dtype)
+            except (TypeError, ValueError) as error:
+                raise ValueError(f"Homogeneous HDF5 component dtype ID {dtype_id} is invalid") from error
+            stream = group[name]
+            if stream.ndim != 1 or stream.dtype != dtype:
+                raise ValueError(f"Homogeneous HDF5 component data stream does not match dtype ID {dtype_id}")
+            streams[dtype_id] = stream
+        return streams
+
+    def _validate_integrity(self) -> None:
+        data = self._file["data"]
+        metadata = self._file["metadata"]
+        offsets = self._file["component_offsets"][:]
+        components = self._file["components"][:]
+        component_metadata = self._file["component_metadata"]
+        shapes = self._file["component_shapes"][:]
+        if len(data) != len(metadata):
+            raise ValueError("Homogeneous HDF5 top-level data and metadata lengths differ")
+        if len(offsets) != len(data) + 1:
+            raise ValueError("Homogeneous HDF5 component offset count does not match signal count")
+        if len(offsets) == 0 or int(offsets[0]) != 0 or np.any(offsets[1:] < offsets[:-1]) or int(offsets[-1]) != len(components):
+            raise ValueError("Homogeneous HDF5 component offsets are invalid")
+        if len(component_metadata) != len(components):
+            raise ValueError("Homogeneous HDF5 component metadata length does not match records")
+
+        streams = self._component_streams()
+        for record in components:
+            dtype_id = int(record["dtype_id"])
+            if dtype_id not in streams:
+                raise ValueError(f"Homogeneous HDF5 component references invalid dtype ID {dtype_id}")
+            data_offset = int(record["data_offset"])
+            data_length = int(record["data_length"])
+            if data_offset + data_length > len(streams[dtype_id]):
+                raise ValueError("Homogeneous HDF5 component data range is out of bounds")
+            shape_offset = int(record["shape_offset"])
+            shape_count = int(record["shape_count"])
+            shape_stop = shape_offset + shape_count
+            if shape_stop > len(shapes):
+                raise ValueError("Homogeneous HDF5 component shape range is out of bounds")
+            shape = (int(value) for value in shapes[shape_offset:shape_stop])
+            if prod(shape) != data_length:
+                raise ValueError("Homogeneous HDF5 component shape does not match its data length")
 
     def __len__(self) -> int:
         """Return the number of stored top-level signals."""
