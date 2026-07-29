@@ -212,6 +212,10 @@ class BatchedHDF5Writer(FileWriter):
         self.shuffle = shuffle
         self.fletcher32 = fletcher32
         self.chunk_cache_size = chunk_cache_size
+        if not isinstance(max_batches_in_memory, int) or isinstance(max_batches_in_memory, bool):
+            raise TypeError("Packed HDF5 max_batches_in_memory must be an integer")
+        if max_batches_in_memory < 1:
+            raise ValueError("Packed HDF5 max_batches_in_memory must be positive")
         self.max_batches_in_memory = max_batches_in_memory
         self._file: h5py.File | None = None
         self._data: dict[int, h5py.Dataset] = {}
@@ -480,7 +484,9 @@ class BatchedHDF5Writer(FileWriter):
 
         Batch indices must be non-negative and form a contiguous sequence
         beginning at zero. Batches may arrive out of order, but a batch is not
-        committed until every preceding batch has arrived.
+        committed until every preceding batch has arrived. At most
+        ``max_batches_in_memory`` out-of-order batches may be buffered; the
+        next expected batch is always accepted because it can drain the buffer.
         """
         if not isinstance(batch_idx, int) or isinstance(batch_idx, bool):
             raise TypeError("Packed HDF5 batch index must be an integer")
@@ -489,7 +495,9 @@ class BatchedHDF5Writer(FileWriter):
         with self._lock:
             if batch_idx < self._next_batch_idx or batch_idx in self._batch_buffer:
                 raise ValueError(f"Duplicate packed HDF5 batch index: {batch_idx}")
-            self._batch_buffer[batch_idx] = data
+            if batch_idx != self._next_batch_idx and len(self._batch_buffer) >= self.max_batches_in_memory:
+                raise BufferError(f"Packed HDF5 out-of-order batch buffer is full; expected batch index {self._next_batch_idx}")
+            self._batch_buffer[batch_idx] = list(data)
             should_flush = len(self._batch_buffer) >= self.max_batches_in_memory
         if should_flush:
             try:

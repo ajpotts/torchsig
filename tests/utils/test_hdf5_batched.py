@@ -1,5 +1,7 @@
 """Tests for the experimental packed HDF5 format."""
 
+from concurrent.futures import ThreadPoolExecutor
+
 import h5py
 import numpy as np
 import pytest
@@ -122,6 +124,72 @@ def test_batched_hdf5_rejects_missing_batch_at_teardown(tmp_path) -> None:
     assert writer._file is None  # noqa: SLF001
     with h5py.File(tmp_path / "data.h5", "r") as handle:
         assert not bool(handle.attrs["complete"])
+
+
+@pytest.mark.parametrize("max_batches", [0, -1])
+def test_batched_hdf5_rejects_non_positive_batch_buffer_limit(tmp_path, max_batches) -> None:
+    with pytest.raises(ValueError, match="must be positive"):
+        BatchedHDF5Writer(tmp_path, max_batches_in_memory=max_batches)
+
+
+@pytest.mark.parametrize("max_batches", [1.5, True])
+def test_batched_hdf5_rejects_non_integer_batch_buffer_limit(tmp_path, max_batches) -> None:
+    with pytest.raises(TypeError, match="must be an integer"):
+        BatchedHDF5Writer(tmp_path, max_batches_in_memory=max_batches)
+
+
+def test_batched_hdf5_enforces_out_of_order_batch_buffer_limit(tmp_path) -> None:
+    writer = BatchedHDF5Writer(tmp_path, max_batches_in_memory=2)
+    writer.setup()
+    writer.write(2, [])
+    writer.write(1, [])
+
+    with pytest.raises(BufferError, match=r"buffer is full.*expected batch index 0"):
+        writer.write(3, [])
+
+    writer.write(0, [])
+    writer.write(3, [])
+    writer.teardown()
+
+
+def test_batched_hdf5_snapshots_buffered_batch_container(tmp_path) -> None:
+    expected = Signal(data=np.array([1], dtype=np.int64))
+    replacement = Signal(data=np.array([2], dtype=np.int64))
+    batch = [expected]
+    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=2) as writer:
+        writer.write(0, batch)
+        batch[0] = replacement
+        writer.write(1, [])
+
+    reader = BatchedHDF5Reader(tmp_path)
+    try:
+        np.testing.assert_array_equal(reader.read(0).data, expected.data)
+    finally:
+        reader.teardown()
+
+
+def test_batched_hdf5_orders_concurrent_batch_writes(tmp_path) -> None:
+    batch_count = 16
+    writer = BatchedHDF5Writer(tmp_path, max_batches_in_memory=batch_count)
+    writer.setup()
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = [
+            executor.submit(
+                writer.write,
+                batch_idx,
+                [Signal(data=np.array([batch_idx], dtype=np.int64))],
+            )
+            for batch_idx in reversed(range(batch_count))
+        ]
+        for future in futures:
+            future.result()
+    writer.teardown()
+
+    reader = BatchedHDF5Reader(tmp_path)
+    try:
+        assert [int(reader.read(idx).data[0]) for idx in range(batch_count)] == list(range(batch_count))
+    finally:
+        reader.teardown()
 
 
 @pytest.mark.parametrize("batch_idx", [-1, 1.5, True])
