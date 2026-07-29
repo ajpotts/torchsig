@@ -352,22 +352,31 @@ class BatchedHDF5Writer(FileWriter):
         """Validate and encode a batch without modifying the HDF5 file."""
         flattened: list[Signal] = []
         component_ids: list[list[int]] = []
-        active_components: set[int] = set()
 
         def add_signal(signal: Signal) -> int:
-            if not isinstance(signal, Signal):
-                raise TypeError("Packed HDF5 batches must contain Signal instances")
-            signal_identity = id(signal)
-            if signal_identity in active_components:
-                raise ValueError("Packed HDF5 component signal cycle detected")
-            active_components.add(signal_identity)
-            record_id = len(self._records) + len(flattened)
-            flattened.append(signal)
-            component_ids.append([])
-            children = component_ids[-1]
-            children.extend(add_signal(item) for item in signal.component_signals)
-            active_components.remove(signal_identity)
-            return record_id
+            active_components: set[int] = set()
+            root_id = len(self._records) + len(flattened)
+            stack: list[tuple[Signal, list[int] | None, bool]] = [(signal, None, False)]
+            while stack:
+                current, destination, exiting = stack.pop()
+                current_identity = id(current)
+                if exiting:
+                    active_components.remove(current_identity)
+                    continue
+                if not isinstance(current, Signal):
+                    raise TypeError("Packed HDF5 batches must contain Signal instances")
+                if current_identity in active_components:
+                    raise ValueError("Packed HDF5 component signal cycle detected")
+                active_components.add(current_identity)
+                record_id = len(self._records) + len(flattened)
+                flattened.append(current)
+                component_ids.append([])
+                if destination is not None:
+                    destination.append(record_id)
+                children = component_ids[-1]
+                stack.append((current, None, True))
+                stack.extend((item, children, False) for item in reversed(current.component_signals))
+            return root_id
 
         top_ids = [add_signal(signal) for signal in signals]
         if not flattened:
@@ -377,7 +386,6 @@ class BatchedHDF5Writer(FileWriter):
         parent_ids = self._parent_ids.copy()
         new_dtypes: list[tuple[int, np.dtype]] = []
         new_parents: list[tuple[int, int, str]] = []
-        active_parents: set[int] = set()
 
         def prepare_dtype(dtype: np.dtype) -> int:
             if dtype.hasobject:
@@ -396,19 +404,27 @@ class BatchedHDF5Writer(FileWriter):
         ) -> int:
             if parent is None:
                 return self.schema.sentinels["no_parent"]
-            parent_identity = id(parent)
-            if parent_identity in active_parents:
-                raise ValueError("Packed HDF5 parent metadata cycle detected")
-            active_parents.add(parent_identity)
-            ancestor_id = prepare_parent(parent.parent)
-            encoded_metadata = _encode_metadata(parent)
-            parent_key = (encoded_metadata, ancestor_id)
-            if parent_key not in parent_ids:
-                parent_id = len(parent_ids)
-                parent_ids[parent_key] = parent_id
-                new_parents.append((parent_id, ancestor_id, encoded_metadata))
-            active_parents.remove(parent_identity)
-            return parent_ids[parent_key]
+            chain = []
+            active_parents: set[int] = set()
+            current = parent
+            while current is not None:
+                current_identity = id(current)
+                if current_identity in active_parents:
+                    raise ValueError("Packed HDF5 parent metadata cycle detected")
+                active_parents.add(current_identity)
+                chain.append(current)
+                current = current.parent
+
+            ancestor_id = self.schema.sentinels["no_parent"]
+            for current in reversed(chain):
+                encoded_metadata = _encode_metadata(current)
+                parent_key = (encoded_metadata, ancestor_id)
+                if parent_key not in parent_ids:
+                    parent_id = len(parent_ids)
+                    parent_ids[parent_key] = parent_id
+                    new_parents.append((parent_id, ancestor_id, encoded_metadata))
+                ancestor_id = parent_ids[parent_key]
+            return ancestor_id
 
         arrays_by_dtype: dict[int, list[np.ndarray]] = {}
         offsets_by_dtype: dict[int, int] = {}

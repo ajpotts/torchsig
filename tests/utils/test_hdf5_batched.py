@@ -450,6 +450,21 @@ def test_batched_hdf5_rejects_component_cycle_before_appending(
     writer.teardown()
 
 
+def test_batched_hdf5_rejects_parent_cycle_before_appending(tmp_path) -> None:
+    parent = HierarchicalMetadataObject(metadata={"name": "parent"})
+    signal = Signal(data=np.ones(4, dtype=np.complex64), parent=parent)
+    parent.parent = parent
+    writer = BatchedHDF5Writer(tmp_path, max_batches_in_memory=1)
+    writer.setup()
+
+    with pytest.raises(ValueError, match="parent metadata cycle"):
+        writer.write(0, [signal])
+
+    assert len(writer._records) == 0  # noqa: SLF001
+    assert len(writer._index) == 0  # noqa: SLF001
+    writer.teardown()
+
+
 def test_batched_hdf5_marks_successful_file_complete(tmp_path) -> None:
     with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
         writer.write(0, [Signal(data=np.ones(4, dtype=np.complex64))])
@@ -507,22 +522,14 @@ def test_batched_hdf5_reads_component_hierarchy_beyond_recursion_limit(
     tmp_path,
 ) -> None:
     depth = sys.getrecursionlimit() + 100
-    signals = [Signal(data=np.array([idx], dtype=np.int16)) for idx in range(depth)]
+    signal = Signal(data=np.array([depth - 1], dtype=np.int16))
+    for idx in reversed(range(depth - 1)):
+        signal = Signal(
+            data=np.array([idx], dtype=np.int16),
+            component_signals=[signal],
+        )
     with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
-        writer.write(0, signals)
-
-    with h5py.File(tmp_path / "data.h5", "r+") as handle:
-        components = handle["components"]
-        components.resize(depth - 1, axis=0)
-        components[:] = np.arange(1, depth, dtype=np.uint64)
-        records = handle["records"][:]
-        records["component_offset"] = np.arange(depth, dtype=np.uint64)
-        records["component_count"][:-1] = 1
-        records["component_count"][-1] = 0
-        handle["records"][:] = records
-        index = handle["index"]
-        index.resize(1, axis=0)
-        index[0] = 0
+        writer.write(0, [signal])
 
     reader = BatchedHDF5Reader(tmp_path)
     try:
@@ -540,31 +547,29 @@ def test_batched_hdf5_reads_parent_hierarchy_beyond_recursion_limit(
     tmp_path,
 ) -> None:
     depth = sys.getrecursionlimit() + 100
+    parent = None
+    for idx in reversed(range(depth)):
+        parent = HierarchicalMetadataObject(
+            parent=parent,
+            metadata={"depth": idx},
+        )
     with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
-        writer.write(0, [Signal(data=np.ones(1, dtype=np.complex64))])
-
-    with h5py.File(tmp_path / "data.h5", "r+") as handle:
-        parent_records = handle["parent_records"]
-        parent_records.resize(depth, axis=0)
-        records = np.empty(depth, dtype=parent_records.dtype)
-        records["parent_id"][:-1] = np.arange(1, depth, dtype=np.uint64)
-        records["parent_id"][-1] = np.iinfo(np.uint64).max
-        parent_records[:] = records
-
-        metadata = handle["metadata"][0]
-        parent_metadata = handle["parent_metadata"]
-        parent_metadata.resize(depth, axis=0)
-        parent_metadata[:] = np.asarray([metadata] * depth, dtype=object)
-
-        signal_record = handle["records"][0]
-        signal_record["parent_id"] = 0
-        handle["records"][0] = signal_record
+        writer.write(
+            0,
+            [
+                Signal(
+                    data=np.ones(1, dtype=np.complex64),
+                    parent=parent,
+                )
+            ],
+        )
 
     reader = BatchedHDF5Reader(tmp_path)
     try:
         parent = reader.read(0).parent
         actual_depth = 0
         while parent is not None:
+            assert parent["depth"] == actual_depth
             actual_depth += 1
             parent = parent.parent
         assert actual_depth == depth
