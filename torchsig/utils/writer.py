@@ -280,6 +280,34 @@ class DatasetCreator:
         with open(self.writer_info_filepath) as f:
             writer_disk = yaml.safe_load(f) or {}
         complete = bool(writer_disk.get("complete", False))
+        expected_handler = getattr(
+            self.file_handler, "__name__", str(self.file_handler)
+        )
+        if (
+            "file_handler" in writer_disk
+            and writer_disk["file_handler"] != expected_handler
+        ):
+            differences.append(
+                (
+                    "file_handler",
+                    writer_disk["file_handler"],
+                    expected_handler,
+                )
+            )
+        if (
+            "file_handler_kwargs" in writer_disk
+            and not _deep_equal(
+                writer_disk["file_handler_kwargs"],
+                self.writer_info_kwargs,
+            )
+        ):
+            differences.append(
+                (
+                    "file_handler_kwargs",
+                    writer_disk["file_handler_kwargs"],
+                    self.writer_info_kwargs,
+                )
+            )
 
         if not self.dataset_info_filepath.exists():
             differences.append(("dataset_info.yaml", "missing", "expected present"))
@@ -352,6 +380,11 @@ class DatasetCreator:
                 raise RuntimeError(
                     f"Dataset only partially exists in {self.root}. "
                     "Regenerate by setting overwrite=True."
+                )
+            if any(key == "file_handler" for key, _, _ in diffs):
+                raise RuntimeError(
+                    f"Dataset at {self.root} was created with a different "
+                    "file handler. Regenerate by setting overwrite=True."
                 )
             print(f"Dataset exists at {self.root} but differs from current dataset config. Using dataset on disk.")
             for k, disk_v, cur_v in diffs:
