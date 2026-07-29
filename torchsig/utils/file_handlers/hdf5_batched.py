@@ -173,6 +173,64 @@ def _validate_declared_datasets(file: h5py.File, schema: PackedHDF5Schema) -> No
         raise ValueError(f"Packed HDF5 file is missing declared paths: {missing_paths}")
 
 
+def _validate_physical_schema(file: h5py.File, schema: PackedHDF5Schema) -> None:
+    """Ensure declared objects have compatible HDF5 types and shapes."""
+    paths: dict[str, str] = {}
+    for logical_name, specification in schema.datasets.items():
+        canonical_path = file[specification.path].name
+        if canonical_path in paths:
+            raise ValueError(f"Invalid packed HDF5 schema: logical datasets {paths[canonical_path]!r} and {logical_name!r} share path {canonical_path!r}")
+        paths[canonical_path] = logical_name
+
+    data_group = file[schema.datasets["data"].path]
+    if not isinstance(data_group, h5py.Group):
+        raise ValueError(  # noqa: TRY004
+            "Invalid packed HDF5 file: data path must be a group"
+        )
+
+    for logical_name in ("index", "shapes", "components"):
+        dataset = file[schema.datasets[logical_name].path]
+        if not isinstance(dataset, h5py.Dataset) or dataset.ndim != 1:
+            raise ValueError(f"Invalid packed HDF5 file: {logical_name} must be a one-dimensional dataset")
+        if dataset.dtype != np.dtype(np.uint64):
+            raise ValueError(f"Invalid packed HDF5 file: {logical_name} must have dtype uint64")
+
+    for logical_name in ("dtypes", "metadata", "parent_metadata"):
+        dataset = file[schema.datasets[logical_name].path]
+        if not isinstance(dataset, h5py.Dataset) or dataset.ndim != 1:
+            raise ValueError(f"Invalid packed HDF5 file: {logical_name} must be a one-dimensional dataset")
+        string_info = h5py.check_string_dtype(dataset.dtype)
+        if string_info is None or string_info.encoding != "utf-8":
+            raise ValueError(f"Invalid packed HDF5 file: {logical_name} must contain UTF-8 strings")
+
+    for logical_name, expected_dtype in (
+        ("records", _RECORD_DTYPE),
+        ("parent_records", _PARENT_DTYPE),
+    ):
+        specification = schema.datasets[logical_name]
+        dataset = file[specification.path]
+        if not isinstance(dataset, h5py.Dataset) or dataset.ndim != 1:
+            raise ValueError(f"Invalid packed HDF5 file: {logical_name} must be a one-dimensional dataset")
+        if specification.fields is None:
+            raise ValueError(f"Invalid packed HDF5 schema: missing {logical_name} field mappings")
+        for logical_field, expected_field_dtype in expected_dtype.fields.items():
+            physical_field = specification.fields.get(logical_field)
+            actual_fields = dataset.dtype.fields or {}
+            if physical_field not in actual_fields:
+                raise ValueError(f"Invalid packed HDF5 file: {logical_name} is missing field {physical_field!r}")
+            actual_field_dtype = actual_fields[physical_field][0]
+            if actual_field_dtype != expected_field_dtype[0]:
+                raise ValueError(f"Invalid packed HDF5 file: {logical_name} field {physical_field!r} has incompatible dtype")
+
+    no_parent = schema.sentinels.get("no_parent")
+    if no_parent is None or not 0 <= no_parent <= np.iinfo(np.uint64).max:
+        raise ValueError("Invalid packed HDF5 schema: no_parent sentinel does not fit uint64")
+
+    for name, stream in data_group.items():
+        if not isinstance(stream, h5py.Dataset) or stream.ndim != 1:
+            raise ValueError(f"Invalid packed HDF5 file: data stream {name!r} must be a one-dimensional dataset")
+
+
 def _validate_complete_file(file: h5py.File) -> None:
     """Reject files which were not finalized by a successful writer."""
     if "complete" not in file.attrs:
@@ -670,6 +728,7 @@ class BatchedHDF5Reader(FileReader):
                 _validate_complete_file(self._file)
                 spec = self.schema.datasets
                 _validate_declared_datasets(self._file, self.schema)
+                _validate_physical_schema(self._file, self.schema)
                 self._records = self._file[spec["records"].path]
                 self._metadata = self._file[spec["metadata"].path]
                 self._components = self._file[spec["components"].path]

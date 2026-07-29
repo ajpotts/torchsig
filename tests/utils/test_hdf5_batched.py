@@ -589,6 +589,95 @@ def test_batched_hdf5_reader_rejects_mismatched_record_metadata_lengths(
         BatchedHDF5Reader(tmp_path).read(0)
 
 
+def test_batched_hdf5_reader_rejects_wrong_table_rank(tmp_path) -> None:
+    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+        writer.write(0, [Signal(data=np.ones(4, dtype=np.complex64))])
+    with h5py.File(tmp_path / "data.h5", "r+") as handle:
+        values = handle["shapes"][:]
+        del handle["shapes"]
+        handle.create_dataset("shapes", data=values.reshape(1, -1))
+
+    with pytest.raises(ValueError, match="shapes must be a one-dimensional"):
+        BatchedHDF5Reader(tmp_path).read(0)
+
+
+def test_batched_hdf5_reader_rejects_signed_index_dtype(tmp_path) -> None:
+    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+        writer.write(0, [Signal(data=np.ones(4, dtype=np.complex64))])
+    with h5py.File(tmp_path / "data.h5", "r+") as handle:
+        values = handle["index"][:].astype(np.int64)
+        del handle["index"]
+        handle.create_dataset("index", data=values)
+
+    with pytest.raises(ValueError, match="index must have dtype uint64"):
+        BatchedHDF5Reader(tmp_path).read(0)
+
+
+def test_batched_hdf5_reader_rejects_incompatible_record_field_dtype(
+    tmp_path,
+) -> None:
+    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+        writer.write(0, [Signal(data=np.ones(4, dtype=np.complex64))])
+    with h5py.File(tmp_path / "data.h5", "r+") as handle:
+        original = handle["records"]
+        dtype = np.dtype(
+            [
+                (
+                    name,
+                    np.int64 if name == "data_offset" else original.dtype.fields[name][0],
+                )
+                for name in original.dtype.names
+            ]
+        )
+        values = original[:].astype(dtype)
+        del handle["records"]
+        handle.create_dataset("records", data=values)
+
+    with pytest.raises(ValueError, match=r"data_offset.*incompatible dtype"):
+        BatchedHDF5Reader(tmp_path).read(0)
+
+
+def test_batched_hdf5_reader_rejects_non_utf8_metadata_table(
+    tmp_path,
+) -> None:
+    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+        writer.write(0, [Signal(data=np.ones(4, dtype=np.complex64))])
+    with h5py.File(tmp_path / "data.h5", "r+") as handle:
+        value = handle["metadata"][0]
+        del handle["metadata"]
+        handle.create_dataset("metadata", data=[value], dtype="S256")
+
+    with pytest.raises(ValueError, match="metadata must contain UTF-8"):
+        BatchedHDF5Reader(tmp_path).read(0)
+
+
+def test_batched_hdf5_reader_rejects_data_dataset_instead_of_group(
+    tmp_path,
+) -> None:
+    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+        writer.write(0, [Signal(data=np.ones(4, dtype=np.complex64))])
+    with h5py.File(tmp_path / "data.h5", "r+") as handle:
+        del handle["data"]
+        handle.create_dataset("data", data=np.ones(4, dtype=np.complex64))
+
+    with pytest.raises(ValueError, match="data path must be a group"):
+        BatchedHDF5Reader(tmp_path).read(0)
+
+
+def test_batched_hdf5_reader_rejects_multidimensional_data_stream(
+    tmp_path,
+) -> None:
+    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+        writer.write(0, [Signal(data=np.ones(4, dtype=np.complex64))])
+    with h5py.File(tmp_path / "data.h5", "r+") as handle:
+        values = handle["data/0"][:]
+        del handle["data/0"]
+        handle["data"].create_dataset("0", data=values.reshape(2, 2))
+
+    with pytest.raises(ValueError, match=r"data stream '0'.*one-dimensional"):
+        BatchedHDF5Reader(tmp_path).read(0)
+
+
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [

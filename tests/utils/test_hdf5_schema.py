@@ -74,6 +74,31 @@ def test_batched_reader_rejects_missing_declared_path(tmp_path) -> None:
         reader.read(0)
 
 
+def test_batched_reader_rejects_colliding_schema_paths(tmp_path) -> None:
+    _write_file(tmp_path)
+
+    def collide_paths(value) -> None:
+        value["datasets"]["shapes"]["path"] = value["datasets"]["index"]["path"]
+
+    _update_schema(tmp_path, collide_paths)
+    reader = BatchedHDF5Reader(tmp_path)
+    with pytest.raises(ValueError, match="share path"):
+        reader.read(0)
+
+
+@pytest.mark.parametrize("sentinel", [-1, 1 << 64])
+def test_batched_reader_rejects_out_of_range_parent_sentinel(tmp_path, sentinel) -> None:
+    _write_file(tmp_path)
+
+    def update_sentinel(value) -> None:
+        value["sentinels"]["no_parent"] = sentinel
+
+    _update_schema(tmp_path, update_sentinel)
+    reader = BatchedHDF5Reader(tmp_path)
+    with pytest.raises(ValueError, match="sentinel does not fit uint64"):
+        reader.read(0)
+
+
 def test_batched_reader_rejects_incomplete_file(tmp_path) -> None:
     _write_file(tmp_path)
     with h5py.File(tmp_path / "data.h5", "r+") as handle:
