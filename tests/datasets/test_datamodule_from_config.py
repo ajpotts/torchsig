@@ -10,6 +10,7 @@ from torchsig.datasets import TorchSigDataModule
 from torchsig.datasets.datasets import TorchSigDatasetConfig
 from torchsig.transforms.metadata_transforms import YOLOLabel
 from torchsig.transforms.transforms import ComplexTo2D, Spectrogram
+from torchsig.utils.file_handlers import BatchedHDF5Reader, BatchedHDF5Writer
 from torchsig.utils.yaml import load_config_from_yaml
 
 # Path to default configs directory
@@ -144,6 +145,32 @@ class TestDataModuleCreation:
         assert dm.impairment_level == config.impairment_level
         assert isinstance(dm.root, Path)
         assert dm.root == dataset_root
+
+    def test_from_config_forwards_packed_writer_options(self, tmp_path):
+        """Packed writer configuration survives the config constructor."""
+        config = load_config_from_yaml(
+            CONFIGS_DIR / "narrowband_toy_dataset.yaml"
+        )
+        options = {
+            "compression": None,
+            "shuffle": False,
+            "fletcher32": False,
+        }
+
+        dm = TorchSigDataModule.from_config(
+            config,
+            root=tmp_path,
+            file_writer=BatchedHDF5Writer,
+            file_writer_kwargs=options,
+        )
+        options["compression"] = "lzf"
+
+        assert dm.file_reader is BatchedHDF5Reader
+        assert dm.file_writer_kwargs == {
+            "compression": None,
+            "shuffle": False,
+            "fletcher32": False,
+        }
 
     def test_narrowband_transforms(self, tmp_path):
         """Test narrowband configs produce expected transforms."""

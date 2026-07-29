@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, Mock, call, patch
 import numpy as np
 import pytest
 import torch
+import h5py
 
 from torchsig.datasets.datamodules import (
     SplitTorchSigDataModule,
@@ -831,6 +832,12 @@ def test_torchsig_datamodule_infers_packed_reader_end_to_end(
             "signal_duration_in_samples_max": 4_096,
         }
     )
+    writer_options = {
+        "compression": None,
+        "shuffle": False,
+        "fletcher32": False,
+        "max_batches_in_memory": 1,
+    }
     dm = TorchSigDataModule(
         root=tmp_path,
         metadata=metadata,
@@ -838,20 +845,29 @@ def test_torchsig_datamodule_infers_packed_reader_end_to_end(
         dataset_splits=[4, 1, 1],
         create_batch_size=2,
         file_writer=BatchedHDF5Writer,
+        file_writer_kwargs=writer_options,
         overwrite=True,
         impairment_level=0,
         transforms=transforms,
         collate_fn=identity_collate_fn,
         num_workers=0,
     )
+    writer_options["compression"] = "lzf"
 
     assert dm.file_reader is BatchedHDF5Reader
+    assert dm.file_writer_kwargs["compression"] is None
     dm.prepare_data()
     dm.setup()
 
     full_dataset = dm.train.dataset
     assert isinstance(full_dataset.reader, BatchedHDF5Reader)
     assert full_dataset[0].data.ndim == expected_ndim
+    full_dataset.reader.teardown()
+    with h5py.File(tmp_path / "data.h5", "r") as handle:
+        assert handle.attrs["compression"] == "none"
+        assert handle["data/0"].compression is None
+        assert not handle["data/0"].shuffle
+        assert not handle["data/0"].fletcher32
     writer_info = (tmp_path / "writer_info.yaml").read_text()
     assert (
         "torchsig.utils.file_handlers.hdf5_batched.BatchedHDF5Writer"
@@ -883,6 +899,23 @@ def test_torchsig_datamodule_rejects_incompatible_handler_pair(
         )
 
 
+@pytest.mark.parametrize(
+    "file_writer_kwargs",
+    [{"unknown_option": True}, ["not", "a", "dictionary"]],
+)
+def test_torchsig_datamodule_rejects_invalid_writer_options(
+    tmp_path, file_writer_kwargs
+):
+    with pytest.raises(TypeError, match="file_writer_kwargs|Invalid options"):
+        TorchSigDataModule(
+            root=tmp_path,
+            metadata=TorchSigDefaults().default_dataset_metadata,
+            dataset_size=1,
+            file_writer=BatchedHDF5Writer,
+            file_writer_kwargs=file_writer_kwargs,
+        )
+
+
 def test_split_datamodule_infers_packed_reader_end_to_end(
     tmp_path, split_configs
 ):
@@ -895,6 +928,12 @@ def test_split_datamodule_infers_packed_reader_end_to_end(
         create_batch_size=2,
         create_num_workers=0,
         file_writer=BatchedHDF5Writer,
+        file_writer_kwargs={
+            "compression": None,
+            "shuffle": False,
+            "fletcher32": False,
+            "max_batches_in_memory": 1,
+        },
         overwrite=True,
         collate_fn=identity_collate_fn,
     )
@@ -906,3 +945,9 @@ def test_split_datamodule_infers_packed_reader_end_to_end(
     assert isinstance(dm.train.reader, BatchedHDF5Reader)
     assert isinstance(dm.val.reader, BatchedHDF5Reader)
     assert isinstance(dm.test.reader, BatchedHDF5Reader)
+    dm.train.reader.teardown()
+    dm.val.reader.teardown()
+    dm.test.reader.teardown()
+    with h5py.File(dm.root / "train" / "data.h5", "r") as handle:
+        assert handle.attrs["compression"] == "none"
+        assert handle["data/0"].compression is None
