@@ -49,6 +49,15 @@ def _yaml_safe_value(value: Any) -> Any:
     return value
 
 
+def _qualified_name(value: Any) -> str:
+    """Return a stable qualified name for a class or callable."""
+    module = getattr(value, "__module__", None)
+    name = getattr(value, "__qualname__", getattr(value, "__name__", None))
+    if module is not None and name is not None:
+        return f"{module}.{name}"
+    return str(value)
+
+
 def default_collate_fn(batch):
     """Collates a batch by zipping its elements together. Note: not pickle-safe for complex
     nested structures, but works for typical (data, label) batches.
@@ -133,6 +142,7 @@ class DatasetCreator:
         overwrite: bool = True,
         tqdm_desc: str | None = None,
         file_handler: FileWriter = HDF5Writer,
+        file_reader: type | None = None,
         multithreading: bool = True,
         max_inflight_futures: int = 32,
         **kwargs,
@@ -146,6 +156,7 @@ class DatasetCreator:
             overwrite (bool): Flag indicating whether to overwrite an existing dataset. Defaults to True.
             tqdm_desc (str): Description for the progress bar.
             file_handler (FileWriter): File handler used to write dataset. Defaults to HDF5Writer.
+            file_reader: Optional reader class paired with the writer for metadata.
             multithreading (bool): Whether to use multithreading for writing batches. Defaults to True.
             max_inflight_futures (int): Maximum number of concurrent futures when using multithreading. Defaults to 32.
             **kwargs: Additional arguments for the file handler.
@@ -163,6 +174,7 @@ class DatasetCreator:
                 )
             file_handler = legacy_file_writer
         self.file_handler = file_handler
+        self.file_reader = file_reader
         self.kwargs = dict(kwargs)
         self.writer_info_kwargs = _yaml_safe_value(self.kwargs)
 
@@ -262,6 +274,12 @@ class DatasetCreator:
             "batch_size": None if self.batch_size is None else int(self.batch_size),
             "num_workers": None if self.num_workers is None else int(self.num_workers),
             "file_handler": getattr(self.file_handler, "__name__", str(self.file_handler)),
+            "file_handler_qualified": _qualified_name(self.file_handler),
+            "file_reader_qualified": (
+                None
+                if self.file_reader is None
+                else _qualified_name(self.file_reader)
+            ),
             "file_handler_kwargs": self.writer_info_kwargs,
             "multithreading": bool(self.multithreading),
             "dataset_length_requested": int(self.dataset_length_requested),

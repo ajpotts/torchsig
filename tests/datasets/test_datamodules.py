@@ -16,6 +16,13 @@ from torchsig.datasets.datamodules import (
 from torchsig.datasets.datasets import TorchSigDatasetConfig
 from torch.utils.data import Subset
 from torchsig.utils.defaults import TorchSigDefaults
+from torchsig.transforms.transforms import Spectrogram
+from torchsig.utils.file_handlers import (
+    BatchedHDF5Reader,
+    BatchedHDF5Writer,
+    HDF5Reader,
+    HDF5Writer,
+)
 from torchsig.utils.writer import identity_collate_fn
 
 
@@ -802,3 +809,100 @@ def test_split_datamodule_smoke(tmp_path, split_configs):
     assert next(iter(dm.train_dataloader()))
     assert next(iter(dm.val_dataloader()))
     assert next(iter(dm.test_dataloader()))
+
+
+@pytest.mark.parametrize(
+    ("transforms", "expected_ndim"),
+    [([], 1), ([Spectrogram(fft_size=64)], 2)],
+    ids=["iq", "spectrogram"],
+)
+def test_torchsig_datamodule_infers_packed_reader_end_to_end(
+    tmp_path, transforms, expected_ndim
+):
+    metadata = TorchSigDefaults().default_dataset_metadata.copy()
+    metadata.update(
+        {
+            "num_iq_samples_dataset": 4_096,
+            "fft_size": 64,
+            "fft_stride": 64,
+            "num_signals_min": 1,
+            "num_signals_max": 1,
+            "signal_duration_in_samples_min": 3_276,
+            "signal_duration_in_samples_max": 4_096,
+        }
+    )
+    dm = TorchSigDataModule(
+        root=tmp_path,
+        metadata=metadata,
+        dataset_size=6,
+        dataset_splits=[4, 1, 1],
+        create_batch_size=2,
+        file_writer=BatchedHDF5Writer,
+        overwrite=True,
+        impairment_level=0,
+        transforms=transforms,
+        collate_fn=identity_collate_fn,
+        num_workers=0,
+    )
+
+    assert dm.file_reader is BatchedHDF5Reader
+    dm.prepare_data()
+    dm.setup()
+
+    full_dataset = dm.train.dataset
+    assert isinstance(full_dataset.reader, BatchedHDF5Reader)
+    assert full_dataset[0].data.ndim == expected_ndim
+    writer_info = (tmp_path / "writer_info.yaml").read_text()
+    assert (
+        "torchsig.utils.file_handlers.hdf5_batched.BatchedHDF5Writer"
+        in writer_info
+    )
+    assert (
+        "torchsig.utils.file_handlers.hdf5_batched.BatchedHDF5Reader"
+        in writer_info
+    )
+
+
+@pytest.mark.parametrize(
+    ("file_writer", "file_reader"),
+    [
+        (BatchedHDF5Writer, HDF5Reader),
+        (HDF5Writer, BatchedHDF5Reader),
+    ],
+)
+def test_torchsig_datamodule_rejects_incompatible_handler_pair(
+    tmp_path, file_writer, file_reader
+):
+    with pytest.raises(ValueError, match="Incompatible file handler pair"):
+        TorchSigDataModule(
+            root=tmp_path,
+            metadata=TorchSigDefaults().default_dataset_metadata,
+            dataset_size=1,
+            file_writer=file_writer,
+            file_reader=file_reader,
+        )
+
+
+def test_split_datamodule_infers_packed_reader_end_to_end(
+    tmp_path, split_configs
+):
+    train_cfg, val_cfg, test_cfg = split_configs
+    dm = SplitTorchSigDataModule(
+        train_cfg=train_cfg,
+        val_cfg=val_cfg,
+        test_cfg=test_cfg,
+        root=tmp_path,
+        create_batch_size=2,
+        create_num_workers=0,
+        file_writer=BatchedHDF5Writer,
+        overwrite=True,
+        collate_fn=identity_collate_fn,
+    )
+
+    assert dm.file_reader is BatchedHDF5Reader
+    dm.prepare_data()
+    dm.setup(None)
+
+    assert isinstance(dm.train.reader, BatchedHDF5Reader)
+    assert isinstance(dm.val.reader, BatchedHDF5Reader)
+    assert isinstance(dm.test.reader, BatchedHDF5Reader)

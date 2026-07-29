@@ -27,6 +27,10 @@ from torchsig.transforms.metadata_transforms import YOLOLabel
 from torchsig.transforms.transforms import ComplexTo2D, Spectrogram
 from torchsig.utils.data_loading import WorkerSeedingDataLoader
 from torchsig.utils.file_handlers.hdf5 import HDF5Reader, HDF5Writer
+from torchsig.utils.file_handlers.hdf5_batched import (
+    BatchedHDF5Reader,
+    BatchedHDF5Writer,
+)
 from torchsig.utils.writer import DatasetCreator
 from torchsig.utils.defaults import TorchSigDefaults
 from torchsig.utils.yaml import load_config_from_yaml
@@ -65,6 +69,23 @@ def set_global_seed(seed: int) -> None:
 def _identity_collate(batch: list[Any]) -> list[Any]:
     """Return a batch without applying collation."""
     return batch
+
+
+def _resolve_file_reader(file_writer, file_reader):
+    """Infer or validate known HDF5 writer/reader format pairs."""
+    known_pairs = {
+        HDF5Writer: HDF5Reader,
+        BatchedHDF5Writer: BatchedHDF5Reader,
+    }
+    expected_reader = known_pairs.get(file_writer)
+    if file_reader is None:
+        return expected_reader or HDF5Reader
+    if expected_reader is not None and file_reader is not expected_reader:
+        raise ValueError(
+            f"Incompatible file handler pair: {file_writer.__name__} requires "
+            f"{expected_reader.__name__}, got {file_reader.__name__}"
+        )
+    return file_reader
 
 
 def _load_dataset_config(
@@ -196,7 +217,7 @@ class TorchSigDataModule(pl.LightningDataModule):
         create_batch_size: int = 8,
         create_num_workers: int = 4,
         file_writer: BaseFileHandler = HDF5Writer,
-        file_reader: BaseFileHandler = HDF5Reader,
+        file_reader: BaseFileHandler | None = None,
         overwrite: bool = False,
         # transforms
         impairment_level: int = 0,
@@ -255,7 +276,7 @@ class TorchSigDataModule(pl.LightningDataModule):
         self.create_batch_size = create_batch_size
         self.create_num_workers = create_num_workers
         self.file_writer = file_writer
-        self.file_reader = file_reader
+        self.file_reader = _resolve_file_reader(file_writer, file_reader)
         self.overwrite = overwrite
 
         # ---- placeholders ------------------------------------------------
@@ -280,7 +301,7 @@ class TorchSigDataModule(pl.LightningDataModule):
         create_batch_size: int = 8,
         create_num_workers: int = 4,
         file_writer: type[BaseFileHandler] = HDF5Writer,
-        file_reader: type[BaseFileHandler] = HDF5Reader,
+        file_reader: type[BaseFileHandler] | None = None,
         overwrite: bool = False,
         shuffle: bool = True,
         collate_fn: Callable | None = None,
@@ -397,6 +418,7 @@ class TorchSigDataModule(pl.LightningDataModule):
             root=self.root,
             overwrite=self.overwrite,
             file_handler=self.file_writer,
+            file_reader=self.file_reader,
         )
         print(f"Full Dataset: Impairment Level {self.impairment_level}, "
               f"{self.dataset_size} samples")
@@ -532,7 +554,7 @@ class SplitTorchSigDataModule(pl.LightningDataModule):
         create_batch_size: int = 8,
         create_num_workers: int = 4,
         file_writer: type[BaseFileHandler] = HDF5Writer,
-        file_reader: type[BaseFileHandler] = HDF5Reader,
+        file_reader: type[BaseFileHandler] | None = None,
         overwrite: bool = False,
         shuffle: bool = True,
         collate_fn: Callable | None = None,
@@ -554,7 +576,7 @@ class SplitTorchSigDataModule(pl.LightningDataModule):
         self.create_num_workers = create_num_workers
 
         self.file_writer = file_writer
-        self.file_reader = file_reader
+        self.file_reader = _resolve_file_reader(file_writer, file_reader)
         self.overwrite = overwrite
 
         self.shuffle = shuffle
@@ -613,6 +635,7 @@ class SplitTorchSigDataModule(pl.LightningDataModule):
             root=split_root,
             overwrite=self.overwrite,
             file_handler=self.file_writer,
+            file_reader=self.file_reader,
         )
         creator.create()
 
