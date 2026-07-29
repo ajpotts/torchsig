@@ -74,6 +74,109 @@ def test_homogeneous_hdf5_round_trip_variable_components(tmp_path) -> None:
         reader.teardown()
 
 
+def test_homogeneous_hdf5_round_trips_scalar_and_empty_components(
+    tmp_path,
+) -> None:
+    scalar_component = Signal(data=np.array([3.5], dtype=np.float32))
+    scalar_component.data = np.array(3.5, dtype=np.float32)
+    components = [
+        scalar_component,
+        Signal(data=np.empty((2, 0), dtype=np.int16)),
+    ]
+    signal = Signal(
+        data=np.ones(8, dtype=np.complex64),
+        component_signals=components,
+    )
+    with HomogeneousHDF5Writer(tmp_path) as writer:
+        writer.write(0, [signal])
+
+    reader = HomogeneousHDF5Reader(tmp_path)
+    try:
+        actual = reader.read(0)
+        for actual_component, expected_component in zip(
+            actual.component_signals,
+            components,
+            strict=True,
+        ):
+            np.testing.assert_array_equal(
+                actual_component.data,
+                expected_component.data,
+            )
+            assert actual_component.data.shape == expected_component.data.shape
+            assert actual_component.data.dtype == expected_component.data.dtype
+    finally:
+        reader.teardown()
+
+
+def test_homogeneous_hdf5_rejects_empty_batch_without_consuming_index(
+    tmp_path,
+) -> None:
+    with HomogeneousHDF5Writer(tmp_path) as writer:
+        with pytest.raises(ValueError, match="must not be empty"):
+            writer.write(0, [])
+        writer.write(0, [_signals()[0]])
+
+
+@pytest.mark.parametrize(
+    ("batch_idx", "error", "message"),
+    [
+        (True, TypeError, "must be an integer"),
+        (0.0, TypeError, "must be an integer"),
+        (-1, ValueError, "must be non-negative"),
+        (1, ValueError, "requires sequential"),
+    ],
+)
+def test_homogeneous_hdf5_rejects_invalid_batch_indices(
+    tmp_path,
+    batch_idx,
+    error,
+    message,
+) -> None:
+    with HomogeneousHDF5Writer(tmp_path) as writer:
+        with pytest.raises(error, match=message):
+            writer.write(batch_idx, [_signals()[0]])
+        writer.write(0, [_signals()[0]])
+
+
+def test_homogeneous_hdf5_rejects_empty_finalization(tmp_path) -> None:
+    writer = HomogeneousHDF5Writer(tmp_path)
+    writer.setup()
+
+    with pytest.raises(ValueError, match="cannot finalize an empty dataset"):
+        writer.teardown()
+    writer.teardown()
+
+    with h5py.File(tmp_path / "data.h5", "r") as file:
+        assert not file.attrs["complete"]
+
+
+def test_homogeneous_hdf5_writer_can_be_reused_after_teardown(tmp_path) -> None:
+    writer = HomogeneousHDF5Writer(tmp_path)
+    writer.setup()
+    writer.write(0, [_signals()[0]])
+    writer.teardown()
+
+    replacement = Signal(data=np.arange(4, dtype=np.float32))
+    writer.setup()
+    writer.write(0, [replacement])
+    writer.teardown()
+    writer.teardown()
+
+    reader = HomogeneousHDF5Reader(tmp_path)
+    try:
+        assert len(reader) == 1
+        np.testing.assert_array_equal(reader.read(0).data, replacement.data)
+    finally:
+        reader.teardown()
+
+
+def test_homogeneous_hdf5_rejects_setup_while_open(tmp_path) -> None:
+    with HomogeneousHDF5Writer(tmp_path) as writer:
+        with pytest.raises(RuntimeError, match="already open"):
+            writer.setup()
+        writer.write(0, [_signals()[0]])
+
+
 def test_homogeneous_hdf5_writes_schema_version(tmp_path) -> None:
     _write_signals(tmp_path)
 
@@ -220,6 +323,8 @@ def test_homogeneous_hdf5_rejects_heterogeneous_top_level_data(tmp_path, signal)
     with pytest.raises(ValueError, match="share one dtype and shape"):
         writer.write(1, [signal])
     writer.teardown()
+    with h5py.File(tmp_path / "data.h5", "r") as file:
+        assert not file.attrs["complete"]
 
 
 def test_homogeneous_hdf5_rejects_parent_metadata(tmp_path) -> None:

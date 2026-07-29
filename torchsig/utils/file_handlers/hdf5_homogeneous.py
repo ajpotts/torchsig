@@ -90,6 +90,12 @@ class HomogeneousHDF5Writer(FileWriter):
         self._component_dtype_ids: dict[str, int] = {}
         self._failed = False
 
+    def setup(self) -> None:
+        """Open a new file, resetting state from any completed prior use."""
+        if self._file is not None:
+            raise RuntimeError("Homogeneous HDF5 writer is already open")
+        super().setup()
+
     def _filter_kwargs(self) -> dict[str, Any]:
         kwargs: dict[str, Any] = {}
         if self.compression is not None:
@@ -103,6 +109,13 @@ class HomogeneousHDF5Writer(FileWriter):
         return kwargs
 
     def _setup(self) -> None:
+        self._data = None
+        self._shape = None
+        self._dtype = None
+        self._next_batch_idx = 0
+        self._component_data.clear()
+        self._component_dtype_ids.clear()
+        self._failed = False
         self._file = h5py.File(self.datapath, "w", libver="latest")
         self._file.attrs["format"] = _FORMAT
         self._file.attrs["schema_version"] = _SCHEMA_VERSION
@@ -273,8 +286,14 @@ class HomogeneousHDF5Writer(FileWriter):
             raise RuntimeError("Homogeneous HDF5 writer is not open")
         if self._failed:
             raise RuntimeError("Homogeneous HDF5 writer cannot continue after failure")
+        if not isinstance(batch_idx, int) or isinstance(batch_idx, bool):
+            raise TypeError("Homogeneous HDF5 batch index must be an integer")
+        if batch_idx < 0:
+            raise ValueError("Homogeneous HDF5 batch index must be non-negative")
         if batch_idx != self._next_batch_idx:
             raise ValueError(f"Homogeneous HDF5 prototype requires sequential batch indices; expected {self._next_batch_idx}, got {batch_idx}")
+        if not data:
+            raise ValueError("Homogeneous HDF5 batches must not be empty")
         try:
             arrays = [self._validate_signal(signal) for signal in data]
             if arrays and self._data is None:
@@ -294,6 +313,8 @@ class HomogeneousHDF5Writer(FileWriter):
 
     def __len__(self) -> int:
         """Return the number of stored top-level signals."""
+        if self._file is None:
+            raise RuntimeError("Homogeneous HDF5 writer is not open")
         return len(self._metadata)
 
     def teardown(self) -> None:
@@ -302,6 +323,9 @@ class HomogeneousHDF5Writer(FileWriter):
             return
         try:
             if not self._failed:
+                if self._data is None:
+                    self._failed = True
+                    raise ValueError("Homogeneous HDF5 cannot finalize an empty dataset")
                 self._file.attrs["complete"] = True
                 self._file.flush()
         finally:
