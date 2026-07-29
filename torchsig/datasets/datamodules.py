@@ -396,7 +396,7 @@ class TorchSigDataModule(pl.LightningDataModule):
             dataset_length=self.dataset_size,
             root=self.root,
             overwrite=self.overwrite,
-            file_writer=self.file_writer,
+            file_handler=self.file_writer,
         )
         print(f"Full Dataset: Impairment Level {self.impairment_level}, "
               f"{self.dataset_size} samples")
@@ -612,7 +612,7 @@ class SplitTorchSigDataModule(pl.LightningDataModule):
             dataset_length=int(cfg.dataset_length),
             root=split_root,
             overwrite=self.overwrite,
-            file_writer=self.file_writer,
+            file_handler=self.file_writer,
         )
         creator.create()
 
