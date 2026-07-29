@@ -45,6 +45,7 @@ _RECORD_DTYPE = np.dtype(
     ]
 )
 _PARENT_DTYPE = np.dtype([("parent_id", np.uint64)])
+_VALIDATION_CHUNK_SIZE = 65_536
 
 
 @dataclass
@@ -616,50 +617,103 @@ class BatchedHDF5Reader(FileReader):
                 raise ValueError(f"Invalid packed HDF5 file: data stream dtype mismatch at index {dtype_id}")
 
         record_count = len(self._records)
+        parent_count = len(self._parent_records)
         component_links: list[list[int]] = []
         fields = self._record_fields
-        for record_id in range(record_count):
-            record = self._records[record_id]
-            dtype_id = int(record[fields["dtype_id"]])
-            if dtype_id not in self._data_streams:
-                raise ValueError(f"Invalid packed HDF5 file: invalid dtype ID {dtype_id} in record {record_id}")
-            data_start = int(record[fields["data_offset"]])
-            data_length = int(record[fields["data_length"]])
-            if data_start + data_length > len(self._data_streams[dtype_id]):
-                raise ValueError(f"Invalid packed HDF5 file: data slice out of bounds in record {record_id}")
-            shape_start = int(record[fields["shape_offset"]])
-            shape_count = int(record[fields["shape_count"]])
-            if shape_start + shape_count > len(self._shapes):
-                raise ValueError(f"Invalid packed HDF5 file: shape slice out of bounds in record {record_id}")
-            shape = tuple(int(value) for value in self._shapes[shape_start : shape_start + shape_count])
-            if int(np.prod(shape, dtype=np.uint64)) != data_length:
-                raise ValueError(f"Invalid packed HDF5 file: shape does not match data length in record {record_id}")
-            component_start = int(record[fields["component_offset"]])
-            component_count = int(record[fields["component_count"]])
-            if component_start + component_count > len(self._components):
-                raise ValueError(f"Invalid packed HDF5 file: component slice out of bounds in record {record_id}")
-            children = [int(value) for value in self._components[component_start : component_start + component_count]]
-            if any(child_id >= record_count for child_id in children):
-                raise ValueError(f"Invalid packed HDF5 file: invalid component record ID in record {record_id}")
-            component_links.append(children)
-            parent_id = int(record[fields["parent_id"]])
-            if parent_id != self._no_parent and parent_id >= len(self._parent_records):
-                raise ValueError(f"Invalid packed HDF5 file: invalid parent ID {parent_id} in record {record_id}")
+        for chunk_start in range(0, record_count, _VALIDATION_CHUNK_SIZE):
+            chunk_stop = min(chunk_start + _VALIDATION_CHUNK_SIZE, record_count)
+            records = self._records[chunk_start:chunk_stop]
+            dtype_ids = records[fields["dtype_id"]]
+            invalid = np.flatnonzero(dtype_ids >= dtype_count)
+            if len(invalid):
+                offset = int(invalid[0])
+                record_id = chunk_start + offset
+                raise ValueError(f"Invalid packed HDF5 file: invalid dtype ID {int(dtype_ids[offset])} in record {record_id}")
 
-        top_ids = [int(value) for value in self._index]
-        if any(record_id >= record_count for record_id in top_ids):
-            raise ValueError("Invalid packed HDF5 file: invalid top-level record ID")
+            data_starts = records[fields["data_offset"]]
+            data_lengths = records[fields["data_length"]]
+            for dtype_id in np.unique(dtype_ids):
+                selected = np.flatnonzero(dtype_ids == dtype_id)
+                stream_length = len(self._data_streams[int(dtype_id)])
+                starts = data_starts[selected]
+                lengths = data_lengths[selected]
+                out_of_bounds = starts > stream_length
+                in_bounds = ~out_of_bounds
+                out_of_bounds[in_bounds] = lengths[in_bounds] > stream_length - starts[in_bounds]
+                invalid = np.flatnonzero(out_of_bounds)
+                if len(invalid):
+                    record_id = chunk_start + int(selected[int(invalid[0])])
+                    raise ValueError(f"Invalid packed HDF5 file: data slice out of bounds in record {record_id}")
+
+            shape_starts = records[fields["shape_offset"]]
+            shape_counts = records[fields["shape_count"]]
+            shape_out_of_bounds = shape_starts > len(self._shapes)
+            shape_in_bounds = ~shape_out_of_bounds
+            shape_out_of_bounds[shape_in_bounds] = shape_counts[shape_in_bounds] > len(self._shapes) - shape_starts[shape_in_bounds]
+            invalid = np.flatnonzero(shape_out_of_bounds)
+            if len(invalid):
+                record_id = chunk_start + int(invalid[0])
+                raise ValueError(f"Invalid packed HDF5 file: shape slice out of bounds in record {record_id}")
+            if len(records):
+                shape_data_start = int(np.min(shape_starts))
+                shape_data_stop = int(np.max(shape_starts + shape_counts))
+                shape_values = self._shapes[shape_data_start:shape_data_stop]
+                for offset, (shape_start, shape_count, data_length) in enumerate(zip(shape_starts, shape_counts, data_lengths, strict=True)):
+                    relative_start = int(shape_start) - shape_data_start
+                    relative_stop = relative_start + int(shape_count)
+                    if int(np.prod(shape_values[relative_start:relative_stop], dtype=np.uint64)) != int(data_length):
+                        record_id = chunk_start + offset
+                        raise ValueError(f"Invalid packed HDF5 file: shape does not match data length in record {record_id}")
+
+            component_starts = records[fields["component_offset"]]
+            component_counts = records[fields["component_count"]]
+            component_out_of_bounds = component_starts > len(self._components)
+            component_in_bounds = ~component_out_of_bounds
+            component_out_of_bounds[component_in_bounds] = component_counts[component_in_bounds] > len(self._components) - component_starts[component_in_bounds]
+            invalid = np.flatnonzero(component_out_of_bounds)
+            if len(invalid):
+                record_id = chunk_start + int(invalid[0])
+                raise ValueError(f"Invalid packed HDF5 file: component slice out of bounds in record {record_id}")
+            if np.any(component_counts):
+                component_data_start = int(np.min(component_starts))
+                component_data_stop = int(np.max(component_starts + component_counts))
+                component_values = self._components[component_data_start:component_data_stop]
+                for offset, (component_start, component_count) in enumerate(zip(component_starts, component_counts, strict=True)):
+                    relative_start = int(component_start) - component_data_start
+                    relative_stop = relative_start + int(component_count)
+                    children = component_values[relative_start:relative_stop]
+                    if np.any(children >= record_count):
+                        record_id = chunk_start + offset
+                        raise ValueError(f"Invalid packed HDF5 file: invalid component record ID in record {record_id}")
+                    component_links.append([int(value) for value in children])
+            else:
+                component_links.extend([] for _ in range(len(records)))
+
+            parent_ids = records[fields["parent_id"]]
+            invalid = np.flatnonzero((parent_ids != self._no_parent) & (parent_ids >= parent_count))
+            if len(invalid):
+                offset = int(invalid[0])
+                record_id = chunk_start + offset
+                raise ValueError(f"Invalid packed HDF5 file: invalid parent ID {int(parent_ids[offset])} in record {record_id}")
+
+        for chunk_start in range(0, len(self._index), _VALIDATION_CHUNK_SIZE):
+            top_ids = self._index[chunk_start : chunk_start + _VALIDATION_CHUNK_SIZE]
+            if np.any(top_ids >= record_count):
+                raise ValueError("Invalid packed HDF5 file: invalid top-level record ID")
         _validate_acyclic_links(component_links, relationship="component relationship")
 
-        parent_links: list[list[int]] = []
         parent_field = self._parent_fields["parent_id"]
-        parent_count = len(self._parent_records)
-        for parent_id in range(parent_count):
-            ancestor_id = int(self._parent_records[parent_id][parent_field])
+        parent_values = self._parent_records[:][parent_field]
+        invalid = np.flatnonzero((parent_values != self._no_parent) & (parent_values >= parent_count))
+        if len(invalid):
+            parent_id = int(invalid[0])
+            ancestor_id = int(parent_values[parent_id])
+            raise ValueError(f"Invalid packed HDF5 file: invalid ancestor ID {ancestor_id} in parent record {parent_id}")
+        parent_links: list[list[int]] = []
+        for ancestor_value in parent_values:
+            ancestor_id = int(ancestor_value)
             if ancestor_id == self._no_parent:
                 parent_links.append([])
-            elif ancestor_id >= parent_count:
-                raise ValueError(f"Invalid packed HDF5 file: invalid ancestor ID {ancestor_id} in parent record {parent_id}")
             else:
                 parent_links.append([ancestor_id])
         _validate_acyclic_links(parent_links, relationship="parent relationship")
