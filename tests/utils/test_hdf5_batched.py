@@ -14,9 +14,7 @@ from torchsig.utils.file_handlers.hdf5_batched import (
 
 
 def test_batched_hdf5_round_trip_components_and_metadata(tmp_path) -> None:
-    grandparent = HierarchicalMetadataObject(
-        metadata={"sample_rate": 2_000_000.0, "labels": np.array([1, 2])}
-    )
+    grandparent = HierarchicalMetadataObject(metadata={"sample_rate": 2_000_000.0, "labels": np.array([1, 2])})
     parent = HierarchicalMetadataObject(
         parent=grandparent,
         metadata={"split": "train"},
@@ -86,10 +84,7 @@ def test_batched_hdf5_preserves_mixed_signal_dtypes(tmp_path) -> None:
 
 
 def test_batched_hdf5_orders_batches_across_flush_boundaries(tmp_path) -> None:
-    batches = {
-        idx: [Signal(data=np.array([idx], dtype=np.int64))]
-        for idx in range(4)
-    }
+    batches = {idx: [Signal(data=np.array([idx], dtype=np.int64))] for idx in range(4)}
     with BatchedHDF5Writer(tmp_path, max_batches_in_memory=2) as writer:
         writer.write(2, batches[2])
         writer.write(3, batches[3])
@@ -170,9 +165,7 @@ def test_batched_hdf5_preserves_reserved_metadata_tags(tmp_path) -> None:
     ],
     ids=["bytes", "complex", "tuple", "numpy-scalar", "numpy-array"],
 )
-def test_batched_hdf5_round_trips_encoded_metadata_types(
-    tmp_path, value
-) -> None:
+def test_batched_hdf5_round_trips_encoded_metadata_types(tmp_path, value) -> None:
     with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
         writer.write(
             0,
@@ -270,12 +263,8 @@ def test_batched_hdf5_marks_successful_file_complete(tmp_path) -> None:
 
 def test_batched_hdf5_context_exception_leaves_file_incomplete(tmp_path) -> None:
     def fail_during_generation() -> None:
-        with BatchedHDF5Writer(
-            tmp_path, max_batches_in_memory=1
-        ) as writer:
-            writer.write(
-                1, [Signal(data=np.ones(4, dtype=np.complex64))]
-            )
+        with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+            writer.write(1, [Signal(data=np.ones(4, dtype=np.complex64))])
             raise RuntimeError("generation failed")
 
     with pytest.raises(RuntimeError, match="generation failed"):
@@ -291,9 +280,7 @@ def test_batched_hdf5_context_exception_leaves_file_incomplete(tmp_path) -> None
     ids=["complex-to-2d", "spectrogram"],
 )
 def test_batched_hdf5_preserves_transformed_2d_shape(tmp_path, transform) -> None:
-    source = Signal(
-        data=np.exp(2j * np.pi * np.arange(64) / 8).astype(np.complex64)
-    )
+    source = Signal(data=np.exp(2j * np.pi * np.arange(64) / 8).astype(np.complex64))
     expected = transform(source)
     assert expected.data.ndim == 2
 
@@ -313,3 +300,78 @@ def test_batched_hdf5_preserves_transformed_2d_shape(tmp_path, transform) -> Non
         np.testing.assert_array_equal(actual.data, expected.data)
     finally:
         reader.teardown()
+
+
+def test_batched_hdf5_reader_rejects_mismatched_record_metadata_lengths(
+    tmp_path,
+) -> None:
+    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+        writer.write(0, [Signal(data=np.ones(4, dtype=np.complex64))])
+    with h5py.File(tmp_path / "data.h5", "r+") as handle:
+        handle["metadata"].resize(0, axis=0)
+
+    with pytest.raises(ValueError, match="records and metadata lengths differ"):
+        BatchedHDF5Reader(tmp_path).read(0)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("dtype_id", 99, "invalid dtype ID"),
+        ("data_offset", 99, "data slice out of bounds"),
+        ("shape_offset", 99, "shape slice out of bounds"),
+        ("component_offset", 99, "component slice out of bounds"),
+        ("parent_id", 99, "invalid parent ID"),
+    ],
+)
+def test_batched_hdf5_reader_rejects_invalid_record_references(tmp_path, field, value, message) -> None:
+    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+        writer.write(0, [Signal(data=np.ones(4, dtype=np.complex64))])
+    with h5py.File(tmp_path / "data.h5", "r+") as handle:
+        record = handle["records"][0]
+        record[field] = value
+        handle["records"][0] = record
+
+    with pytest.raises(ValueError, match=message):
+        BatchedHDF5Reader(tmp_path).read(0)
+
+
+def test_batched_hdf5_reader_rejects_shape_data_length_mismatch(
+    tmp_path,
+) -> None:
+    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+        writer.write(0, [Signal(data=np.ones(4, dtype=np.complex64))])
+    with h5py.File(tmp_path / "data.h5", "r+") as handle:
+        handle["shapes"][0] = 3
+
+    with pytest.raises(ValueError, match="shape does not match data length"):
+        BatchedHDF5Reader(tmp_path).read(0)
+
+
+def test_batched_hdf5_reader_rejects_component_cycle(tmp_path) -> None:
+    component = Signal(data=np.ones(2, dtype=np.complex64))
+    signal = Signal(
+        data=np.ones(4, dtype=np.complex64),
+        component_signals=[component],
+    )
+    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+        writer.write(0, [signal])
+    with h5py.File(tmp_path / "data.h5", "r+") as handle:
+        handle["components"][0] = 0
+
+    with pytest.raises(ValueError, match="component relationship cycle"):
+        BatchedHDF5Reader(tmp_path).read(0)
+
+
+def test_batched_hdf5_reader_rejects_parent_cycle(tmp_path) -> None:
+    parent = HierarchicalMetadataObject(metadata={"name": "parent"})
+    signal = Signal(data=np.ones(4, dtype=np.complex64), parent=parent)
+    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+        writer.write(0, [signal])
+    with h5py.File(tmp_path / "data.h5", "r+") as handle:
+        record = handle["parent_records"][0]
+        record["parent_id"] = 0
+        handle["parent_records"][0] = record
+
+    with pytest.raises(ValueError, match="parent relationship cycle"):
+        BatchedHDF5Reader(tmp_path).read(0)
