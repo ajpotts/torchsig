@@ -27,6 +27,8 @@ from torchsig.utils.file_handlers.hdf5_batched import (
 __all__ = ["HomogeneousHDF5Reader", "HomogeneousHDF5Writer"]
 
 _FORMAT = "torchsig-homogeneous-prototype"
+_TARGET_CHUNK_BYTES = 1024**2
+_LARGE_COMPRESSED_SAMPLE_BYTES = 64 * 1024
 _COMPONENT_DTYPE = np.dtype(
     [
         ("data_offset", np.uint64),
@@ -52,7 +54,11 @@ class HomogeneousHDF5Writer(FileWriter):
     """Write fixed-shape top-level arrays with ragged component signals.
 
     Every top-level signal must have the same NumPy dtype and shape. Component
-    counts, component shapes, and component dtypes may vary by sample.
+    counts, component shapes, and component dtypes may vary by sample. The
+    ``chunk_samples`` argument is an upper bound; large observations use fewer
+    samples per chunk to keep top-level chunks at or below roughly one MiB.
+    Compressed observations of at least 64 KiB use one sample per chunk to
+    avoid decompressing unrelated samples during random reads.
     """
 
     def __init__(
@@ -161,10 +167,21 @@ class HomogeneousHDF5Writer(FileWriter):
                 raise TypeError("Homogeneous HDF5 does not support object arrays")
         return array
 
+    def _samples_per_chunk(self, array: np.ndarray) -> int:
+        if self.compression is not None and array.nbytes >= _LARGE_COMPRESSED_SAMPLE_BYTES:
+            return 1
+        return max(
+            1,
+            min(
+                self.chunk_samples,
+                _TARGET_CHUNK_BYTES // max(array.nbytes, 1),
+            ),
+        )
+
     def _create_data(self, array: np.ndarray) -> None:
         self._shape = array.shape
         self._dtype = array.dtype
-        chunk_shape = (self.chunk_samples, *array.shape)
+        chunk_shape = (self._samples_per_chunk(array), *array.shape)
         self._data = self._file.create_dataset(
             "data",
             shape=(0, *array.shape),
@@ -333,18 +350,48 @@ class HomogeneousHDF5Reader(FileReader):
         self._ensure_open()
         return len(self._metadata)
 
-    def _read_component(self, component_id: int) -> Signal:
-        record = self._components[component_id]
-        data_offset = int(record["data_offset"])
-        data_stop = data_offset + int(record["data_length"])
-        shape_offset = int(record["shape_offset"])
-        shape_stop = shape_offset + int(record["shape_count"])
-        shape = tuple(int(value) for value in self._component_shapes[shape_offset:shape_stop])
-        dtype_id = int(record["dtype_id"])
-        return Signal(
-            data=self._component_data[str(dtype_id)][data_offset:data_stop].reshape(shape),
-            metadata=_decode_metadata(self._component_metadata[component_id]),
-        )
+    def _read_components(self, start: int, stop: int) -> list[Signal]:
+        if start == stop:
+            return []
+
+        records = self._components[start:stop]
+        metadata = self._component_metadata[start:stop]
+        shape_start = int(records[0]["shape_offset"])
+        shape_stop = max(int(record["shape_offset"]) + int(record["shape_count"]) for record in records)
+        shapes = self._component_shapes[shape_start:shape_stop]
+
+        data_ranges: dict[int, tuple[int, int]] = {}
+        for record in records:
+            dtype_id = int(record["dtype_id"])
+            data_start = int(record["data_offset"])
+            data_stop = data_start + int(record["data_length"])
+            if dtype_id in data_ranges:
+                range_start, range_stop = data_ranges[dtype_id]
+                data_ranges[dtype_id] = (
+                    min(range_start, data_start),
+                    max(range_stop, data_stop),
+                )
+            else:
+                data_ranges[dtype_id] = (data_start, data_stop)
+        data_by_dtype = {dtype_id: self._component_data[str(dtype_id)][range_start:range_stop] for dtype_id, (range_start, range_stop) in data_ranges.items()}
+
+        components = []
+        for record, component_metadata in zip(records, metadata, strict=True):
+            dtype_id = int(record["dtype_id"])
+            data_start = int(record["data_offset"])
+            data_length = int(record["data_length"])
+            range_start = data_ranges[dtype_id][0]
+            local_start = data_start - range_start
+            component_shape_start = int(record["shape_offset"]) - shape_start
+            component_shape_stop = component_shape_start + int(record["shape_count"])
+            shape = tuple(int(value) for value in shapes[component_shape_start:component_shape_stop])
+            components.append(
+                Signal(
+                    data=data_by_dtype[dtype_id][local_start : local_start + data_length].reshape(shape),
+                    metadata=_decode_metadata(component_metadata),
+                )
+            )
+        return components
 
     def read(self, idx: int) -> Signal:
         """Read one signal and its variable-length component list."""
@@ -354,7 +401,7 @@ class HomogeneousHDF5Reader(FileReader):
         component_stop = int(self._component_offsets[idx + 1])
         return Signal(
             data=self._data[idx],
-            component_signals=[self._read_component(component_id) for component_id in range(component_start, component_stop)],
+            component_signals=self._read_components(component_start, component_stop),
             metadata=_decode_metadata(self._metadata[idx]),
         )
 

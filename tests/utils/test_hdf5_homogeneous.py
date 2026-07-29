@@ -1,5 +1,6 @@
 """Tests for the homogeneous-top-level HDF5 prototype."""
 
+import h5py
 import numpy as np
 import pytest
 
@@ -19,7 +20,7 @@ def _signals() -> list[Signal]:
                 data=np.arange(
                     2 + component_idx,
                     dtype=np.float32 if component_idx % 2 == 0 else np.int16,
-                ),
+                ).reshape((2, 2) if component_idx == 2 else (-1,)),
                 component_index=component_idx,
             )
             for component_idx in range(component_count)
@@ -80,6 +81,33 @@ def test_homogeneous_hdf5_reads_native_contiguous_batch(tmp_path) -> None:
         np.testing.assert_array_equal(actual, expected)
     finally:
         reader.teardown()
+
+
+@pytest.mark.parametrize(
+    ("shape", "dtype", "expected_chunks"),
+    [
+        ((65_536,), np.complex64, (1, 65_536)),
+        ((128, 256), np.float32, (1, 128, 256)),
+        ((2_048,), np.complex64, (32, 2_048)),
+    ],
+    ids=["wideband", "spectrogram", "narrowband"],
+)
+def test_homogeneous_hdf5_selects_top_level_chunks(
+    tmp_path,
+    shape,
+    dtype,
+    expected_chunks,
+) -> None:
+    signal = Signal(data=np.ones(shape, dtype=dtype))
+    with HomogeneousHDF5Writer(
+        tmp_path,
+        compression="lzf",
+        chunk_samples=32,
+    ) as writer:
+        writer.write(0, [signal])
+
+    with h5py.File(tmp_path / "data.h5", "r") as file:
+        assert file["data"].chunks == expected_chunks
 
 
 @pytest.mark.parametrize(
