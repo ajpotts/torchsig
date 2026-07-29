@@ -13,6 +13,7 @@ import json
 import threading
 from copy import deepcopy
 from dataclasses import dataclass
+from enum import Enum, auto
 from io import BytesIO
 from typing import TYPE_CHECKING, Any
 
@@ -49,6 +50,15 @@ _RECORD_DTYPE = np.dtype(
 )
 _PARENT_DTYPE = np.dtype([("parent_id", np.uint64)])
 _VALIDATION_CHUNK_SIZE = 65_536
+
+
+class _WriterState(Enum):
+    """Lifecycle state of a packed HDF5 writer."""
+
+    NEW = auto()
+    OPEN = auto()
+    FAILED = auto()
+    CLOSED = auto()
 
 
 @dataclass
@@ -229,7 +239,23 @@ class BatchedHDF5Writer(FileWriter):
         self._parent_ids: dict[tuple[str, int], int] = {}
         self._lock = threading.Lock()
         self._write_failed = False
+        self._state = _WriterState.NEW
         self.schema = default_packed_schema()
+
+    def setup(self) -> None:
+        """Create a new packed file and transition the writer to open."""
+        if self._state is not _WriterState.NEW:
+            raise RuntimeError(f"Packed HDF5 writer setup is only valid for a new writer; current state is {self._state.name.lower()}")
+        try:
+            super().setup()
+        except Exception:
+            self._write_failed = True
+            self._state = _WriterState.FAILED
+            if self._file is not None:
+                self._file.close()
+                self._file = None
+            raise
+        self._state = _WriterState.OPEN
 
     def _setup(self) -> None:
         self._file = h5py.File(
@@ -484,6 +510,7 @@ class BatchedHDF5Writer(FileWriter):
             _append(self._index, batch.top_ids)
         except Exception as error:
             self._write_failed = True
+            self._state = _WriterState.FAILED
             rollback_errors = []
 
             def attempt_rollback(target: str, operation: Callable[[], None]) -> None:
@@ -540,8 +567,10 @@ class BatchedHDF5Writer(FileWriter):
         ``max_batches_in_memory`` out-of-order batches may be buffered; the
         next expected batch is always accepted because it can drain the buffer.
         """
-        if self._write_failed:
+        if self._state is _WriterState.FAILED:
             raise RuntimeError("Packed HDF5 writer cannot continue after a failed write")
+        if self._state is not _WriterState.OPEN:
+            raise RuntimeError(f"Packed HDF5 writer is not open; current state is {self._state.name.lower()}")
         if not isinstance(batch_idx, int) or isinstance(batch_idx, bool):
             raise TypeError("Packed HDF5 batch index must be an integer")
         if batch_idx < 0:
@@ -558,37 +587,47 @@ class BatchedHDF5Writer(FileWriter):
                 self._flush_buffer()
             except Exception:
                 self._write_failed = True
+                self._state = _WriterState.FAILED
                 raise
 
     def __len__(self) -> int:
         """Return the number of indexed top-level signals."""
+        if self._state is not _WriterState.OPEN:
+            raise RuntimeError(f"Packed HDF5 writer length is only available while open; current state is {self._state.name.lower()}")
         return len(self._index)
 
     def teardown(self) -> None:
         """Flush pending batches and close the packed file."""
+        if self._state is _WriterState.CLOSED:
+            return
         if self._file is None:
+            self._state = _WriterState.CLOSED
             return
         try:
-            self._flush_buffer(final=True)
-            if not self._write_failed:
+            if self._state is _WriterState.OPEN:
+                self._flush_buffer(final=True)
                 self._file.attrs["complete"] = True
                 self._file.flush()
         except Exception:
             self._write_failed = True
+            self._state = _WriterState.FAILED
             raise
         finally:
             self._file.close()
             self._file = None
             self._data.clear()
+            self._state = _WriterState.CLOSED
 
     def __exit__(self, exc_type, exc_value, traceback):
         """Close the file while preserving an incomplete marker on failure."""
         if exc_type is not None:
             self._write_failed = True
+            self._state = _WriterState.FAILED
             if self._file is not None:
                 self._file.close()
                 self._file = None
                 self._data.clear()
+            self._state = _WriterState.CLOSED
             return False
         self.teardown()
         return False

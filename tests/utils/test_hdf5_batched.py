@@ -115,6 +115,48 @@ def test_batched_hdf5_rejects_duplicate_batch_index(tmp_path) -> None:
     writer.teardown()
 
 
+def test_batched_hdf5_rejects_operations_before_setup(tmp_path) -> None:
+    writer = BatchedHDF5Writer(tmp_path)
+
+    with pytest.raises(RuntimeError, match=r"not open.*state is new"):
+        writer.write(0, [])
+    with pytest.raises(RuntimeError, match=r"length.*state is new"):
+        len(writer)
+
+    writer.teardown()
+
+
+def test_batched_hdf5_rejects_repeated_setup_without_overwriting(tmp_path) -> None:
+    writer = BatchedHDF5Writer(tmp_path, max_batches_in_memory=1)
+    writer.setup()
+    writer.write(0, [Signal(data=np.ones(2, dtype=np.complex64))])
+
+    with pytest.raises(RuntimeError, match=r"setup.*state is open"):
+        writer.setup()
+
+    assert len(writer) == 1
+    writer.teardown()
+    reader = BatchedHDF5Reader(tmp_path)
+    try:
+        assert len(reader) == 1
+    finally:
+        reader.teardown()
+
+
+def test_batched_hdf5_rejects_operations_after_teardown(tmp_path) -> None:
+    writer = BatchedHDF5Writer(tmp_path)
+    writer.setup()
+    writer.teardown()
+    writer.teardown()
+
+    with pytest.raises(RuntimeError, match=r"not open.*state is closed"):
+        writer.write(0, [])
+    with pytest.raises(RuntimeError, match=r"length.*state is closed"):
+        len(writer)
+    with pytest.raises(RuntimeError, match=r"setup.*state is closed"):
+        writer.setup()
+
+
 def test_batched_hdf5_rejects_missing_batch_at_teardown(tmp_path) -> None:
     writer = BatchedHDF5Writer(tmp_path, max_batches_in_memory=1)
     writer.setup()
@@ -416,8 +458,10 @@ def test_batched_hdf5_marks_successful_file_complete(tmp_path) -> None:
 
 
 def test_batched_hdf5_context_exception_leaves_file_incomplete(tmp_path) -> None:
+    writer = BatchedHDF5Writer(tmp_path, max_batches_in_memory=1)
+
     def fail_during_generation() -> None:
-        with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+        with writer:
             writer.write(1, [Signal(data=np.ones(4, dtype=np.complex64))])
             raise RuntimeError("generation failed")
 
@@ -426,6 +470,8 @@ def test_batched_hdf5_context_exception_leaves_file_incomplete(tmp_path) -> None
 
     with h5py.File(tmp_path / "data.h5", "r") as handle:
         assert not bool(handle.attrs["complete"])
+    with pytest.raises(RuntimeError, match=r"not open.*state is closed"):
+        writer.write(0, [])
 
 
 @pytest.mark.parametrize(
