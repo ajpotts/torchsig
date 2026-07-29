@@ -1,9 +1,14 @@
-"""Experimental packed HDF5 reader and writer.
+"""Experimental packed HDF5 reader and writer for TorchSIG signals.
 
-Unlike the current one-dataset-per-signal layout, this format stores IQ data,
-record descriptors, component links, and metadata in appendable datasets.
-It is intentionally separate because its on-disk schema is not backward
-compatible with :mod:`torchsig.utils.file_handlers.hdf5`.
+Unlike the current one-dataset-per-signal layout, this format stores signal
+sample arrays, record descriptors, component links, and metadata in a small
+set of appendable datasets. Signal data is not restricted to one-dimensional
+complex IQ: any non-object NumPy-compatible array is flattened for storage and
+restored to its original shape and dtype when read. This includes real or
+complex multidimensional data such as spectrograms.
+
+The format is intentionally separate because its on-disk schema is not
+backward compatible with :mod:`torchsig.utils.file_handlers.hdf5`.
 """
 
 from __future__ import annotations
@@ -265,7 +270,15 @@ def _validate_acyclic_links(links: list[list[int]], *, relationship: str) -> Non
 
 
 class BatchedHDF5Writer(FileWriter):
-    """Write signals into a small set of appendable HDF5 datasets."""
+    """Write signal arrays into a small set of appendable HDF5 datasets.
+
+    Each :class:`~torchsig.signals.signal_types.Signal` data array is flattened
+    into a stream shared by arrays of the same NumPy dtype. Its original shape
+    is stored separately and reconstructed by :class:`BatchedHDF5Reader`.
+    Batches may therefore mix dtypes and shapes, including one-dimensional
+    complex IQ and multidimensional real or complex spectrogram data. NumPy
+    object arrays are not supported.
+    """
 
     def __init__(
         self,
@@ -708,7 +721,13 @@ class BatchedHDF5Writer(FileWriter):
 
 
 class BatchedHDF5Reader(FileReader):
-    """Read the experimental packed HDF5 schema."""
+    """Read signals from the experimental packed HDF5 schema.
+
+    Stored arrays are reconstructed with their original NumPy dtype and shape.
+    The reader supports both one-dimensional complex IQ and multidimensional
+    representations such as spectrograms; ``batched`` describes the packed
+    storage layout rather than a restriction on signal data.
+    """
 
     def __init__(self, root) -> None:
         super().__init__(root=root)
