@@ -820,21 +820,56 @@ class BatchedHDF5Reader(FileReader):
     def _build_parent(self, parent_id: int) -> HierarchicalMetadataObject | None:
         if parent_id == self._no_parent:
             return None
-        try:
-            metadata, ancestor_id = self._parent_cache[parent_id]
-        except KeyError:
-            record = self._parent_records[parent_id]
-            ancestor_id = int(record[self._parent_fields["parent_id"]])
-            metadata = _decode_metadata(self._parent_metadata[parent_id])
-            self._parent_cache[parent_id] = (metadata, ancestor_id)
-        parent = HierarchicalMetadataObject(metadata=deepcopy(metadata))
-        ancestor = self._build_parent(ancestor_id)
-        if ancestor is not None:
-            parent.add_parent(ancestor, register=False)
+        chain = []
+        while parent_id != self._no_parent:
+            try:
+                metadata, ancestor_id = self._parent_cache[parent_id]
+            except KeyError:
+                record = self._parent_records[parent_id]
+                ancestor_id = int(record[self._parent_fields["parent_id"]])
+                metadata = _decode_metadata(self._parent_metadata[parent_id])
+                self._parent_cache[parent_id] = (metadata, ancestor_id)
+            chain.append(metadata)
+            parent_id = ancestor_id
+
+        parent = None
+        for metadata in reversed(chain):
+            current = HierarchicalMetadataObject(metadata=deepcopy(metadata))
+            if parent is not None:
+                current.add_parent(parent, register=False)
+            parent = current
         return parent
 
     def _read_record(self, record_id: int) -> Signal:
-        record = self._records[record_id]
+        stack: list[tuple[int, np.void | None, int]] = [(record_id, None, 0)]
+        built: list[Signal] = []
+        while stack:
+            current_id, record, component_count = stack.pop()
+            if record is None:
+                record = self._records[current_id]
+                fields = self._record_fields
+                component_start = int(record[fields["component_offset"]])
+                component_count = int(record[fields["component_count"]])
+                component_ids = self._components[component_start : component_start + component_count]
+                stack.append((current_id, record, component_count))
+                stack.extend((int(component_id), None, 0) for component_id in reversed(component_ids))
+                continue
+
+            if component_count:
+                component_signals = built[-component_count:]
+                del built[-component_count:]
+            else:
+                component_signals = []
+            built.append(self._build_record_signal(current_id, record, component_signals))
+        return built[0]
+
+    def _build_record_signal(
+        self,
+        record_id: int,
+        record: np.void,
+        component_signals: list[Signal],
+    ) -> Signal:
+        """Construct one signal after its component signals are available."""
         fields = self._record_fields
         data_start = int(record[fields["data_offset"]])
         data_stop = data_start + int(record[fields["data_length"]])
@@ -842,9 +877,6 @@ class BatchedHDF5Reader(FileReader):
         shape_start = int(record[fields["shape_offset"]])
         shape_stop = shape_start + int(record[fields["shape_count"]])
         shape = tuple(int(value) for value in self._shapes[shape_start:shape_stop])
-        component_start = int(record[fields["component_offset"]])
-        component_stop = component_start + int(record[fields["component_count"]])
-        component_ids = self._components[component_start:component_stop]
         try:
             metadata = self._metadata_cache[record_id]
         except KeyError:
@@ -852,7 +884,7 @@ class BatchedHDF5Reader(FileReader):
             self._metadata_cache[record_id] = metadata
         signal = Signal(
             data=self._data_streams[dtype_id][data_start:data_stop].reshape(shape),
-            component_signals=[self._read_record(int(component_id)) for component_id in component_ids],
+            component_signals=component_signals,
             metadata=deepcopy(metadata),
         )
         parent = self._build_parent(int(record[fields["parent_id"]]))

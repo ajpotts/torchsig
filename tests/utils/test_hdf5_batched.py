@@ -1,5 +1,6 @@
 """Tests for the experimental packed HDF5 format."""
 
+import sys
 from concurrent.futures import ThreadPoolExecutor
 
 import h5py
@@ -498,6 +499,75 @@ def test_batched_hdf5_preserves_transformed_2d_shape(tmp_path, transform) -> Non
         assert actual.data.shape == expected.data.shape
         assert actual.data.dtype == expected.data.dtype
         np.testing.assert_array_equal(actual.data, expected.data)
+    finally:
+        reader.teardown()
+
+
+def test_batched_hdf5_reads_component_hierarchy_beyond_recursion_limit(
+    tmp_path,
+) -> None:
+    depth = sys.getrecursionlimit() + 100
+    signals = [Signal(data=np.array([idx], dtype=np.int16)) for idx in range(depth)]
+    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+        writer.write(0, signals)
+
+    with h5py.File(tmp_path / "data.h5", "r+") as handle:
+        components = handle["components"]
+        components.resize(depth - 1, axis=0)
+        components[:] = np.arange(1, depth, dtype=np.uint64)
+        records = handle["records"][:]
+        records["component_offset"] = np.arange(depth, dtype=np.uint64)
+        records["component_count"][:-1] = 1
+        records["component_count"][-1] = 0
+        handle["records"][:] = records
+        index = handle["index"]
+        index.resize(1, axis=0)
+        index[0] = 0
+
+    reader = BatchedHDF5Reader(tmp_path)
+    try:
+        signal = reader.read(0)
+        for expected in range(depth):
+            assert int(signal.data[0]) == expected
+            if expected < depth - 1:
+                signal = signal.component_signals[0]
+        assert not signal.component_signals
+    finally:
+        reader.teardown()
+
+
+def test_batched_hdf5_reads_parent_hierarchy_beyond_recursion_limit(
+    tmp_path,
+) -> None:
+    depth = sys.getrecursionlimit() + 100
+    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+        writer.write(0, [Signal(data=np.ones(1, dtype=np.complex64))])
+
+    with h5py.File(tmp_path / "data.h5", "r+") as handle:
+        parent_records = handle["parent_records"]
+        parent_records.resize(depth, axis=0)
+        records = np.empty(depth, dtype=parent_records.dtype)
+        records["parent_id"][:-1] = np.arange(1, depth, dtype=np.uint64)
+        records["parent_id"][-1] = np.iinfo(np.uint64).max
+        parent_records[:] = records
+
+        metadata = handle["metadata"][0]
+        parent_metadata = handle["parent_metadata"]
+        parent_metadata.resize(depth, axis=0)
+        parent_metadata[:] = np.asarray([metadata] * depth, dtype=object)
+
+        signal_record = handle["records"][0]
+        signal_record["parent_id"] = 0
+        handle["records"][0] = signal_record
+
+    reader = BatchedHDF5Reader(tmp_path)
+    try:
+        parent = reader.read(0).parent
+        actual_depth = 0
+        while parent is not None:
+            actual_depth += 1
+            parent = parent.parent
+        assert actual_depth == depth
     finally:
         reader.teardown()
 
