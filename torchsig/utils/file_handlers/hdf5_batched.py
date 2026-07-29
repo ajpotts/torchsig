@@ -164,7 +164,8 @@ class BatchedHDF5Writer(FileWriter):
         self._file: h5py.File | None = None
         self._data: dict[int, h5py.Dataset] = {}
         self._dtype_ids: dict[str, int] = {}
-        self._batch_buffer: list[tuple[int, list[Signal]]] = []
+        self._batch_buffer: dict[int, list[Signal]] = {}
+        self._next_batch_idx = 0
         self._parent_ids: dict[tuple[str, int], int] = {}
         self._lock = threading.Lock()
         self.schema = default_packed_schema()
@@ -243,6 +244,8 @@ class BatchedHDF5Writer(FileWriter):
         self._parent_ids.clear()
         self._dtype_ids.clear()
         self._data.clear()
+        self._batch_buffer.clear()
+        self._next_batch_idx = 0
 
     def _data_kwargs(self) -> dict[str, Any]:
         kwargs: dict[str, Any] = {"chunks": True}
@@ -349,21 +352,41 @@ class BatchedHDF5Writer(FileWriter):
             _append(self._components, np.asarray(links, dtype=np.uint64))
         _append(self._index, np.asarray(top_ids, dtype=np.uint64))
 
-    def _flush_buffer(self) -> None:
-        if not self._batch_buffer:
-            return
+    def _flush_buffer(self, *, final: bool = False) -> None:
         with self._lock:
-            self._batch_buffer.sort(key=lambda item: item[0])
-            batches = self._batch_buffer
-            self._batch_buffer = []
-            for _, signals in batches:
+            while self._next_batch_idx in self._batch_buffer:
+                signals = self._batch_buffer.pop(self._next_batch_idx)
                 self._write_batch(signals)
-            self._file.flush()
+                self._next_batch_idx += 1
+            if final and self._batch_buffer:
+                pending = sorted(self._batch_buffer)
+                raise ValueError(
+                    "Cannot finalize packed HDF5 file: missing batch index "
+                    f"{self._next_batch_idx}; pending batch indices: {pending}"
+                )
+            if self._file is not None:
+                self._file.flush()
 
     def write(self, batch_idx: int, data: list[Signal]) -> None:
-        """Buffer a generated batch for ordered packed writing."""
+        """Buffer a uniquely indexed batch and write each contiguous prefix.
+
+        Batch indices must be non-negative and form a contiguous sequence
+        beginning at zero. Batches may arrive out of order, but a batch is not
+        committed until every preceding batch has arrived.
+        """
+        if not isinstance(batch_idx, int) or isinstance(batch_idx, bool):
+            raise TypeError("Packed HDF5 batch index must be an integer")
+        if batch_idx < 0:
+            raise ValueError("Packed HDF5 batch index must be non-negative")
         with self._lock:
-            self._batch_buffer.append((batch_idx, data))
+            if (
+                batch_idx < self._next_batch_idx
+                or batch_idx in self._batch_buffer
+            ):
+                raise ValueError(
+                    f"Duplicate packed HDF5 batch index: {batch_idx}"
+                )
+            self._batch_buffer[batch_idx] = data
             should_flush = len(self._batch_buffer) >= self.max_batches_in_memory
         if should_flush:
             self._flush_buffer()
@@ -376,10 +399,12 @@ class BatchedHDF5Writer(FileWriter):
         """Flush pending batches and close the packed file."""
         if self._file is None:
             return
-        self._flush_buffer()
-        self._file.close()
-        self._file = None
-        self._data.clear()
+        try:
+            self._flush_buffer(final=True)
+        finally:
+            self._file.close()
+            self._file = None
+            self._data.clear()
 
 
 class BatchedHDF5Reader(FileReader):

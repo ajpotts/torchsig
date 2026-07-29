@@ -84,6 +84,57 @@ def test_batched_hdf5_preserves_mixed_signal_dtypes(tmp_path) -> None:
         reader.teardown()
 
 
+def test_batched_hdf5_orders_batches_across_flush_boundaries(tmp_path) -> None:
+    batches = {
+        idx: [Signal(data=np.array([idx], dtype=np.int64))]
+        for idx in range(4)
+    }
+    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=2) as writer:
+        writer.write(2, batches[2])
+        writer.write(3, batches[3])
+        writer.write(0, batches[0])
+        writer.write(1, batches[1])
+
+    reader = BatchedHDF5Reader(tmp_path)
+    try:
+        assert [int(reader.read(idx).data[0]) for idx in range(4)] == [
+            0,
+            1,
+            2,
+            3,
+        ]
+    finally:
+        reader.teardown()
+
+
+def test_batched_hdf5_rejects_duplicate_batch_index(tmp_path) -> None:
+    writer = BatchedHDF5Writer(tmp_path, max_batches_in_memory=2)
+    writer.setup()
+    writer.write(0, [])
+    with pytest.raises(ValueError, match="Duplicate"):
+        writer.write(0, [])
+    writer.teardown()
+
+
+def test_batched_hdf5_rejects_missing_batch_at_teardown(tmp_path) -> None:
+    writer = BatchedHDF5Writer(tmp_path, max_batches_in_memory=1)
+    writer.setup()
+    writer.write(1, [])
+
+    with pytest.raises(ValueError, match="missing batch index 0"):
+        writer.teardown()
+    assert writer._file is None  # noqa: SLF001
+
+
+@pytest.mark.parametrize("batch_idx", [-1, 1.5, True])
+def test_batched_hdf5_rejects_invalid_batch_index(tmp_path, batch_idx) -> None:
+    with (
+        BatchedHDF5Writer(tmp_path) as writer,
+        pytest.raises((TypeError, ValueError), match="batch index"),
+    ):
+        writer.write(batch_idx, [])
+
+
 @pytest.mark.parametrize(
     "transform",
     [ComplexTo2D(), Spectrogram(fft_size=8)],
