@@ -14,10 +14,13 @@ import threading
 from copy import deepcopy
 from dataclasses import dataclass
 from io import BytesIO
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import h5py
 import numpy as np
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 from torchsig.signals.signal_types import Signal
 from torchsig.utils.abstractions import HierarchicalMetadataObject
@@ -434,34 +437,82 @@ class BatchedHDF5Writer(FileWriter):
 
     def _commit_batch(self, batch: _PreparedBatch) -> None:
         """Append an already validated batch to the open HDF5 file."""
-        for dtype_id, dtype in batch.new_dtypes:
-            _append(self._dtypes, [dtype.str])
-            self._data[dtype_id] = self._data_group.create_dataset(
-                str(dtype_id),
-                shape=(0,),
-                maxshape=(None,),
-                dtype=dtype,
-                **self._data_kwargs(),
-            )
-        self._dtype_ids = batch.dtype_ids
+        datasets = {
+            "dtypes": self._dtypes,
+            "records": self._records,
+            "metadata": self._metadata,
+            "shapes": self._shapes,
+            "components": self._components,
+            "index": self._index,
+            "parent_records": self._parent_records,
+            "parent_metadata": self._parent_metadata,
+        }
+        dataset_lengths = {name: len(dataset) for name, dataset in datasets.items()}
+        data_lengths = {dtype_id: len(dataset) for dtype_id, dataset in self._data.items()}
+        existing_data_ids = set(self._data)
+        dtype_ids = self._dtype_ids.copy()
+        parent_ids = self._parent_ids.copy()
 
-        for _, ancestor_id, encoded_metadata in batch.new_parents:
-            _append(
-                self._parent_records,
-                np.array([(ancestor_id,)], dtype=_PARENT_DTYPE),
-            )
-            _append(self._parent_metadata, [encoded_metadata])
-        self._parent_ids = batch.parent_ids
+        try:
+            for dtype_id, dtype in batch.new_dtypes:
+                _append(self._dtypes, [dtype.str])
+                self._data[dtype_id] = self._data_group.create_dataset(
+                    str(dtype_id),
+                    shape=(0,),
+                    maxshape=(None,),
+                    dtype=dtype,
+                    **self._data_kwargs(),
+                )
+            self._dtype_ids = batch.dtype_ids
 
-        for dtype_id, array in batch.arrays_by_dtype.items():
-            _append(self._data[dtype_id], array)
-        _append(self._records, batch.records)
-        _append(self._metadata, batch.metadata)
-        if len(batch.shapes):
-            _append(self._shapes, batch.shapes)
-        if len(batch.components):
-            _append(self._components, batch.components)
-        _append(self._index, batch.top_ids)
+            for _, ancestor_id, encoded_metadata in batch.new_parents:
+                _append(
+                    self._parent_records,
+                    np.array([(ancestor_id,)], dtype=_PARENT_DTYPE),
+                )
+                _append(self._parent_metadata, [encoded_metadata])
+            self._parent_ids = batch.parent_ids
+
+            for dtype_id, array in batch.arrays_by_dtype.items():
+                _append(self._data[dtype_id], array)
+            _append(self._records, batch.records)
+            _append(self._metadata, batch.metadata)
+            if len(batch.shapes):
+                _append(self._shapes, batch.shapes)
+            if len(batch.components):
+                _append(self._components, batch.components)
+            _append(self._index, batch.top_ids)
+        except Exception as error:
+            self._write_failed = True
+            rollback_errors = []
+
+            def attempt_rollback(target: str, operation: Callable[[], None]) -> None:
+                try:
+                    operation()
+                except Exception as rollback_error:  # noqa: BLE001  # pragma: no cover
+                    rollback_errors.append(f"{target}: {rollback_error}")
+
+            for name, dataset in datasets.items():
+                attempt_rollback(
+                    name,
+                    lambda dataset=dataset, length=dataset_lengths[name]: dataset.resize(length, axis=0),
+                )
+            for dtype_id in existing_data_ids:
+                attempt_rollback(
+                    f"data/{dtype_id}",
+                    lambda dtype_id=dtype_id: self._data[dtype_id].resize(data_lengths[dtype_id], axis=0),
+                )
+            for dtype_id in set(self._data) - existing_data_ids:
+                attempt_rollback(
+                    f"data/{dtype_id}",
+                    lambda dtype_id=dtype_id: self._data_group.__delitem__(str(dtype_id)),
+                )
+            self._data = {dtype_id: self._data[dtype_id] for dtype_id in existing_data_ids}
+            self._dtype_ids = dtype_ids
+            self._parent_ids = parent_ids
+            if rollback_errors:
+                error.add_note("Packed HDF5 rollback errors: " + "; ".join(rollback_errors))
+            raise
 
     def _write_batch(self, signals: list[Signal]) -> None:
         batch = self._prepare_batch(signals)
@@ -489,6 +540,8 @@ class BatchedHDF5Writer(FileWriter):
         ``max_batches_in_memory`` out-of-order batches may be buffered; the
         next expected batch is always accepted because it can drain the buffer.
         """
+        if self._write_failed:
+            raise RuntimeError("Packed HDF5 writer cannot continue after a failed write")
         if not isinstance(batch_idx, int) or isinstance(batch_idx, bool):
             raise TypeError("Packed HDF5 batch index must be an integer")
         if batch_idx < 0:

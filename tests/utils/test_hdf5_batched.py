@@ -9,6 +9,7 @@ import pytest
 from torchsig.signals.signal_types import Signal
 from torchsig.transforms.transforms import ComplexTo2D, Spectrogram
 from torchsig.utils.abstractions import HierarchicalMetadataObject
+from torchsig.utils.file_handlers import hdf5_batched
 from torchsig.utils.file_handlers.hdf5_batched import (
     BatchedHDF5Reader,
     BatchedHDF5Writer,
@@ -302,6 +303,91 @@ def test_batched_hdf5_invalid_batch_does_not_append_partial_data(
     }
     assert lengths_after == lengths_before
     assert set(writer._data_group) == data_streams_before  # noqa: SLF001
+    writer.teardown()
+
+
+@pytest.mark.parametrize("fail_on_append", [1, 3, 6, 9])
+def test_batched_hdf5_rolls_back_failed_batch_commit(tmp_path, monkeypatch, fail_on_append) -> None:
+    original_append = hdf5_batched._append  # noqa: SLF001
+    append_count = 0
+
+    def failing_append(dataset, values):
+        nonlocal append_count
+        append_count += 1
+        result = original_append(dataset, values)
+        if append_count == fail_on_append:
+            raise OSError("injected HDF5 append failure")
+        return result
+
+    monkeypatch.setattr(hdf5_batched, "_append", failing_append)
+    parent = HierarchicalMetadataObject(metadata={"split": "train"})
+    component = Signal(data=np.ones(2, dtype=np.complex64))
+    signal = Signal(
+        data=np.ones(4, dtype=np.complex64),
+        component_signals=[component],
+        parent=parent,
+    )
+    writer = BatchedHDF5Writer(tmp_path, max_batches_in_memory=1)
+    writer.setup()
+
+    with pytest.raises(OSError, match="injected HDF5 append failure"):
+        writer.write(0, [signal])
+
+    assert len(writer._dtypes) == 0  # noqa: SLF001
+    assert len(writer._records) == 0  # noqa: SLF001
+    assert len(writer._metadata) == 0  # noqa: SLF001
+    assert len(writer._shapes) == 0  # noqa: SLF001
+    assert len(writer._components) == 0  # noqa: SLF001
+    assert len(writer._index) == 0  # noqa: SLF001
+    assert len(writer._parent_records) == 0  # noqa: SLF001
+    assert len(writer._parent_metadata) == 0  # noqa: SLF001
+    assert not writer._data  # noqa: SLF001
+    assert not writer._dtype_ids  # noqa: SLF001
+    assert not writer._parent_ids  # noqa: SLF001
+    with pytest.raises(RuntimeError, match="cannot continue"):
+        writer.write(1, [signal])
+
+    writer.teardown()
+    with h5py.File(tmp_path / "data.h5", "r") as handle:
+        assert not bool(handle.attrs["complete"])
+
+
+def test_batched_hdf5_rollback_preserves_committed_batches(tmp_path, monkeypatch) -> None:
+    writer = BatchedHDF5Writer(tmp_path, max_batches_in_memory=1)
+    writer.setup()
+    writer.write(0, [Signal(data=np.ones(4, dtype=np.complex64))])
+    original_append = hdf5_batched._append  # noqa: SLF001
+    append_count = 0
+
+    def failing_append(dataset, values):
+        nonlocal append_count
+        append_count += 1
+        result = original_append(dataset, values)
+        if append_count == 8:
+            raise OSError("injected HDF5 append failure")
+        return result
+
+    monkeypatch.setattr(hdf5_batched, "_append", failing_append)
+    parent = HierarchicalMetadataObject(metadata={"split": "test"})
+    signal = Signal(
+        data=np.ones(3, dtype=np.float32),
+        parent=parent,
+    )
+
+    with pytest.raises(OSError, match="injected HDF5 append failure"):
+        writer.write(1, [signal])
+
+    assert len(writer._dtypes) == 1  # noqa: SLF001
+    assert len(writer._records) == 1  # noqa: SLF001
+    assert len(writer._metadata) == 1  # noqa: SLF001
+    assert len(writer._shapes) == 1  # noqa: SLF001
+    assert len(writer._index) == 1  # noqa: SLF001
+    assert len(writer._parent_records) == 0  # noqa: SLF001
+    assert set(writer._data_group) == {"0"}  # noqa: SLF001
+    assert len(writer._data[0]) == 4  # noqa: SLF001
+    assert writer._dtype_ids == {np.dtype(np.complex64).str: 0}  # noqa: SLF001
+    assert not writer._parent_ids  # noqa: SLF001
+
     writer.teardown()
 
 
