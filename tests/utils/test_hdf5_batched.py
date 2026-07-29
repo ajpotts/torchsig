@@ -205,6 +205,61 @@ def test_batched_hdf5_rejects_non_string_metadata_dictionary_key(
     writer.teardown()
 
 
+def test_batched_hdf5_invalid_batch_does_not_append_partial_data(
+    tmp_path,
+) -> None:
+    valid = Signal(data=np.ones(4, dtype=np.complex64), label="valid")
+    invalid = Signal(
+        data=np.ones(4, dtype=np.float32),
+        unsupported=object(),
+    )
+    writer = BatchedHDF5Writer(tmp_path, max_batches_in_memory=1)
+    writer.setup()
+    writer.write(0, [valid])
+    lengths_before = {
+        "records": len(writer._records),  # noqa: SLF001
+        "metadata": len(writer._metadata),  # noqa: SLF001
+        "shapes": len(writer._shapes),  # noqa: SLF001
+        "components": len(writer._components),  # noqa: SLF001
+        "index": len(writer._index),  # noqa: SLF001
+        "dtypes": len(writer._dtypes),  # noqa: SLF001
+        "parents": len(writer._parent_records),  # noqa: SLF001
+    }
+    data_streams_before = set(writer._data_group)  # noqa: SLF001
+
+    with pytest.raises(TypeError, match="Unsupported packed HDF5 metadata"):
+        writer.write(1, [valid, invalid])
+
+    lengths_after = {
+        "records": len(writer._records),  # noqa: SLF001
+        "metadata": len(writer._metadata),  # noqa: SLF001
+        "shapes": len(writer._shapes),  # noqa: SLF001
+        "components": len(writer._components),  # noqa: SLF001
+        "index": len(writer._index),  # noqa: SLF001
+        "dtypes": len(writer._dtypes),  # noqa: SLF001
+        "parents": len(writer._parent_records),  # noqa: SLF001
+    }
+    assert lengths_after == lengths_before
+    assert set(writer._data_group) == data_streams_before  # noqa: SLF001
+    writer.teardown()
+
+
+def test_batched_hdf5_rejects_component_cycle_before_appending(
+    tmp_path,
+) -> None:
+    signal = Signal(data=np.ones(4, dtype=np.complex64))
+    signal.component_signals.append(signal)
+    writer = BatchedHDF5Writer(tmp_path, max_batches_in_memory=1)
+    writer.setup()
+
+    with pytest.raises(ValueError, match="component signal cycle"):
+        writer.write(0, [signal])
+
+    assert len(writer._records) == 0  # noqa: SLF001
+    assert len(writer._index) == 0  # noqa: SLF001
+    writer.teardown()
+
+
 def test_batched_hdf5_marks_successful_file_complete(tmp_path) -> None:
     with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
         writer.write(0, [Signal(data=np.ones(4, dtype=np.complex64))])

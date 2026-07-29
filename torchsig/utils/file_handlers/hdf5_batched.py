@@ -12,6 +12,7 @@ import base64
 import json
 import threading
 from copy import deepcopy
+from dataclasses import dataclass
 from io import BytesIO
 from typing import Any
 
@@ -44,6 +45,22 @@ _RECORD_DTYPE = np.dtype(
     ]
 )
 _PARENT_DTYPE = np.dtype([("parent_id", np.uint64)])
+
+
+@dataclass
+class _PreparedBatch:
+    """Validated in-memory representation of one append operation."""
+
+    top_ids: np.ndarray
+    records: np.ndarray
+    metadata: list[str]
+    shapes: np.ndarray
+    components: np.ndarray
+    arrays_by_dtype: dict[int, np.ndarray]
+    new_dtypes: list[tuple[int, np.dtype]]
+    new_parents: list[tuple[int, int, str]]
+    dtype_ids: dict[str, int]
+    parent_ids: dict[tuple[str, int], int]
 
 
 def _pack_value(value: Any) -> Any:  # noqa: PLR0911
@@ -294,74 +311,107 @@ class BatchedHDF5Writer(FileWriter):
             kwargs["fletcher32"] = True
         return kwargs
 
-    def _data_for_dtype(self, dtype: np.dtype) -> tuple[int, h5py.Dataset]:
-        dtype_string = dtype.str
-        if dtype_string in self._dtype_ids:
-            dtype_id = self._dtype_ids[dtype_string]
-        else:
-            if dtype.hasobject:
-                raise TypeError("Packed HDF5 does not support object signal dtypes")
-            dtype_id = len(self._dtypes)
-            _append(self._dtypes, [dtype_string])
-            self._dtype_ids[dtype_string] = dtype_id
-            self._data[dtype_id] = self._data_group.create_dataset(
-                str(dtype_id),
-                shape=(0,),
-                maxshape=(None,),
-                dtype=dtype,
-                **self._data_kwargs(),
-            )
-        return dtype_id, self._data[dtype_id]
-
-    def _store_parent(self, parent: HierarchicalMetadataObject | None) -> int:
-        if parent is None:
-            return self.schema.sentinels["no_parent"]
-        parent_parent_id = self._store_parent(parent.parent)
-        encoded_metadata = _encode_metadata(parent)
-        parent_key = (encoded_metadata, parent_parent_id)
-        if parent_key in self._parent_ids:
-            return self._parent_ids[parent_key]
-        parent_id = len(self._parent_records)
-        _append(
-            self._parent_records,
-            np.array([(parent_parent_id,)], dtype=_PARENT_DTYPE),
-        )
-        _append(self._parent_metadata, [encoded_metadata])
-        self._parent_ids[parent_key] = parent_id
-        return parent_id
-
-    def _write_batch(self, signals: list[Signal]) -> None:
+    def _prepare_batch(self, signals: list[Signal]) -> _PreparedBatch | None:
+        """Validate and encode a batch without modifying the HDF5 file."""
         flattened: list[Signal] = []
         component_ids: list[list[int]] = []
+        active_components: set[int] = set()
 
         def add_signal(signal: Signal) -> int:
+            if not isinstance(signal, Signal):
+                raise TypeError(
+                    "Packed HDF5 batches must contain Signal instances"
+                )
+            signal_identity = id(signal)
+            if signal_identity in active_components:
+                raise ValueError("Packed HDF5 component signal cycle detected")
+            active_components.add(signal_identity)
             record_id = len(self._records) + len(flattened)
             flattened.append(signal)
             component_ids.append([])
-            component_ids[-1].extend(add_signal(item) for item in signal.component_signals)
+            children = component_ids[-1]
+            children.extend(
+                add_signal(item) for item in signal.component_signals
+            )
+            active_components.remove(signal_identity)
             return record_id
 
         top_ids = [add_signal(signal) for signal in signals]
         if not flattened:
-            return
+            return None
+
+        dtype_ids = self._dtype_ids.copy()
+        parent_ids = self._parent_ids.copy()
+        new_dtypes: list[tuple[int, np.dtype]] = []
+        new_parents: list[tuple[int, int, str]] = []
+        active_parents: set[int] = set()
+
+        def prepare_dtype(dtype: np.dtype) -> int:
+            if dtype.hasobject:
+                raise TypeError(
+                    "Packed HDF5 does not support object signal dtypes"
+                )
+            dtype_string = dtype.str
+            if dtype_string not in dtype_ids:
+                dtype_id = len(dtype_ids)
+                if dtype_id > np.iinfo(np.uint32).max:
+                    raise OverflowError("Packed HDF5 has too many signal dtypes")
+                dtype_ids[dtype_string] = dtype_id
+                new_dtypes.append((dtype_id, dtype))
+            return dtype_ids[dtype_string]
+
+        def prepare_parent(
+            parent: HierarchicalMetadataObject | None,
+        ) -> int:
+            if parent is None:
+                return self.schema.sentinels["no_parent"]
+            parent_identity = id(parent)
+            if parent_identity in active_parents:
+                raise ValueError("Packed HDF5 parent metadata cycle detected")
+            active_parents.add(parent_identity)
+            ancestor_id = prepare_parent(parent.parent)
+            encoded_metadata = _encode_metadata(parent)
+            parent_key = (encoded_metadata, ancestor_id)
+            if parent_key not in parent_ids:
+                parent_id = len(parent_ids)
+                parent_ids[parent_key] = parent_id
+                new_parents.append(
+                    (parent_id, ancestor_id, encoded_metadata)
+                )
+            active_parents.remove(parent_identity)
+            return parent_ids[parent_key]
 
         arrays_by_dtype: dict[int, list[np.ndarray]] = {}
         offsets_by_dtype: dict[int, int] = {}
         records = np.empty(len(flattened), dtype=_RECORD_DTYPE)
-        metadata = []
+        metadata: list[str] = []
         links: list[int] = []
         shapes: list[int] = []
         component_offset = len(self._components)
         shape_offset = len(self._shapes)
         for idx, signal in enumerate(flattened):
             array = np.asarray(signal.data)
-            dtype_id, data = self._data_for_dtype(array.dtype)
+            if array.ndim > np.iinfo(np.uint16).max:
+                raise OverflowError(
+                    "Packed HDF5 signal has too many dimensions"
+                )
+            children = component_ids[idx]
+            if len(children) > np.iinfo(np.uint32).max:
+                raise OverflowError(
+                    "Packed HDF5 signal has too many component signals"
+                )
+            encoded_metadata = _encode_metadata(signal)
+            parent_id = prepare_parent(signal.parent)
+            dtype_id = prepare_dtype(array.dtype)
             if dtype_id not in offsets_by_dtype:
-                offsets_by_dtype[dtype_id] = len(data)
+                offsets_by_dtype[dtype_id] = (
+                    len(self._data[dtype_id])
+                    if dtype_id in self._data
+                    else 0
+                )
                 arrays_by_dtype[dtype_id] = []
             data_offset = offsets_by_dtype[dtype_id]
             arrays_by_dtype[dtype_id].append(array.reshape(-1))
-            children = component_ids[idx]
             records[idx] = (
                 data_offset,
                 array.size,
@@ -370,22 +420,64 @@ class BatchedHDF5Writer(FileWriter):
                 array.ndim,
                 component_offset + len(links),
                 len(children),
-                self._store_parent(signal.parent),
+                parent_id,
             )
             offsets_by_dtype[dtype_id] += array.size
             shapes.extend(array.shape)
             links.extend(children)
-            metadata.append(_encode_metadata(signal))
+            metadata.append(encoded_metadata)
 
-        for dtype_id, arrays in arrays_by_dtype.items():
-            _append(self._data[dtype_id], np.concatenate(arrays))
-        _append(self._records, records)
-        _append(self._metadata, metadata)
-        if shapes:
-            _append(self._shapes, np.asarray(shapes, dtype=np.uint64))
-        if links:
-            _append(self._components, np.asarray(links, dtype=np.uint64))
-        _append(self._index, np.asarray(top_ids, dtype=np.uint64))
+        return _PreparedBatch(
+            top_ids=np.asarray(top_ids, dtype=np.uint64),
+            records=records,
+            metadata=metadata,
+            shapes=np.asarray(shapes, dtype=np.uint64),
+            components=np.asarray(links, dtype=np.uint64),
+            arrays_by_dtype={
+                dtype_id: np.concatenate(arrays)
+                for dtype_id, arrays in arrays_by_dtype.items()
+            },
+            new_dtypes=new_dtypes,
+            new_parents=new_parents,
+            dtype_ids=dtype_ids,
+            parent_ids=parent_ids,
+        )
+
+    def _commit_batch(self, batch: _PreparedBatch) -> None:
+        """Append an already validated batch to the open HDF5 file."""
+        for dtype_id, dtype in batch.new_dtypes:
+            _append(self._dtypes, [dtype.str])
+            self._data[dtype_id] = self._data_group.create_dataset(
+                str(dtype_id),
+                shape=(0,),
+                maxshape=(None,),
+                dtype=dtype,
+                **self._data_kwargs(),
+            )
+        self._dtype_ids = batch.dtype_ids
+
+        for _, ancestor_id, encoded_metadata in batch.new_parents:
+            _append(
+                self._parent_records,
+                np.array([(ancestor_id,)], dtype=_PARENT_DTYPE),
+            )
+            _append(self._parent_metadata, [encoded_metadata])
+        self._parent_ids = batch.parent_ids
+
+        for dtype_id, array in batch.arrays_by_dtype.items():
+            _append(self._data[dtype_id], array)
+        _append(self._records, batch.records)
+        _append(self._metadata, batch.metadata)
+        if len(batch.shapes):
+            _append(self._shapes, batch.shapes)
+        if len(batch.components):
+            _append(self._components, batch.components)
+        _append(self._index, batch.top_ids)
+
+    def _write_batch(self, signals: list[Signal]) -> None:
+        batch = self._prepare_batch(signals)
+        if batch is not None:
+            self._commit_batch(batch)
 
     def _flush_buffer(self, *, final: bool = False) -> None:
         with self._lock:
