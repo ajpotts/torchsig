@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from torchsig.datasets.datasets import apply_transforms_and_labels_to_signal
+from torchsig.signals.signal_lists import CLASS_FAMILY_DICT, FAMILY_SHARED_LIST
 from torchsig.signals.signal_types import Signal
 from torchsig.transforms.metadata_transforms import (
     GroupingLabel,
@@ -296,6 +297,41 @@ def test_grouping_label_supports_arithmetic_formula_and_default():
     fallback = transform(Signal(bandwidth=7_000))
     assert fallback.group_name == "all"
     assert fallback.group_index == 2
+
+
+def test_grouping_label_match_does_not_require_a_signal():
+    grouping = GroupingLabel(
+        {
+            "groups": [
+                {"name": "linear", "values": ["bpsk", "qpsk"]},
+                {"name": "all", "default": True},
+            ]
+        }
+    )
+
+    assert grouping.match("qpsk") == ("linear", 0)
+    assert grouping.match("tone") == ("all", 1)
+
+
+def test_grouping_label_family_preset_uses_canonical_mapping():
+    grouping = GroupingLabel("family")
+
+    assert grouping.source == "class_name"
+    assert grouping.targets_metadata == ["family_name", "family_index"]
+    assert GroupingLabel.available_presets() == ("family",)
+    for class_name, expected_family in CLASS_FAMILY_DICT.items():
+        family_name, family_index = grouping.match(class_name)
+        assert family_name == expected_family
+        assert family_index == FAMILY_SHARED_LIST.index(expected_family)
+
+
+def test_grouping_label_family_preset_returns_independent_configs():
+    first = GroupingLabel("family")
+    second = GroupingLabel("family")
+
+    first.groups[0]["values"].append("custom-class")
+
+    assert "custom-class" not in second.groups[0]["values"]
 
 
 def test_grouping_label_values_are_available_as_dataset_targets(parent_signal):

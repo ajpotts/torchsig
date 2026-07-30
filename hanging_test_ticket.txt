@@ -1,0 +1,84 @@
+Title: DataLoader test hangs and may leave orphaned Python workers when num_workers=2
+
+Summary
+-------
+The parameterized test below hangs when it exercises TorchSigDataModule with
+two PyTorch DataLoader worker processes:
+
+    tests/datasets/test_datamodules.py::test_datamodule_dataloaders_return_batches[2]
+
+The corresponding num_workers=0 case passes. The multi-worker case does not
+finish within 90 seconds and may leave Python worker processes behind when the
+test run is interrupted.
+
+Observed behavior
+-----------------
+The test creates separate train, validation, and test DataLoaders and retrieves
+only the first batch from each using this pattern:
+
+    batch = next(iter(loader))
+
+With num_workers=2, each DataLoader enables persistent_workers. The temporary
+iterator is discarded immediately after one batch, without an explicit worker
+shutdown. The pytest process then hangs during this test instead of completing.
+
+Reproduction
+------------
+From the repository root, run:
+
+    timeout 90s pytest -vv \
+        tests/datasets/test_datamodules.py \
+        tests/datasets/test_dataset_utils.py \
+        tests/datasets/test_datasets.py
+
+Result observed on Python 3.12.13, pytest 9.1.1, and PyTorch with the repository's
+torchsig-dev environment:
+
+    tests/datasets/test_datamodules.py::test_datamodule_dataloaders_return_batches[0] PASSED
+    tests/datasets/test_datamodules.py::test_datamodule_dataloaders_return_batches[2] <hangs>
+
+The timeout terminates pytest with exit code 124.
+
+The issue can be isolated further with:
+
+    timeout 90s pytest -vv \
+        'tests/datasets/test_datamodules.py::test_datamodule_dataloaders_return_batches[2]'
+
+Expected behavior
+-----------------
+The num_workers=2 case should retrieve a non-empty batch from each DataLoader,
+shut down all worker processes, and allow pytest to exit normally.
+
+Actual behavior
+---------------
+The test stalls during the num_workers=2 parameter and requires external
+termination. Interrupted runs can leave Python DataLoader workers running.
+
+Investigation notes
+-------------------
+The leading hypothesis is a DataLoader iterator/worker lifecycle issue in the
+test. TorchSigDataModule configures persistent_workers=True whenever
+num_workers > 0, but the test creates short-lived iterators solely through
+next(iter(loader)). This should be verified before changing production code.
+
+Possible fixes to evaluate:
+
+1. Keep each iterator in a local variable, consume the required batch, and
+   explicitly shut down its workers in test cleanup.
+2. Add a supported option for disabling persistent workers and use it in this
+   short-lived test.
+3. Reuse one managed iterator per loader and guarantee cleanup with try/finally.
+4. Confirm whether creating three persistent multi-worker DataLoaders in one
+   test exposes a production lifecycle problem that should be fixed in the
+   datamodule rather than worked around in the test.
+
+Acceptance criteria
+-------------------
+* The test passes for both num_workers=0 and num_workers=2.
+* The test suite exits without a timeout.
+* No DataLoader Python worker processes remain after the test completes or
+  fails.
+* The test retains real multi-process coverage; the num_workers=2 parameter is
+  not simply removed or changed to zero.
+* A regression test verifies worker cleanup for short-lived iteration.
+

@@ -1,0 +1,143 @@
+Title: Add equal-probability sampling by configured label group
+
+Summary
+
+This follow-on MR allows TorchSigIterableDataset to balance signal generation
+using an existing GroupingLabel configuration.
+
+Previously, GroupingLabel could assign grouped output labels, but generator
+selection remained uniform per signal class. Groups containing many classes
+therefore appeared more frequently than groups containing only a few classes.
+
+TorchSigIterableDataset now accepts sampling_grouping. It assigns equal total
+probability to every represented group and distributes that probability
+uniformly among the generators within the group.
+
+Usage
+
+The same GroupingLabel instance can control both generator selection and
+output labeling:
+
+    grouping = GroupingLabel("grouping.yaml")
+
+    dataset = TorchSigIterableDataset(
+        signal_generators=["bpsk", "qpsk", "8psk", "2fsk"],
+        transforms=[grouping],
+        target_labels=[grouping.index_label],
+        sampling_grouping=grouping,
+        metadata=metadata,
+    )
+
+TorchSigIterableDataset also accepts a grouping YAML path or equivalent
+configuration mapping directly through sampling_grouping.
+
+Built-in family preset
+
+TorchSIG's canonical class-to-family mapping is available as the built-in
+"family" preset. Users do not need to recreate or maintain a family YAML file:
+
+    dataset = TorchSigIterableDataset(
+        signal_generators="all",
+        sampling_grouping="family",
+        metadata=metadata,
+    )
+
+To use the same family definitions as output labels:
+
+    family_grouping = GroupingLabel("family")
+    dataset = TorchSigIterableDataset(
+        signal_generators="all",
+        sampling_grouping=family_grouping,
+        transforms=[family_grouping],
+        target_labels=[family_grouping.index_label],
+        metadata=metadata,
+    )
+
+The preset is generated from CLASS_FAMILY_DICT. Family names are sorted to
+provide stable numeric indices, and each GroupingLabel receives an independent
+configuration copy.
+
+Probability calculation
+
+Generator probability is calculated as:
+
+    1 / (number of represented groups * generators in the selected group)
+
+For example, if bpsk, qpsk, and 8psk belong to one group and 2fsk belongs to
+another:
+
+    bpsk: 1/6
+    qpsk: 1/6
+    8psk: 1/6
+    2fsk: 1/2
+
+The three PSK generators collectively receive 50% probability, and the FSK
+generator receives the other 50%.
+
+Only groups represented by the dataset's configured signal generators
+participate in the distribution. A configured group with no available
+generator cannot produce samples and therefore receives no probability.
+
+When a generated component is rejected because it overlaps an existing
+component, TorchSIG retries within the originally selected group. This avoids
+biasing accepted output components toward groups whose signals are easier to
+place.
+
+Pre-generation metadata requirement
+
+Sampling groups must use metadata available on each generator before signal
+generation. Class-name groupings, including exact, regex, formula, and default
+rules, can be balanced this way.
+
+Values produced or measured during generation cannot determine which
+generator is selected. For example, the realized signal bandwidth is not
+available at generator-selection time. TorchSIG raises a descriptive
+ValueError when the grouping source is unavailable before generation instead
+of silently using an unbalanced distribution.
+
+Public API
+
+- Added the sampling_grouping argument to TorchSigIterableDataset.
+- Added balance_signal_generators_by_group() for applying or reapplying a
+  grouping after all generators have been configured.
+- Added GroupingLabel.match() so grouping rules can classify a source value
+  without constructing or mutating a Signal.
+- Added the built-in GroupingLabel("family") preset and
+  GroupingLabel.available_presets().
+
+Example update
+
+The string-grouping classifier example now passes the same GroupingLabel to
+sampling_grouping and to the dataset transform chain. Its
+WorkerSeedingDataLoader therefore receives labels and generated samples based
+on the same YAML grouping.
+
+Testing
+
+The new tests verify:
+
+- Exact generator probabilities for groups with unequal class counts.
+- Empirical group frequencies over repeated generator selections.
+- Constructor configuration from a YAML grouping path.
+- A clear error when the grouping source is unavailable before generation.
+- GroupingLabel.match() behavior without a Signal object.
+- Equal group frequencies among accepted generated components.
+- Preservation of the selected group across overlap retries.
+- Errors for empty datasets and generators that match no configured group.
+- Correct and independently copied canonical family presets.
+- Equal sampling through sampling_grouping="family".
+
+Commands run:
+
+    pytest -q tests/datasets/test_dataset_class_sampling.py \
+        tests/transforms/test_metadata_transforms.py
+    36 passed
+
+    python examples/scripts/train_grouping_string_classifier.py
+    completed successfully
+
+    git diff --check
+    passed
+
+The test and example runs emit environment-specific warnings about NVML and
+the Matplotlib cache directory. These warnings are unrelated to this change.

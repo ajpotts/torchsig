@@ -1,6 +1,7 @@
 """Metadata Transforms"""
 
 import ast
+import copy
 import re
 from collections.abc import Mapping
 from pathlib import Path
@@ -9,6 +10,7 @@ from typing import Any, ClassVar
 import numpy as np
 import yaml
 
+from torchsig.signals.signal_lists import CLASS_FAMILY_DICT
 from torchsig.signals.signal_types import Signal
 from torchsig.transforms.base_transforms import Transform
 from torchsig.utils.printing import generate_repr_str
@@ -20,6 +22,32 @@ __all__ = [
     "YOLOLabel",
 ]
 
+
+def _build_family_grouping_config() -> dict[str, Any]:
+    """Build the canonical TorchSIG family-grouping preset."""
+    classes_by_family: dict[str, list[str]] = {}
+    for class_name, family_name in CLASS_FAMILY_DICT.items():
+        classes_by_family.setdefault(family_name, []).append(class_name)
+
+    return {
+        "source": "class_name",
+        "labels": {
+            "name": "family_name",
+            "index": "family_index",
+        },
+        "groups": [
+            {
+                "name": family_name,
+                "values": sorted(classes_by_family[family_name]),
+            }
+            for family_name in sorted(classes_by_family)
+        ],
+    }
+
+
+_BUILTIN_GROUPING_CONFIGS = {
+    "family": _build_family_grouping_config(),
+}
 
 ## Base/Helper Classes
 class MetadataTransform(Transform):
@@ -291,7 +319,9 @@ class GroupingLabel(MetadataTransform):
                 default: true
 
     Args:
-        config: YAML file path or a mapping with the same schema.
+        config: Built-in preset name, YAML file path, or a mapping with the
+            same schema. The ``"family"`` preset uses TorchSIG's canonical
+            class-to-family mapping.
         **kwargs: Additional keyword arguments passed to the parent class.
     """
 
@@ -364,6 +394,8 @@ class GroupingLabel(MetadataTransform):
         """Load and copy grouping configuration."""
         if isinstance(config, Mapping):
             return dict(config)
+        if isinstance(config, str) and config in _BUILTIN_GROUPING_CONFIGS:
+            return copy.deepcopy(_BUILTIN_GROUPING_CONFIGS[config])
         if isinstance(config, (str, Path)):
             path = Path(config)
             loaded = yaml.safe_load(path.read_text())
@@ -371,6 +403,11 @@ class GroupingLabel(MetadataTransform):
                 raise TypeError("grouping YAML root must be a mapping")
             return loaded
         raise TypeError("config must be a YAML path or mapping")
+
+    @staticmethod
+    def available_presets() -> tuple[str, ...]:
+        """Return the names of built-in grouping configurations."""
+        return tuple(sorted(_BUILTIN_GROUPING_CONFIGS))
 
     def _validate_config(self) -> None:
         """Validate grouping configuration structure and label names."""
@@ -403,10 +440,15 @@ class GroupingLabel(MetadataTransform):
                 "default",
             } & group.keys()
             if len(rule_names) != 1:
-                raise ValueError(f"group {name!r} must define exactly one of values, regex, formula, or default")
+                raise ValueError(
+                    f"group {name!r} must define exactly one of values, "
+                    "regex, formula, or default"
+                )
             if "default" in group:
                 if group["default"] is not True:
-                    raise ValueError(f"group {name!r} default rule must be true")
+                    raise ValueError(
+                        f"group {name!r} default rule must be true"
+                    )
                 if group_index != len(self.groups) - 1:
                     raise ValueError("the default group must be last")
 
@@ -556,6 +598,33 @@ class GroupingLabel(MetadataTransform):
             return True
         return bool(self._evaluate_formula(rule, value))
 
+    def match(self, value: Any) -> tuple[str, int]:
+        """Return the configured group name and index for a source value.
+
+        This method applies the same ordered rules used by the metadata
+        transform without requiring or mutating a :class:`Signal`. It can be
+        used to configure sampling distributions before signal generation.
+
+        Args:
+            value: Value from the configured source metadata field.
+
+        Returns:
+            A tuple containing the matched group name and numeric index.
+
+        Raises:
+            ValueError: If no configured group matches the value.
+        """
+        for group_index, (group, compiled_rule) in enumerate(
+            zip(self.groups, self._compiled_rules, strict=True)
+        ):
+            rule_type, rule = compiled_rule
+            if self._rule_matches(rule_type, rule, value):
+                return group["name"], group_index
+
+        raise ValueError(
+            f"value {value!r} did not match any configured group"
+        )
+
     def __apply__(self, signal: Signal) -> Signal:
         """Assign the first matching group to a signal.
 
@@ -566,11 +635,14 @@ class GroupingLabel(MetadataTransform):
             raise ValueError(f"GroupingLabel requires signal metadata field {self.source!r}")
         value = getattr(signal, self.source)
 
-        for group_index, (group, compiled_rule) in enumerate(zip(self.groups, self._compiled_rules, strict=True)):
-            rule_type, rule = compiled_rule
-            if self._rule_matches(rule_type, rule, value):
-                signal[self.name_label] = group["name"]
-                signal[self.index_label] = group_index
-                return signal
+        try:
+            group_name, group_index = self.match(value)
+        except ValueError as error:
+            raise ValueError(
+                f"value {value!r} from metadata field {self.source!r} did "
+                "not match any configured group"
+            ) from error
 
-        raise ValueError(f"value {value!r} from metadata field {self.source!r} did not match any configured group")
+        signal[self.name_label] = group_name
+        signal[self.index_label] = group_index
+        return signal
