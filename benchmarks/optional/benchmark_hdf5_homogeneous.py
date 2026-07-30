@@ -11,6 +11,7 @@ Run one workload with, for example:
         --benchmark-only -k wideband
 """
 
+import tracemalloc
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +19,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+import torchsig.utils.file_handlers.hdf5_homogeneous as homogeneous_module
 from torchsig.signals.signal_types import Signal
 from torchsig.utils.file_handlers.hdf5_batched import (
     BatchedHDF5Reader,
@@ -184,6 +186,29 @@ def _packed_contiguous_read(
     return np.stack([reader.read(idx).data for idx in range(start, stop)])
 
 
+def _open_reader(reader_class: Callable, root: Path) -> int:
+    reader = reader_class(root)
+    try:
+        return len(reader)
+    finally:
+        reader.teardown()
+
+
+def _cold_reader_open_peak(
+    reader_class: Callable,
+    root: Path,
+) -> int:
+    if reader_class is HomogeneousHDF5Reader:
+        homogeneous_module._VALIDATED_FILES.pop(str(root / "data.h5"), None)  # noqa: SLF001
+    tracemalloc.start()
+    try:
+        _open_reader(reader_class, root)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    return peak
+
+
 def _set_extra_info(
     benchmark,
     workload: Workload,
@@ -196,6 +221,37 @@ def _set_extra_info(
     benchmark.extra_info["shape"] = workload.shape
     benchmark.extra_info["max_components"] = workload.max_components
     benchmark.extra_info["file_size_mib"] = file_size / (1024**2)
+
+
+@pytest.mark.benchmark
+@pytest.mark.parametrize("case", CASES, ids=_case_id)
+def test_benchmark_homogeneous_reader_open(
+    benchmark,
+    tmp_path,
+    case,
+) -> None:
+    """Measure warm reader opening and record cold-open peak allocation."""
+    (
+        workload,
+        compression_name,
+        compression,
+        format_name,
+        writer_class,
+        reader_class,
+    ) = case
+    signals = _make_signals(workload)
+    root = tmp_path / f"dataset-{format_name}"
+    file_size = _write(
+        writer_class,
+        root,
+        signals,
+        workload,
+        compression,
+    )
+    peak_bytes = _cold_reader_open_peak(reader_class, root)
+    assert benchmark(_open_reader, reader_class, root) == len(signals)
+    _set_extra_info(benchmark, workload, compression_name, file_size)
+    benchmark.extra_info["cold_open_peak_mib"] = peak_bytes / (1024**2)
 
 
 @pytest.mark.benchmark

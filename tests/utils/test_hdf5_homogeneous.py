@@ -4,6 +4,7 @@ import h5py
 import numpy as np
 import pytest
 
+import torchsig.utils.file_handlers.hdf5_homogeneous as homogeneous_module
 from torchsig.signals.signal_types import Signal
 from torchsig.utils.abstractions import HierarchicalMetadataObject
 from torchsig.utils.file_handlers.hdf5_homogeneous import (
@@ -264,6 +265,72 @@ def test_homogeneous_hdf5_rejects_component_shape_mismatch(tmp_path) -> None:
         file["components"][0] = record
 
     with pytest.raises(ValueError, match="shape does not match"):
+        len(HomogeneousHDF5Reader(tmp_path))
+
+
+def test_homogeneous_hdf5_validation_crosses_chunk_boundaries(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        homogeneous_module,
+        "_VALIDATION_CHUNK_RECORDS",
+        2,
+    )
+    signals = [
+        Signal(
+            data=np.ones(8, dtype=np.complex64),
+            component_signals=[Signal(data=np.array([idx], dtype=np.float32))],
+        )
+        for idx in range(6)
+    ]
+    with HomogeneousHDF5Writer(tmp_path) as writer:
+        writer.write(0, signals)
+    with h5py.File(tmp_path / "data.h5", "r+") as file:
+        file["component_offsets"][4] = 1
+
+    with pytest.raises(ValueError, match="component offsets are invalid"):
+        len(HomogeneousHDF5Reader(tmp_path))
+
+
+def test_homogeneous_hdf5_caches_successful_validation(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _write_signals(tmp_path)
+    calls = 0
+    original = HomogeneousHDF5Reader._validate_integrity  # noqa: SLF001
+
+    def count_validation(reader) -> None:
+        nonlocal calls
+        calls += 1
+        original(reader)
+
+    monkeypatch.setattr(
+        HomogeneousHDF5Reader,
+        "_validate_integrity",
+        count_validation,
+    )
+    first = HomogeneousHDF5Reader(tmp_path)
+    assert len(first) == 3
+    first.teardown()
+    second = HomogeneousHDF5Reader(tmp_path)
+    assert len(second) == 3
+    second.teardown()
+    assert calls == 1
+
+
+def test_homogeneous_hdf5_invalidates_validation_cache(tmp_path) -> None:
+    _write_signals(tmp_path)
+    reader = HomogeneousHDF5Reader(tmp_path)
+    assert len(reader) == 3
+    reader.teardown()
+
+    with h5py.File(tmp_path / "data.h5", "r+") as file:
+        file["component_offsets"][-1] += 1
+        file.attrs["cache_buster"] = 1
+
+    with pytest.raises(ValueError, match="component offsets are invalid"):
         len(HomogeneousHDF5Reader(tmp_path))
 
 

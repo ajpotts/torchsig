@@ -31,6 +31,9 @@ _FORMAT = "torchsig-homogeneous-prototype"
 _SCHEMA_VERSION = 1
 _TARGET_CHUNK_BYTES = 1024**2
 _LARGE_COMPRESSED_SAMPLE_BYTES = 64 * 1024
+_VALIDATION_CHUNK_RECORDS = 65_536
+_VALIDATION_CACHE_SIZE = 128
+_VALIDATED_FILES: dict[str, tuple[int, int, int, int]] = {}
 _COMPONENT_DTYPE = np.dtype(
     [
         ("data_offset", np.uint64),
@@ -373,8 +376,19 @@ class HomogeneousHDF5Reader(FileReader):
             raise ValueError(f"Unsupported homogeneous HDF5 schema version: {self._file.attrs.get('schema_version')!r}")
         if not bool(self._file.attrs.get("complete", False)):
             raise ValueError("Homogeneous HDF5 prototype file is incomplete")
+        cache_key = str(self.datapath)
+        fingerprint = self._fingerprint()
+        if _VALIDATED_FILES.get(cache_key) == fingerprint:
+            return
         self._validate_structure()
         self._validate_integrity()
+        if cache_key not in _VALIDATED_FILES and len(_VALIDATED_FILES) >= _VALIDATION_CACHE_SIZE:
+            del _VALIDATED_FILES[next(iter(_VALIDATED_FILES))]
+        _VALIDATED_FILES[cache_key] = self._fingerprint()
+
+    def _fingerprint(self) -> tuple[int, int, int, int]:
+        stat = self.datapath.stat()
+        return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns)
 
     def _dataset(self, name: str, ndim: int | None = 1) -> h5py.Dataset:
         if name not in self._file or not isinstance(
@@ -432,39 +446,81 @@ class HomogeneousHDF5Reader(FileReader):
             streams[dtype_id] = stream
         return streams
 
+    def _validate_offsets(
+        self,
+        offsets: h5py.Dataset,
+        signal_count: int,
+        component_count: int,
+    ) -> None:
+        if len(offsets) != signal_count + 1:
+            raise ValueError("Homogeneous HDF5 component offset count does not match signal count")
+        previous: int | None = None
+        for start in range(0, len(offsets), _VALIDATION_CHUNK_RECORDS):
+            values = offsets[start : start + _VALIDATION_CHUNK_RECORDS]
+            if len(values) == 0 or (previous is None and int(values[0]) != 0) or (previous is not None and int(values[0]) < previous) or np.any(values[1:] < values[:-1]):
+                raise ValueError("Homogeneous HDF5 component offsets are invalid")
+            previous = int(values[-1])
+        if previous != component_count:
+            raise ValueError("Homogeneous HDF5 component offsets are invalid")
+
+    def _validate_component_records(
+        self,
+        components: h5py.Dataset,
+        shapes: h5py.Dataset,
+        streams: dict[int, h5py.Dataset],
+    ) -> None:
+        shape_position = 0
+        data_positions = dict.fromkeys(streams, 0)
+        for start in range(0, len(components), _VALIDATION_CHUNK_RECORDS):
+            records = components[start : start + _VALIDATION_CHUNK_RECORDS]
+            chunk_shape_start = shape_position
+            for record in records:
+                shape_offset = int(record["shape_offset"])
+                shape_count = int(record["shape_count"])
+                if shape_offset != shape_position:
+                    raise ValueError("Homogeneous HDF5 component shape offsets are invalid")
+                shape_position += shape_count
+            if shape_position > len(shapes):
+                raise ValueError("Homogeneous HDF5 component shape range is out of bounds")
+            shape_values = shapes[chunk_shape_start:shape_position]
+            local_shape_position = 0
+            for record in records:
+                dtype_id = int(record["dtype_id"])
+                if dtype_id not in streams:
+                    raise ValueError(f"Homogeneous HDF5 component references invalid dtype ID {dtype_id}")
+                data_offset = int(record["data_offset"])
+                data_length = int(record["data_length"])
+                if data_offset + data_length > len(streams[dtype_id]):
+                    raise ValueError("Homogeneous HDF5 component data range is out of bounds")
+                if data_offset != data_positions[dtype_id]:
+                    raise ValueError("Homogeneous HDF5 component data offsets are invalid")
+                data_positions[dtype_id] += data_length
+                shape_count = int(record["shape_count"])
+                shape_stop = local_shape_position + shape_count
+                shape = (int(value) for value in shape_values[local_shape_position:shape_stop])
+                if prod(shape) != data_length:
+                    raise ValueError("Homogeneous HDF5 component shape does not match its data length")
+                local_shape_position = shape_stop
+        if shape_position != len(shapes):
+            raise ValueError("Homogeneous HDF5 component shape offsets are invalid")
+        if any(data_positions[dtype_id] != len(stream) for dtype_id, stream in streams.items()):
+            raise ValueError("Homogeneous HDF5 component data offsets are invalid")
+
     def _validate_integrity(self) -> None:
         data = self._file["data"]
         metadata = self._file["metadata"]
-        offsets = self._file["component_offsets"][:]
-        components = self._file["components"][:]
+        offsets = self._file["component_offsets"]
+        components = self._file["components"]
         component_metadata = self._file["component_metadata"]
-        shapes = self._file["component_shapes"][:]
+        shapes = self._file["component_shapes"]
         if len(data) != len(metadata):
             raise ValueError("Homogeneous HDF5 top-level data and metadata lengths differ")
-        if len(offsets) != len(data) + 1:
-            raise ValueError("Homogeneous HDF5 component offset count does not match signal count")
-        if len(offsets) == 0 or int(offsets[0]) != 0 or np.any(offsets[1:] < offsets[:-1]) or int(offsets[-1]) != len(components):
-            raise ValueError("Homogeneous HDF5 component offsets are invalid")
+        self._validate_offsets(offsets, len(data), len(components))
         if len(component_metadata) != len(components):
             raise ValueError("Homogeneous HDF5 component metadata length does not match records")
 
         streams = self._component_streams()
-        for record in components:
-            dtype_id = int(record["dtype_id"])
-            if dtype_id not in streams:
-                raise ValueError(f"Homogeneous HDF5 component references invalid dtype ID {dtype_id}")
-            data_offset = int(record["data_offset"])
-            data_length = int(record["data_length"])
-            if data_offset + data_length > len(streams[dtype_id]):
-                raise ValueError("Homogeneous HDF5 component data range is out of bounds")
-            shape_offset = int(record["shape_offset"])
-            shape_count = int(record["shape_count"])
-            shape_stop = shape_offset + shape_count
-            if shape_stop > len(shapes):
-                raise ValueError("Homogeneous HDF5 component shape range is out of bounds")
-            shape = (int(value) for value in shapes[shape_offset:shape_stop])
-            if prod(shape) != data_length:
-                raise ValueError("Homogeneous HDF5 component shape does not match its data length")
+        self._validate_component_records(components, shapes, streams)
 
     def __len__(self) -> int:
         """Return the number of stored top-level signals."""
