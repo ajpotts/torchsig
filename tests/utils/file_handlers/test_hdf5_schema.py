@@ -7,9 +7,9 @@ import numpy as np
 import pytest
 
 from torchsig.signals.signal_types import Signal
-from torchsig.utils.file_handlers.batched_hdf5 import (
-    BatchedHDF5Reader,
-    BatchedHDF5Writer,
+from torchsig.utils.file_handlers.packed_hdf5 import (
+    PackedHDF5Reader,
+    PackedHDF5Writer,
 )
 from torchsig.utils.file_handlers.hdf5_schema import (
     default_packed_schema,
@@ -18,7 +18,7 @@ from torchsig.utils.file_handlers.hdf5_schema import (
 
 
 def _write_file(root) -> None:
-    with BatchedHDF5Writer(root, max_batches_in_memory=1) as writer:
+    with PackedHDF5Writer(root, max_batches_in_memory=1) as writer:
         writer.write(0, [Signal(data=np.ones(4, dtype=np.complex64))])
 
 
@@ -46,7 +46,7 @@ def test_batched_reader_rejects_unsupported_schema_major(tmp_path) -> None:
     _write_file(tmp_path)
     _update_schema(tmp_path, lambda value: value.update(schema_major=999))
 
-    reader = BatchedHDF5Reader(tmp_path)
+    reader = PackedHDF5Reader(tmp_path)
     with pytest.raises(ValueError, match="schema major version"):
         reader.read(0)
     assert reader._file is None  # noqa: SLF001
@@ -59,7 +59,7 @@ def test_batched_reader_rejects_unknown_required_feature(tmp_path) -> None:
         value["required_features"].append("future_required_feature")
 
     _update_schema(tmp_path, add_feature)
-    reader = BatchedHDF5Reader(tmp_path)
+    reader = PackedHDF5Reader(tmp_path)
     with pytest.raises(ValueError, match="Unsupported required"):
         reader.read(0)
 
@@ -69,7 +69,7 @@ def test_batched_reader_rejects_missing_declared_path(tmp_path) -> None:
     with h5py.File(tmp_path / "data.h5", "r+") as handle:
         del handle["shapes"]
 
-    reader = BatchedHDF5Reader(tmp_path)
+    reader = PackedHDF5Reader(tmp_path)
     with pytest.raises(ValueError, match="missing declared paths"):
         reader.read(0)
 
@@ -81,7 +81,7 @@ def test_batched_reader_rejects_colliding_schema_paths(tmp_path) -> None:
         value["datasets"]["shapes"]["path"] = value["datasets"]["index"]["path"]
 
     _update_schema(tmp_path, collide_paths)
-    reader = BatchedHDF5Reader(tmp_path)
+    reader = PackedHDF5Reader(tmp_path)
     with pytest.raises(ValueError, match="share path"):
         reader.read(0)
 
@@ -94,7 +94,7 @@ def test_batched_reader_rejects_out_of_range_parent_sentinel(tmp_path, sentinel)
         value["sentinels"]["no_parent"] = sentinel
 
     _update_schema(tmp_path, update_sentinel)
-    reader = BatchedHDF5Reader(tmp_path)
+    reader = PackedHDF5Reader(tmp_path)
     with pytest.raises(ValueError, match="sentinel does not fit uint64"):
         reader.read(0)
 
@@ -104,7 +104,7 @@ def test_batched_reader_rejects_incomplete_file(tmp_path) -> None:
     with h5py.File(tmp_path / "data.h5", "r+") as handle:
         handle.attrs["complete"] = False
 
-    reader = BatchedHDF5Reader(tmp_path)
+    reader = PackedHDF5Reader(tmp_path)
     with pytest.raises(ValueError, match="file is incomplete"):
         reader.read(0)
     assert reader._file is None  # noqa: SLF001
@@ -115,7 +115,7 @@ def test_batched_reader_rejects_missing_completeness_marker(tmp_path) -> None:
     with h5py.File(tmp_path / "data.h5", "r+") as handle:
         del handle.attrs["complete"]
 
-    reader = BatchedHDF5Reader(tmp_path)
+    reader = PackedHDF5Reader(tmp_path)
     with pytest.raises(ValueError, match="missing completeness marker"):
         reader.read(0)
     assert reader._file is None  # noqa: SLF001

@@ -4,10 +4,10 @@ import h5py
 import numpy as np
 import pytest
 
-import torchsig.utils.file_handlers.hdf5_homogeneous as homogeneous_module
+import torchsig.utils.file_handlers.homogeneous_hdf5 as homogeneous_module
 from torchsig.signals.signal_types import Signal
 from torchsig.utils.abstractions import HierarchicalMetadataObject
-from torchsig.utils.file_handlers.hdf5_homogeneous import (
+from torchsig.utils.file_handlers.homogeneous_hdf5 import (
     HomogeneousHDF5Reader,
     HomogeneousHDF5Writer,
 )

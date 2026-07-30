@@ -39,7 +39,7 @@ from torchsig.utils.file_handlers.hdf5_schema import (
     write_schema,
 )
 
-__all__ = ["BatchedHDF5Reader", "BatchedHDF5Writer"]
+__all__ = ["PackedHDF5Reader", "PackedHDF5Writer"]
 
 _RECORD_DTYPE = np.dtype(
     [
@@ -269,12 +269,12 @@ def _validate_acyclic_links(links: list[list[int]], *, relationship: str) -> Non
             stack.extend((child_id, False) for child_id in reversed(links[linked_id]))
 
 
-class BatchedHDF5Writer(FileWriter):
+class PackedHDF5Writer(FileWriter):
     """Write signal arrays into a small set of appendable HDF5 datasets.
 
     Each :class:`~torchsig.signals.signal_types.Signal` data array is flattened
     into a stream shared by arrays of the same NumPy dtype. Its original shape
-    is stored separately and reconstructed by :class:`BatchedHDF5Reader`.
+    is stored separately and reconstructed by :class:`PackedHDF5Reader`.
     Batches may therefore mix dtypes and shapes, including one-dimensional
     complex IQ and multidimensional real or complex spectrogram data. NumPy
     object arrays are not supported.
@@ -720,13 +720,12 @@ class BatchedHDF5Writer(FileWriter):
         return False
 
 
-class BatchedHDF5Reader(FileReader):
+class PackedHDF5Reader(FileReader):
     """Read signals from the experimental packed HDF5 schema.
 
     Stored arrays are reconstructed with their original NumPy dtype and shape.
     The reader supports both one-dimensional complex IQ and multidimensional
-    representations such as spectrograms; ``batched`` describes the packed
-    storage layout rather than a restriction on signal data.
+    representations such as spectrograms.
     """
 
     def __init__(self, root) -> None:

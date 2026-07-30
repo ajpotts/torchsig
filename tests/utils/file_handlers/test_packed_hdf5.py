@@ -10,14 +10,14 @@ import pytest
 from torchsig.signals.signal_types import Signal
 from torchsig.transforms.transforms import ComplexTo2D, Spectrogram
 from torchsig.utils.abstractions import HierarchicalMetadataObject
-from torchsig.utils.file_handlers import batched_hdf5
-from torchsig.utils.file_handlers.batched_hdf5 import (
-    BatchedHDF5Reader,
-    BatchedHDF5Writer,
+from torchsig.utils.file_handlers import packed_hdf5
+from torchsig.utils.file_handlers.packed_hdf5 import (
+    PackedHDF5Reader,
+    PackedHDF5Writer,
 )
 
 
-def test_batched_hdf5_round_trip_components_and_metadata(tmp_path) -> None:
+def test_packed_hdf5_round_trip_components_and_metadata(tmp_path) -> None:
     grandparent = HierarchicalMetadataObject(metadata={"sample_rate": 2_000_000.0, "labels": np.array([1, 2])})
     parent = HierarchicalMetadataObject(
         parent=grandparent,
@@ -40,7 +40,7 @@ def test_batched_hdf5_round_trip_components_and_metadata(tmp_path) -> None:
         for idx in range(3)
     ]
 
-    with BatchedHDF5Writer(
+    with PackedHDF5Writer(
         tmp_path,
         shuffle=False,
         fletcher32=False,
@@ -49,7 +49,7 @@ def test_batched_hdf5_round_trip_components_and_metadata(tmp_path) -> None:
         writer.write(1, signals[2:])
         writer.write(0, signals[:2])
 
-    reader = BatchedHDF5Reader(tmp_path)
+    reader = PackedHDF5Reader(tmp_path)
     try:
         assert len(reader) == len(signals)
         for idx, expected in enumerate(signals):
@@ -68,15 +68,15 @@ def test_batched_hdf5_round_trip_components_and_metadata(tmp_path) -> None:
         reader.teardown()
 
 
-def test_batched_hdf5_preserves_mixed_signal_dtypes(tmp_path) -> None:
+def test_packed_hdf5_preserves_mixed_signal_dtypes(tmp_path) -> None:
     signals = [
         Signal(data=np.ones(4, dtype=np.complex64)),
         Signal(data=np.ones((2, 4), dtype=np.float32)),
     ]
-    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+    with PackedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
         writer.write(0, signals)
 
-    reader = BatchedHDF5Reader(tmp_path)
+    reader = PackedHDF5Reader(tmp_path)
     try:
         complex_signal = reader.read(0)
         real_signal = reader.read(1)
@@ -87,15 +87,15 @@ def test_batched_hdf5_preserves_mixed_signal_dtypes(tmp_path) -> None:
         reader.teardown()
 
 
-def test_batched_hdf5_orders_batches_across_flush_boundaries(tmp_path) -> None:
+def test_packed_hdf5_orders_batches_across_flush_boundaries(tmp_path) -> None:
     batches = {idx: [Signal(data=np.array([idx], dtype=np.int64))] for idx in range(4)}
-    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=2) as writer:
+    with PackedHDF5Writer(tmp_path, max_batches_in_memory=2) as writer:
         writer.write(2, batches[2])
         writer.write(3, batches[3])
         writer.write(0, batches[0])
         writer.write(1, batches[1])
 
-    reader = BatchedHDF5Reader(tmp_path)
+    reader = PackedHDF5Reader(tmp_path)
     try:
         assert [int(reader.read(idx).data[0]) for idx in range(4)] == [
             0,
@@ -107,8 +107,8 @@ def test_batched_hdf5_orders_batches_across_flush_boundaries(tmp_path) -> None:
         reader.teardown()
 
 
-def test_batched_hdf5_rejects_duplicate_batch_index(tmp_path) -> None:
-    writer = BatchedHDF5Writer(tmp_path, max_batches_in_memory=2)
+def test_packed_hdf5_rejects_duplicate_batch_index(tmp_path) -> None:
+    writer = PackedHDF5Writer(tmp_path, max_batches_in_memory=2)
     writer.setup()
     writer.write(0, [])
     with pytest.raises(ValueError, match="Duplicate"):
@@ -116,8 +116,8 @@ def test_batched_hdf5_rejects_duplicate_batch_index(tmp_path) -> None:
     writer.teardown()
 
 
-def test_batched_hdf5_rejects_operations_before_setup(tmp_path) -> None:
-    writer = BatchedHDF5Writer(tmp_path)
+def test_packed_hdf5_rejects_operations_before_setup(tmp_path) -> None:
+    writer = PackedHDF5Writer(tmp_path)
 
     with pytest.raises(RuntimeError, match=r"not open.*state is new"):
         writer.write(0, [])
@@ -127,8 +127,8 @@ def test_batched_hdf5_rejects_operations_before_setup(tmp_path) -> None:
     writer.teardown()
 
 
-def test_batched_hdf5_rejects_repeated_setup_without_overwriting(tmp_path) -> None:
-    writer = BatchedHDF5Writer(tmp_path, max_batches_in_memory=1)
+def test_packed_hdf5_rejects_repeated_setup_without_overwriting(tmp_path) -> None:
+    writer = PackedHDF5Writer(tmp_path, max_batches_in_memory=1)
     writer.setup()
     writer.write(0, [Signal(data=np.ones(2, dtype=np.complex64))])
 
@@ -137,15 +137,15 @@ def test_batched_hdf5_rejects_repeated_setup_without_overwriting(tmp_path) -> No
 
     assert len(writer) == 1
     writer.teardown()
-    reader = BatchedHDF5Reader(tmp_path)
+    reader = PackedHDF5Reader(tmp_path)
     try:
         assert len(reader) == 1
     finally:
         reader.teardown()
 
 
-def test_batched_hdf5_rejects_operations_after_teardown(tmp_path) -> None:
-    writer = BatchedHDF5Writer(tmp_path)
+def test_packed_hdf5_rejects_operations_after_teardown(tmp_path) -> None:
+    writer = PackedHDF5Writer(tmp_path)
     writer.setup()
     writer.teardown()
     writer.teardown()
@@ -158,8 +158,8 @@ def test_batched_hdf5_rejects_operations_after_teardown(tmp_path) -> None:
         writer.setup()
 
 
-def test_batched_hdf5_rejects_missing_batch_at_teardown(tmp_path) -> None:
-    writer = BatchedHDF5Writer(tmp_path, max_batches_in_memory=1)
+def test_packed_hdf5_rejects_missing_batch_at_teardown(tmp_path) -> None:
+    writer = PackedHDF5Writer(tmp_path, max_batches_in_memory=1)
     writer.setup()
     writer.write(1, [])
 
@@ -171,19 +171,19 @@ def test_batched_hdf5_rejects_missing_batch_at_teardown(tmp_path) -> None:
 
 
 @pytest.mark.parametrize("max_batches", [0, -1])
-def test_batched_hdf5_rejects_non_positive_batch_buffer_limit(tmp_path, max_batches) -> None:
+def test_packed_hdf5_rejects_non_positive_batch_buffer_limit(tmp_path, max_batches) -> None:
     with pytest.raises(ValueError, match="must be positive"):
-        BatchedHDF5Writer(tmp_path, max_batches_in_memory=max_batches)
+        PackedHDF5Writer(tmp_path, max_batches_in_memory=max_batches)
 
 
 @pytest.mark.parametrize("max_batches", [1.5, True])
-def test_batched_hdf5_rejects_non_integer_batch_buffer_limit(tmp_path, max_batches) -> None:
+def test_packed_hdf5_rejects_non_integer_batch_buffer_limit(tmp_path, max_batches) -> None:
     with pytest.raises(TypeError, match="must be an integer"):
-        BatchedHDF5Writer(tmp_path, max_batches_in_memory=max_batches)
+        PackedHDF5Writer(tmp_path, max_batches_in_memory=max_batches)
 
 
-def test_batched_hdf5_enforces_out_of_order_batch_buffer_limit(tmp_path) -> None:
-    writer = BatchedHDF5Writer(tmp_path, max_batches_in_memory=2)
+def test_packed_hdf5_enforces_out_of_order_batch_buffer_limit(tmp_path) -> None:
+    writer = PackedHDF5Writer(tmp_path, max_batches_in_memory=2)
     writer.setup()
     writer.write(2, [])
     writer.write(1, [])
@@ -196,25 +196,25 @@ def test_batched_hdf5_enforces_out_of_order_batch_buffer_limit(tmp_path) -> None
     writer.teardown()
 
 
-def test_batched_hdf5_snapshots_buffered_batch_container(tmp_path) -> None:
+def test_packed_hdf5_snapshots_buffered_batch_container(tmp_path) -> None:
     expected = Signal(data=np.array([1], dtype=np.int64))
     replacement = Signal(data=np.array([2], dtype=np.int64))
     batch = [expected]
-    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=2) as writer:
+    with PackedHDF5Writer(tmp_path, max_batches_in_memory=2) as writer:
         writer.write(0, batch)
         batch[0] = replacement
         writer.write(1, [])
 
-    reader = BatchedHDF5Reader(tmp_path)
+    reader = PackedHDF5Reader(tmp_path)
     try:
         np.testing.assert_array_equal(reader.read(0).data, expected.data)
     finally:
         reader.teardown()
 
 
-def test_batched_hdf5_orders_concurrent_batch_writes(tmp_path) -> None:
+def test_packed_hdf5_orders_concurrent_batch_writes(tmp_path) -> None:
     batch_count = 16
-    writer = BatchedHDF5Writer(tmp_path, max_batches_in_memory=batch_count)
+    writer = PackedHDF5Writer(tmp_path, max_batches_in_memory=batch_count)
     writer.setup()
     with ThreadPoolExecutor(max_workers=4) as executor:
         futures = [
@@ -229,7 +229,7 @@ def test_batched_hdf5_orders_concurrent_batch_writes(tmp_path) -> None:
             future.result()
     writer.teardown()
 
-    reader = BatchedHDF5Reader(tmp_path)
+    reader = PackedHDF5Reader(tmp_path)
     try:
         assert [int(reader.read(idx).data[0]) for idx in range(batch_count)] == list(range(batch_count))
     finally:
@@ -237,15 +237,15 @@ def test_batched_hdf5_orders_concurrent_batch_writes(tmp_path) -> None:
 
 
 @pytest.mark.parametrize("batch_idx", [-1, 1.5, True])
-def test_batched_hdf5_rejects_invalid_batch_index(tmp_path, batch_idx) -> None:
+def test_packed_hdf5_rejects_invalid_batch_index(tmp_path, batch_idx) -> None:
     with (
-        BatchedHDF5Writer(tmp_path) as writer,
+        PackedHDF5Writer(tmp_path) as writer,
         pytest.raises((TypeError, ValueError), match="batch index"),
     ):
         writer.write(batch_idx, [])
 
 
-def test_batched_hdf5_preserves_reserved_metadata_tags(tmp_path) -> None:
+def test_packed_hdf5_preserves_reserved_metadata_tags(tmp_path) -> None:
     metadata = {
         "__torchsig_type__": "complex",
         "nested": {
@@ -253,13 +253,13 @@ def test_batched_hdf5_preserves_reserved_metadata_tags(tmp_path) -> None:
             "data": "ordinary user metadata",
         },
     }
-    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+    with PackedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
         writer.write(
             0,
             [Signal(data=np.ones(4, dtype=np.complex64), payload=metadata)],
         )
 
-    reader = BatchedHDF5Reader(tmp_path)
+    reader = PackedHDF5Reader(tmp_path)
     try:
         assert reader.read(0)["payload"] == metadata
     finally:
@@ -277,14 +277,14 @@ def test_batched_hdf5_preserves_reserved_metadata_tags(tmp_path) -> None:
     ],
     ids=["bytes", "complex", "tuple", "numpy-scalar", "numpy-array"],
 )
-def test_batched_hdf5_round_trips_encoded_metadata_types(tmp_path, value) -> None:
-    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+def test_packed_hdf5_round_trips_encoded_metadata_types(tmp_path, value) -> None:
+    with PackedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
         writer.write(
             0,
             [Signal(data=np.ones(4, dtype=np.complex64), value=value)],
         )
 
-    reader = BatchedHDF5Reader(tmp_path)
+    reader = PackedHDF5Reader(tmp_path)
     try:
         actual = reader.read(0)["value"]
         if isinstance(value, np.ndarray):
@@ -296,21 +296,21 @@ def test_batched_hdf5_round_trips_encoded_metadata_types(tmp_path, value) -> Non
         reader.teardown()
 
 
-def test_batched_hdf5_rejects_non_string_metadata_dictionary_key(
+def test_packed_hdf5_rejects_non_string_metadata_dictionary_key(
     tmp_path,
 ) -> None:
     signal = Signal(
         data=np.ones(4, dtype=np.complex64),
         payload={1: "not allowed"},
     )
-    writer = BatchedHDF5Writer(tmp_path, max_batches_in_memory=1)
+    writer = PackedHDF5Writer(tmp_path, max_batches_in_memory=1)
     writer.setup()
     with pytest.raises(TypeError, match="keys must be strings"):
         writer.write(0, [signal])
     writer.teardown()
 
 
-def test_batched_hdf5_invalid_batch_does_not_append_partial_data(
+def test_packed_hdf5_invalid_batch_does_not_append_partial_data(
     tmp_path,
 ) -> None:
     valid = Signal(data=np.ones(4, dtype=np.complex64), label="valid")
@@ -318,7 +318,7 @@ def test_batched_hdf5_invalid_batch_does_not_append_partial_data(
         data=np.ones(4, dtype=np.float32),
         unsupported=object(),
     )
-    writer = BatchedHDF5Writer(tmp_path, max_batches_in_memory=1)
+    writer = PackedHDF5Writer(tmp_path, max_batches_in_memory=1)
     writer.setup()
     writer.write(0, [valid])
     lengths_before = {
@@ -350,8 +350,8 @@ def test_batched_hdf5_invalid_batch_does_not_append_partial_data(
 
 
 @pytest.mark.parametrize("fail_on_append", [1, 3, 6, 9])
-def test_batched_hdf5_rolls_back_failed_batch_commit(tmp_path, monkeypatch, fail_on_append) -> None:
-    original_append = batched_hdf5._append  # noqa: SLF001
+def test_packed_hdf5_rolls_back_failed_batch_commit(tmp_path, monkeypatch, fail_on_append) -> None:
+    original_append = packed_hdf5._append  # noqa: SLF001
     append_count = 0
 
     def failing_append(dataset, values):
@@ -362,7 +362,7 @@ def test_batched_hdf5_rolls_back_failed_batch_commit(tmp_path, monkeypatch, fail
             raise OSError("injected HDF5 append failure")
         return result
 
-    monkeypatch.setattr(batched_hdf5, "_append", failing_append)
+    monkeypatch.setattr(packed_hdf5, "_append", failing_append)
     parent = HierarchicalMetadataObject(metadata={"split": "train"})
     component = Signal(data=np.ones(2, dtype=np.complex64))
     signal = Signal(
@@ -370,7 +370,7 @@ def test_batched_hdf5_rolls_back_failed_batch_commit(tmp_path, monkeypatch, fail
         component_signals=[component],
         parent=parent,
     )
-    writer = BatchedHDF5Writer(tmp_path, max_batches_in_memory=1)
+    writer = PackedHDF5Writer(tmp_path, max_batches_in_memory=1)
     writer.setup()
 
     with pytest.raises(OSError, match="injected HDF5 append failure"):
@@ -395,11 +395,11 @@ def test_batched_hdf5_rolls_back_failed_batch_commit(tmp_path, monkeypatch, fail
         assert not bool(handle.attrs["complete"])
 
 
-def test_batched_hdf5_rollback_preserves_committed_batches(tmp_path, monkeypatch) -> None:
-    writer = BatchedHDF5Writer(tmp_path, max_batches_in_memory=1)
+def test_packed_hdf5_rollback_preserves_committed_batches(tmp_path, monkeypatch) -> None:
+    writer = PackedHDF5Writer(tmp_path, max_batches_in_memory=1)
     writer.setup()
     writer.write(0, [Signal(data=np.ones(4, dtype=np.complex64))])
-    original_append = batched_hdf5._append  # noqa: SLF001
+    original_append = packed_hdf5._append  # noqa: SLF001
     append_count = 0
 
     def failing_append(dataset, values):
@@ -410,7 +410,7 @@ def test_batched_hdf5_rollback_preserves_committed_batches(tmp_path, monkeypatch
             raise OSError("injected HDF5 append failure")
         return result
 
-    monkeypatch.setattr(batched_hdf5, "_append", failing_append)
+    monkeypatch.setattr(packed_hdf5, "_append", failing_append)
     parent = HierarchicalMetadataObject(metadata={"split": "test"})
     signal = Signal(
         data=np.ones(3, dtype=np.float32),
@@ -434,12 +434,12 @@ def test_batched_hdf5_rollback_preserves_committed_batches(tmp_path, monkeypatch
     writer.teardown()
 
 
-def test_batched_hdf5_rejects_component_cycle_before_appending(
+def test_packed_hdf5_rejects_component_cycle_before_appending(
     tmp_path,
 ) -> None:
     signal = Signal(data=np.ones(4, dtype=np.complex64))
     signal.component_signals.append(signal)
-    writer = BatchedHDF5Writer(tmp_path, max_batches_in_memory=1)
+    writer = PackedHDF5Writer(tmp_path, max_batches_in_memory=1)
     writer.setup()
 
     with pytest.raises(ValueError, match="component signal cycle"):
@@ -450,11 +450,11 @@ def test_batched_hdf5_rejects_component_cycle_before_appending(
     writer.teardown()
 
 
-def test_batched_hdf5_rejects_parent_cycle_before_appending(tmp_path) -> None:
+def test_packed_hdf5_rejects_parent_cycle_before_appending(tmp_path) -> None:
     parent = HierarchicalMetadataObject(metadata={"name": "parent"})
     signal = Signal(data=np.ones(4, dtype=np.complex64), parent=parent)
     parent.parent = parent
-    writer = BatchedHDF5Writer(tmp_path, max_batches_in_memory=1)
+    writer = PackedHDF5Writer(tmp_path, max_batches_in_memory=1)
     writer.setup()
 
     with pytest.raises(ValueError, match="parent metadata cycle"):
@@ -465,16 +465,16 @@ def test_batched_hdf5_rejects_parent_cycle_before_appending(tmp_path) -> None:
     writer.teardown()
 
 
-def test_batched_hdf5_marks_successful_file_complete(tmp_path) -> None:
-    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+def test_packed_hdf5_marks_successful_file_complete(tmp_path) -> None:
+    with PackedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
         writer.write(0, [Signal(data=np.ones(4, dtype=np.complex64))])
 
     with h5py.File(tmp_path / "data.h5", "r") as handle:
         assert bool(handle.attrs["complete"])
 
 
-def test_batched_hdf5_context_exception_leaves_file_incomplete(tmp_path) -> None:
-    writer = BatchedHDF5Writer(tmp_path, max_batches_in_memory=1)
+def test_packed_hdf5_context_exception_leaves_file_incomplete(tmp_path) -> None:
+    writer = PackedHDF5Writer(tmp_path, max_batches_in_memory=1)
 
     def fail_during_generation() -> None:
         with writer:
@@ -495,12 +495,12 @@ def test_batched_hdf5_context_exception_leaves_file_incomplete(tmp_path) -> None
     [ComplexTo2D(), Spectrogram(fft_size=8)],
     ids=["complex-to-2d", "spectrogram"],
 )
-def test_batched_hdf5_preserves_transformed_2d_shape(tmp_path, transform) -> None:
+def test_packed_hdf5_preserves_transformed_2d_shape(tmp_path, transform) -> None:
     source = Signal(data=np.exp(2j * np.pi * np.arange(64) / 8).astype(np.complex64))
     expected = transform(source)
     assert expected.data.ndim == 2
 
-    with BatchedHDF5Writer(
+    with PackedHDF5Writer(
         tmp_path,
         shuffle=False,
         fletcher32=False,
@@ -508,7 +508,7 @@ def test_batched_hdf5_preserves_transformed_2d_shape(tmp_path, transform) -> Non
     ) as writer:
         writer.write(0, [expected])
 
-    reader = BatchedHDF5Reader(tmp_path)
+    reader = PackedHDF5Reader(tmp_path)
     try:
         actual = reader.read(0)
         assert actual.data.shape == expected.data.shape
@@ -518,7 +518,7 @@ def test_batched_hdf5_preserves_transformed_2d_shape(tmp_path, transform) -> Non
         reader.teardown()
 
 
-def test_batched_hdf5_reads_component_hierarchy_beyond_recursion_limit(
+def test_packed_hdf5_reads_component_hierarchy_beyond_recursion_limit(
     tmp_path,
 ) -> None:
     depth = sys.getrecursionlimit() + 100
@@ -528,10 +528,10 @@ def test_batched_hdf5_reads_component_hierarchy_beyond_recursion_limit(
             data=np.array([idx], dtype=np.int16),
             component_signals=[signal],
         )
-    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+    with PackedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
         writer.write(0, [signal])
 
-    reader = BatchedHDF5Reader(tmp_path)
+    reader = PackedHDF5Reader(tmp_path)
     try:
         signal = reader.read(0)
         for expected in range(depth):
@@ -543,7 +543,7 @@ def test_batched_hdf5_reads_component_hierarchy_beyond_recursion_limit(
         reader.teardown()
 
 
-def test_batched_hdf5_reads_parent_hierarchy_beyond_recursion_limit(
+def test_packed_hdf5_reads_parent_hierarchy_beyond_recursion_limit(
     tmp_path,
 ) -> None:
     depth = sys.getrecursionlimit() + 100
@@ -553,7 +553,7 @@ def test_batched_hdf5_reads_parent_hierarchy_beyond_recursion_limit(
             parent=parent,
             metadata={"depth": idx},
         )
-    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+    with PackedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
         writer.write(
             0,
             [
@@ -564,7 +564,7 @@ def test_batched_hdf5_reads_parent_hierarchy_beyond_recursion_limit(
             ],
         )
 
-    reader = BatchedHDF5Reader(tmp_path)
+    reader = PackedHDF5Reader(tmp_path)
     try:
         parent = reader.read(0).parent
         actual_depth = 0
@@ -577,20 +577,20 @@ def test_batched_hdf5_reads_parent_hierarchy_beyond_recursion_limit(
         reader.teardown()
 
 
-def test_batched_hdf5_reader_rejects_mismatched_record_metadata_lengths(
+def test_packed_hdf5_reader_rejects_mismatched_record_metadata_lengths(
     tmp_path,
 ) -> None:
-    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+    with PackedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
         writer.write(0, [Signal(data=np.ones(4, dtype=np.complex64))])
     with h5py.File(tmp_path / "data.h5", "r+") as handle:
         handle["metadata"].resize(0, axis=0)
 
     with pytest.raises(ValueError, match="records and metadata lengths differ"):
-        BatchedHDF5Reader(tmp_path).read(0)
+        PackedHDF5Reader(tmp_path).read(0)
 
 
-def test_batched_hdf5_reader_rejects_wrong_table_rank(tmp_path) -> None:
-    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+def test_packed_hdf5_reader_rejects_wrong_table_rank(tmp_path) -> None:
+    with PackedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
         writer.write(0, [Signal(data=np.ones(4, dtype=np.complex64))])
     with h5py.File(tmp_path / "data.h5", "r+") as handle:
         values = handle["shapes"][:]
@@ -598,11 +598,11 @@ def test_batched_hdf5_reader_rejects_wrong_table_rank(tmp_path) -> None:
         handle.create_dataset("shapes", data=values.reshape(1, -1))
 
     with pytest.raises(ValueError, match="shapes must be a one-dimensional"):
-        BatchedHDF5Reader(tmp_path).read(0)
+        PackedHDF5Reader(tmp_path).read(0)
 
 
-def test_batched_hdf5_reader_rejects_signed_index_dtype(tmp_path) -> None:
-    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+def test_packed_hdf5_reader_rejects_signed_index_dtype(tmp_path) -> None:
+    with PackedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
         writer.write(0, [Signal(data=np.ones(4, dtype=np.complex64))])
     with h5py.File(tmp_path / "data.h5", "r+") as handle:
         values = handle["index"][:].astype(np.int64)
@@ -610,13 +610,13 @@ def test_batched_hdf5_reader_rejects_signed_index_dtype(tmp_path) -> None:
         handle.create_dataset("index", data=values)
 
     with pytest.raises(ValueError, match="index must have dtype uint64"):
-        BatchedHDF5Reader(tmp_path).read(0)
+        PackedHDF5Reader(tmp_path).read(0)
 
 
-def test_batched_hdf5_reader_rejects_incompatible_record_field_dtype(
+def test_packed_hdf5_reader_rejects_incompatible_record_field_dtype(
     tmp_path,
 ) -> None:
-    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+    with PackedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
         writer.write(0, [Signal(data=np.ones(4, dtype=np.complex64))])
     with h5py.File(tmp_path / "data.h5", "r+") as handle:
         original = handle["records"]
@@ -634,13 +634,13 @@ def test_batched_hdf5_reader_rejects_incompatible_record_field_dtype(
         handle.create_dataset("records", data=values)
 
     with pytest.raises(ValueError, match=r"data_offset.*incompatible dtype"):
-        BatchedHDF5Reader(tmp_path).read(0)
+        PackedHDF5Reader(tmp_path).read(0)
 
 
-def test_batched_hdf5_reader_rejects_non_utf8_metadata_table(
+def test_packed_hdf5_reader_rejects_non_utf8_metadata_table(
     tmp_path,
 ) -> None:
-    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+    with PackedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
         writer.write(0, [Signal(data=np.ones(4, dtype=np.complex64))])
     with h5py.File(tmp_path / "data.h5", "r+") as handle:
         value = handle["metadata"][0]
@@ -648,26 +648,26 @@ def test_batched_hdf5_reader_rejects_non_utf8_metadata_table(
         handle.create_dataset("metadata", data=[value], dtype="S256")
 
     with pytest.raises(ValueError, match="metadata must contain UTF-8"):
-        BatchedHDF5Reader(tmp_path).read(0)
+        PackedHDF5Reader(tmp_path).read(0)
 
 
-def test_batched_hdf5_reader_rejects_data_dataset_instead_of_group(
+def test_packed_hdf5_reader_rejects_data_dataset_instead_of_group(
     tmp_path,
 ) -> None:
-    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+    with PackedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
         writer.write(0, [Signal(data=np.ones(4, dtype=np.complex64))])
     with h5py.File(tmp_path / "data.h5", "r+") as handle:
         del handle["data"]
         handle.create_dataset("data", data=np.ones(4, dtype=np.complex64))
 
     with pytest.raises(ValueError, match="data path must be a group"):
-        BatchedHDF5Reader(tmp_path).read(0)
+        PackedHDF5Reader(tmp_path).read(0)
 
 
-def test_batched_hdf5_reader_rejects_multidimensional_data_stream(
+def test_packed_hdf5_reader_rejects_multidimensional_data_stream(
     tmp_path,
 ) -> None:
-    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+    with PackedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
         writer.write(0, [Signal(data=np.ones(4, dtype=np.complex64))])
     with h5py.File(tmp_path / "data.h5", "r+") as handle:
         values = handle["data/0"][:]
@@ -675,7 +675,7 @@ def test_batched_hdf5_reader_rejects_multidimensional_data_stream(
         handle["data"].create_dataset("0", data=values.reshape(2, 2))
 
     with pytest.raises(ValueError, match=r"data stream '0'.*one-dimensional"):
-        BatchedHDF5Reader(tmp_path).read(0)
+        PackedHDF5Reader(tmp_path).read(0)
 
 
 @pytest.mark.parametrize(
@@ -688,8 +688,8 @@ def test_batched_hdf5_reader_rejects_multidimensional_data_stream(
         ("parent_id", 99, "invalid parent ID"),
     ],
 )
-def test_batched_hdf5_reader_rejects_invalid_record_references(tmp_path, field, value, message) -> None:
-    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+def test_packed_hdf5_reader_rejects_invalid_record_references(tmp_path, field, value, message) -> None:
+    with PackedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
         writer.write(0, [Signal(data=np.ones(4, dtype=np.complex64))])
     with h5py.File(tmp_path / "data.h5", "r+") as handle:
         record = handle["records"][0]
@@ -697,40 +697,40 @@ def test_batched_hdf5_reader_rejects_invalid_record_references(tmp_path, field, 
         handle["records"][0] = record
 
     with pytest.raises(ValueError, match=message):
-        BatchedHDF5Reader(tmp_path).read(0)
+        PackedHDF5Reader(tmp_path).read(0)
 
 
-def test_batched_hdf5_reader_rejects_shape_data_length_mismatch(
+def test_packed_hdf5_reader_rejects_shape_data_length_mismatch(
     tmp_path,
 ) -> None:
-    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+    with PackedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
         writer.write(0, [Signal(data=np.ones(4, dtype=np.complex64))])
     with h5py.File(tmp_path / "data.h5", "r+") as handle:
         handle["shapes"][0] = 3
 
     with pytest.raises(ValueError, match="shape does not match data length"):
-        BatchedHDF5Reader(tmp_path).read(0)
+        PackedHDF5Reader(tmp_path).read(0)
 
 
-def test_batched_hdf5_reader_rejects_component_cycle(tmp_path) -> None:
+def test_packed_hdf5_reader_rejects_component_cycle(tmp_path) -> None:
     component = Signal(data=np.ones(2, dtype=np.complex64))
     signal = Signal(
         data=np.ones(4, dtype=np.complex64),
         component_signals=[component],
     )
-    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+    with PackedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
         writer.write(0, [signal])
     with h5py.File(tmp_path / "data.h5", "r+") as handle:
         handle["components"][0] = 0
 
     with pytest.raises(ValueError, match="component relationship cycle"):
-        BatchedHDF5Reader(tmp_path).read(0)
+        PackedHDF5Reader(tmp_path).read(0)
 
 
-def test_batched_hdf5_reader_rejects_parent_cycle(tmp_path) -> None:
+def test_packed_hdf5_reader_rejects_parent_cycle(tmp_path) -> None:
     parent = HierarchicalMetadataObject(metadata={"name": "parent"})
     signal = Signal(data=np.ones(4, dtype=np.complex64), parent=parent)
-    with BatchedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
+    with PackedHDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
         writer.write(0, [signal])
     with h5py.File(tmp_path / "data.h5", "r+") as handle:
         record = handle["parent_records"][0]
@@ -738,4 +738,4 @@ def test_batched_hdf5_reader_rejects_parent_cycle(tmp_path) -> None:
         handle["parent_records"][0] = record
 
     with pytest.raises(ValueError, match="parent relationship cycle"):
-        BatchedHDF5Reader(tmp_path).read(0)
+        PackedHDF5Reader(tmp_path).read(0)

@@ -6,10 +6,10 @@ It also measures end-to-end ``DatasetCreator`` writes and sequential or
 shuffled DataLoader epochs with 0, 2, and 8 workers.
 
 Run the complete matrix with:
-    pytest benchmarks/optional/benchmark_hdf5_homogeneous.py --benchmark-only
+    pytest benchmarks/optional/benchmark_homogeneous_hdf5.py --benchmark-only
 
 Run one workload with, for example:
-    pytest benchmarks/optional/benchmark_hdf5_homogeneous.py \
+    pytest benchmarks/optional/benchmark_homogeneous_hdf5.py \
         --benchmark-only -k wideband
 """
 
@@ -24,17 +24,17 @@ import pytest
 import torch
 from torch.utils.data import DataLoader
 
-import torchsig.utils.file_handlers.hdf5_homogeneous as homogeneous_module
+import torchsig.utils.file_handlers.homogeneous_hdf5 as homogeneous_module
 from torchsig.datasets.datasets import StaticTorchSigDataset
 from torchsig.signals.signal_types import Signal
 from torchsig.utils.file_handlers.hdf5 import HDF5Reader, HDF5Writer
-from torchsig.utils.file_handlers.batched_hdf5 import (
-    BatchedHDF5Reader,
-    BatchedHDF5Writer,
-)
-from torchsig.utils.file_handlers.hdf5_homogeneous import (
+from torchsig.utils.file_handlers.homogeneous_hdf5 import (
     HomogeneousHDF5Reader,
     HomogeneousHDF5Writer,
+)
+from torchsig.utils.file_handlers.packed_hdf5 import (
+    PackedHDF5Reader,
+    PackedHDF5Writer,
 )
 from torchsig.utils.writer import DatasetCreator, identity_collate_fn
 
@@ -84,7 +84,7 @@ WORKLOADS = (
 
 FORMATS: dict[str, tuple[Callable, Callable]] = {
     "standard": (HDF5Writer, HDF5Reader),
-    "packed": (BatchedHDF5Writer, BatchedHDF5Reader),
+    "packed": (PackedHDF5Writer, PackedHDF5Reader),
     "homogeneous": (HomogeneousHDF5Writer, HomogeneousHDF5Reader),
 }
 COMPRESSIONS = {
@@ -253,7 +253,7 @@ def _random_read(reader, indices: tuple[int, ...]) -> float:
 
 
 def _packed_contiguous_read(
-    reader: BatchedHDF5Reader,
+    reader: PackedHDF5Reader,
     start: int,
     stop: int,
 ) -> np.ndarray:

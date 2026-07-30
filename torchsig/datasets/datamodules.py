@@ -28,11 +28,11 @@ from torchsig.transforms.metadata_transforms import YOLOLabel
 from torchsig.transforms.transforms import ComplexTo2D, Spectrogram
 from torchsig.utils.data_loading import WorkerSeedingDataLoader
 from torchsig.utils.file_handlers.hdf5 import HDF5Reader, HDF5Writer
-from torchsig.utils.file_handlers.batched_hdf5 import (
-    BatchedHDF5Reader,
-    BatchedHDF5Writer,
+from torchsig.utils.file_handlers.packed_hdf5 import (
+    PackedHDF5Reader,
+    PackedHDF5Writer,
 )
-from torchsig.utils.file_handlers.hdf5_homogeneous import (
+from torchsig.utils.file_handlers.homogeneous_hdf5 import (
     HomogeneousHDF5Reader,
     HomogeneousHDF5Writer,
 )
@@ -84,7 +84,7 @@ def _resolve_file_reader(file_writer, file_reader):
     """
     known_pairs = {
         HDF5Writer: HDF5Reader,
-        BatchedHDF5Writer: BatchedHDF5Reader,
+        PackedHDF5Writer: PackedHDF5Reader,
         HomogeneousHDF5Writer: HomogeneousHDF5Reader,
     }
     expected_reader = known_pairs.get(file_writer)

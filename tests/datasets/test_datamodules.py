@@ -19,8 +19,8 @@ from torch.utils.data import Subset
 from torchsig.utils.defaults import TorchSigDefaults
 from torchsig.transforms.transforms import Spectrogram
 from torchsig.utils.file_handlers import (
-    BatchedHDF5Reader,
-    BatchedHDF5Writer,
+    PackedHDF5Reader,
+    PackedHDF5Writer,
     HDF5Reader,
     HDF5Writer,
     HomogeneousHDF5Reader,
@@ -857,7 +857,7 @@ def test_torchsig_datamodule_infers_packed_reader_end_to_end(
         dataset_size=6,
         dataset_splits=[4, 1, 1],
         create_batch_size=2,
-        file_writer=BatchedHDF5Writer,
+        file_writer=PackedHDF5Writer,
         file_writer_kwargs=writer_options,
         overwrite=True,
         impairment_level=0,
@@ -867,13 +867,13 @@ def test_torchsig_datamodule_infers_packed_reader_end_to_end(
     )
     writer_options["compression"] = "lzf"
 
-    assert dm.file_reader is BatchedHDF5Reader
+    assert dm.file_reader is PackedHDF5Reader
     assert dm.file_writer_kwargs["compression"] is None
     dm.prepare_data()
     dm.setup()
 
     full_dataset = dm.train.dataset
-    assert isinstance(full_dataset.reader, BatchedHDF5Reader)
+    assert isinstance(full_dataset.reader, PackedHDF5Reader)
     assert full_dataset[0].data.ndim == expected_ndim
     full_dataset.reader.teardown()
     with h5py.File(tmp_path / "data.h5", "r") as handle:
@@ -883,11 +883,11 @@ def test_torchsig_datamodule_infers_packed_reader_end_to_end(
         assert not handle["data/0"].fletcher32
     writer_info = (tmp_path / "writer_info.yaml").read_text()
     assert (
-        "torchsig.utils.file_handlers.batched_hdf5.BatchedHDF5Writer"
+        "torchsig.utils.file_handlers.packed_hdf5.PackedHDF5Writer"
         in writer_info
     )
     assert (
-        "torchsig.utils.file_handlers.batched_hdf5.BatchedHDF5Reader"
+        "torchsig.utils.file_handlers.packed_hdf5.PackedHDF5Reader"
         in writer_info
     )
 
@@ -957,10 +957,10 @@ def test_torchsig_datamodule_infers_homogeneous_reader_end_to_end(
 @pytest.mark.parametrize(
     ("file_writer", "file_reader"),
     [
-        (BatchedHDF5Writer, HDF5Reader),
-        (HDF5Writer, BatchedHDF5Reader),
-        (HomogeneousHDF5Writer, BatchedHDF5Reader),
-        (BatchedHDF5Writer, HomogeneousHDF5Reader),
+        (PackedHDF5Writer, HDF5Reader),
+        (HDF5Writer, PackedHDF5Reader),
+        (HomogeneousHDF5Writer, PackedHDF5Reader),
+        (PackedHDF5Writer, HomogeneousHDF5Reader),
     ],
 )
 def test_torchsig_datamodule_rejects_incompatible_handler_pair(
@@ -988,7 +988,7 @@ def test_torchsig_datamodule_rejects_invalid_writer_options(
             root=tmp_path,
             metadata=TorchSigDefaults().default_dataset_metadata,
             dataset_size=1,
-            file_writer=BatchedHDF5Writer,
+            file_writer=PackedHDF5Writer,
             file_writer_kwargs=file_writer_kwargs,
         )
 
@@ -1004,7 +1004,7 @@ def test_split_datamodule_infers_packed_reader_end_to_end(
         root=tmp_path,
         create_batch_size=2,
         create_num_workers=0,
-        file_writer=BatchedHDF5Writer,
+        file_writer=PackedHDF5Writer,
         file_writer_kwargs={
             "compression": None,
             "shuffle": False,
@@ -1015,13 +1015,13 @@ def test_split_datamodule_infers_packed_reader_end_to_end(
         collate_fn=identity_collate_fn,
     )
 
-    assert dm.file_reader is BatchedHDF5Reader
+    assert dm.file_reader is PackedHDF5Reader
     dm.prepare_data()
     dm.setup(None)
 
-    assert isinstance(dm.train.reader, BatchedHDF5Reader)
-    assert isinstance(dm.val.reader, BatchedHDF5Reader)
-    assert isinstance(dm.test.reader, BatchedHDF5Reader)
+    assert isinstance(dm.train.reader, PackedHDF5Reader)
+    assert isinstance(dm.val.reader, PackedHDF5Reader)
+    assert isinstance(dm.test.reader, PackedHDF5Reader)
     dm.train.reader.teardown()
     dm.val.reader.teardown()
     dm.test.reader.teardown()

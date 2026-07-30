@@ -1,22 +1,20 @@
 """TorchSig File Handlers"""
 
-from . import base_handler, batched_hdf5, hdf5, hdf5_homogeneous, npy
+from . import base_handler, hdf5, homogeneous_hdf5, npy, packed_hdf5
 from .base_handler import BaseFileHandler, FileReader, FileWriter
-from .batched_hdf5 import BatchedHDF5Reader, BatchedHDF5Writer
 from .hdf5 import HDF5Reader, HDF5Writer
-from .hdf5_homogeneous import (
+from .homogeneous_hdf5 import (
     HomogeneousHDF5Reader,
     HomogeneousHDF5Writer,
 )
 from .metadata_reader import MetadataIndexError, MetadataReader
 from .npy import NPYReader
 from .ogg import OGGReader
+from .packed_hdf5 import PackedHDF5Reader, PackedHDF5Writer
 from .wav import WAVReader
 
 __all__ = [
     "BaseFileHandler",
-    "BatchedHDF5Reader",
-    "BatchedHDF5Writer",
     "FileReader",
     "FileWriter",
     "HDF5FileHandler",
@@ -28,10 +26,12 @@ __all__ = [
     "MetadataReader",
     "NPYReader",
     "OGGReader",
+    "PackedHDF5Reader",
+    "PackedHDF5Writer",
     "WAVReader",
     "base_handler",
-    "batched_hdf5",
     "hdf5",
-    "hdf5_homogeneous",
+    "homogeneous_hdf5",
     "npy",
+    "packed_hdf5",
 ]

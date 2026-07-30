@@ -1,7 +1,7 @@
 """Optional comparison of object-per-record and packed HDF5 formats.
 
 Run with:
-    pytest benchmarks/optional/benchmark_batched_hdf5.py --benchmark-only
+    pytest benchmarks/optional/benchmark_packed_hdf5.py --benchmark-only
 """
 
 from collections.abc import Callable
@@ -12,11 +12,11 @@ import pytest
 
 from torchsig.signals.signal_types import Signal
 from torchsig.utils.abstractions import HierarchicalMetadataObject
-from torchsig.utils.file_handlers.batched_hdf5 import (
-    BatchedHDF5Reader,
-    BatchedHDF5Writer,
-)
 from torchsig.utils.file_handlers.hdf5 import HDF5Reader, HDF5Writer
+from torchsig.utils.file_handlers.packed_hdf5 import (
+    PackedHDF5Reader,
+    PackedHDF5Writer,
+)
 
 NUM_SIGNALS = 256
 NUM_SAMPLES = 2_048
@@ -45,12 +45,12 @@ PACKED_WRITE_CONFIGS = {
 
 WRITERS: dict[str, Callable] = {
     "current": HDF5Writer,
-    "packed": BatchedHDF5Writer,
+    "packed": PackedHDF5Writer,
 }
 
 READ_FORMATS: dict[str, tuple[Callable, Callable]] = {
     "current": (HDF5Writer, HDF5Reader),
-    "packed": (BatchedHDF5Writer, BatchedHDF5Reader),
+    "packed": (PackedHDF5Writer, PackedHDF5Reader),
 }
 
 
@@ -109,7 +109,7 @@ def _read(reader, indices: tuple[int, ...]) -> float:
 
 def _open_and_validate(root: Path) -> int:
     """Open a packed reader, trigger validation, and close it."""
-    reader = BatchedHDF5Reader(root)
+    reader = PackedHDF5Reader(root)
     try:
         return len(reader)
     finally:
@@ -118,7 +118,7 @@ def _open_and_validate(root: Path) -> int:
 
 def _open_and_read_first(root: Path) -> tuple[int, ...]:
     """Open and validate a packed reader, read one signal, and close it."""
-    reader = BatchedHDF5Reader(root)
+    reader = PackedHDF5Reader(root)
     try:
         return reader.read(0).data.shape
     finally:
@@ -149,7 +149,7 @@ def test_benchmark_hdf5_format_write(
     root = tmp_path / "dataset"
     file_size = benchmark(_write, writer_class, root, signals)
     benchmark.extra_info["file_size_mib"] = file_size / (1024**2)
-    reader_class = BatchedHDF5Reader if writer_class is BatchedHDF5Writer else HDF5Reader
+    reader_class = PackedHDF5Reader if writer_class is PackedHDF5Writer else HDF5Reader
     reader = reader_class(root)
     try:
         assert len(reader) == NUM_SIGNALS
@@ -170,7 +170,7 @@ def test_benchmark_packed_hdf5_write_batch_size(
     root = tmp_path / "dataset"
     file_size = benchmark(
         _write,
-        BatchedHDF5Writer,
+        PackedHDF5Writer,
         root,
         signals,
         batch_size=batch_size,
@@ -180,7 +180,7 @@ def test_benchmark_packed_hdf5_write_batch_size(
     benchmark.extra_info["signals"] = len(signals)
     benchmark.extra_info["file_size_mib"] = file_size / (1024**2)
 
-    reader = BatchedHDF5Reader(root)
+    reader = PackedHDF5Reader(root)
     try:
         assert len(reader) == len(signals)
     finally:
@@ -204,7 +204,7 @@ def test_benchmark_packed_hdf5_write_filters(
     root = tmp_path / "dataset"
     file_size = benchmark(
         _write,
-        BatchedHDF5Writer,
+        PackedHDF5Writer,
         root,
         signals,
         **writer_kwargs,
@@ -213,7 +213,7 @@ def test_benchmark_packed_hdf5_write_filters(
     benchmark.extra_info["signals"] = len(signals)
     benchmark.extra_info["file_size_mib"] = file_size / (1024**2)
 
-    reader = BatchedHDF5Reader(root)
+    reader = PackedHDF5Reader(root)
     try:
         assert len(reader) == len(signals)
     finally:
@@ -258,7 +258,7 @@ def test_benchmark_packed_hdf5_cold_open_validation_scaling(
     root = tmp_path / "dataset"
     signals = _validation_signals(signal_count)
     file_size = _write(
-        BatchedHDF5Writer,
+        PackedHDF5Writer,
         root,
         signals,
         batch_size=min(BATCH_SIZE, signal_count),
@@ -284,7 +284,7 @@ def test_benchmark_packed_hdf5_cold_first_read_scaling(
     root = tmp_path / "dataset"
     signals = _validation_signals(signal_count)
     file_size = _write(
-        BatchedHDF5Writer,
+        PackedHDF5Writer,
         root,
         signals,
         batch_size=min(BATCH_SIZE, signal_count),

@@ -10,7 +10,7 @@ import pytest
 from torch.utils.data import DataLoader, Dataset
 
 from torchsig.signals.signal_types import Signal
-from torchsig.utils.file_handlers.hdf5_homogeneous import (
+from torchsig.utils.file_handlers.homogeneous_hdf5 import (
     HomogeneousHDF5Reader,
     HomogeneousHDF5Writer,
 )

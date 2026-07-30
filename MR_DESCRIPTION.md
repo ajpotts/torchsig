@@ -55,7 +55,7 @@ No existing public backend is removed by this MR.
 ## Performance
 
 The table below reports mean uncompressed timings from
-`benchmarks/optional/benchmark_hdf5_homogeneous.py`. Lower is better.
+`benchmarks/optional/benchmark_homogeneous_hdf5.py`. Lower is better.
 
 | Operation | Workload | Legacy standard | Packed | Homogeneous | Homogeneous vs. packed |
 |---|---|---:|---:|---:|---:|
@@ -99,7 +99,7 @@ The complete optional matrix contains 216 cases covering:
 Run it with:
 
 ```bash
-pytest benchmarks/optional/benchmark_hdf5_homogeneous.py --benchmark-only
+pytest benchmarks/optional/benchmark_homogeneous_hdf5.py --benchmark-only
 ```
 
 ## Validation

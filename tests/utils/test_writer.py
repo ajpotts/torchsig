@@ -8,7 +8,7 @@ from torchsig.utils.writer import DatasetCreator
 from torchsig.utils.data_loading import WorkerSeedingDataLoader
 from torchsig.utils.defaults import TorchSigDefaults, default_dataset
 from torchsig.datasets.datasets import TorchSigIterableDataset, StaticTorchSigDataset
-from torchsig.utils.file_handlers import BatchedHDF5Writer
+from torchsig.utils.file_handlers import PackedHDF5Writer
 
 
 @pytest.mark.parametrize(
@@ -137,7 +137,7 @@ def test_DatasetCreator_overwrite_false_rejects_changed_writer(tmp_path):
             root=tmp_path,
             overwrite=False,
             multithreading=False,
-            file_handler=BatchedHDF5Writer,
+            file_handler=PackedHDF5Writer,
         ).create()
 
 

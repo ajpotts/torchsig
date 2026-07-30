@@ -11,7 +11,7 @@ from torchsig.signals.signal_types import Signal
 from torchsig.transforms.transforms import Spectrogram
 from torchsig.utils.abstractions import HierarchicalMetadataObject
 from torchsig.utils.file_handlers import (
-    BatchedHDF5Reader,
+    PackedHDF5Reader,
     HomogeneousHDF5Reader,
     HomogeneousHDF5Writer,
 )
@@ -176,5 +176,5 @@ def test_dataset_creator_rejects_incompatible_homogeneous_reader(
             ),
             root=tmp_path,
             file_handler=HomogeneousHDF5Writer,
-            file_reader=BatchedHDF5Reader,
+            file_reader=PackedHDF5Reader,
         )

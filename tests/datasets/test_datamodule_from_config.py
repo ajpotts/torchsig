@@ -11,8 +11,8 @@ from torchsig.datasets.datasets import TorchSigDatasetConfig
 from torchsig.transforms.metadata_transforms import YOLOLabel
 from torchsig.transforms.transforms import ComplexTo2D, Spectrogram
 from torchsig.utils.file_handlers import (
-    BatchedHDF5Reader,
-    BatchedHDF5Writer,
+    PackedHDF5Reader,
+    PackedHDF5Writer,
     HomogeneousHDF5Reader,
     HomogeneousHDF5Writer,
 )
@@ -165,12 +165,12 @@ class TestDataModuleCreation:
         dm = TorchSigDataModule.from_config(
             config,
             root=tmp_path,
-            file_writer=BatchedHDF5Writer,
+            file_writer=PackedHDF5Writer,
             file_writer_kwargs=options,
         )
         options["compression"] = "lzf"
 
-        assert dm.file_reader is BatchedHDF5Reader
+        assert dm.file_reader is PackedHDF5Reader
         assert dm.file_writer_kwargs == {
             "compression": None,
             "shuffle": False,

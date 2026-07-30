@@ -12,8 +12,8 @@ from torchsig.datasets.datasets import StaticTorchSigDataset
 from torchsig.signals.signal_types import Signal
 from torchsig.transforms.transforms import Spectrogram
 from torchsig.utils.file_handlers import (
-    BatchedHDF5Reader,
-    BatchedHDF5Writer,
+    PackedHDF5Reader,
+    PackedHDF5Writer,
     FileWriter,
 )
 from torchsig.utils.writer import DatasetCreator
@@ -67,13 +67,13 @@ def test_dataset_creator_round_trips_packed_signals(tmp_path, multithreading, sp
     DatasetCreator(
         dataloader=dataloader,
         root=tmp_path,
-        file_handler=BatchedHDF5Writer,
+        file_handler=PackedHDF5Writer,
         multithreading=multithreading,
     ).create()
 
     dataset = StaticTorchSigDataset(
         root=tmp_path,
-        file_handler_class=BatchedHDF5Reader,
+        file_handler_class=PackedHDF5Reader,
         target_labels=None,
     )
     assert len(dataset) == DATASET_LENGTH
@@ -86,7 +86,7 @@ def test_dataset_creator_round_trips_packed_signals(tmp_path, multithreading, sp
         assert actual["sample_index"] == idx
 
     writer_info = yaml.safe_load((tmp_path / "writer_info.yaml").read_text())
-    assert writer_info["file_handler"] == "BatchedHDF5Writer"
+    assert writer_info["file_handler"] == "PackedHDF5Writer"
     assert writer_info["complete"] is True
 
 
@@ -96,7 +96,7 @@ def test_dataset_creator_failure_leaves_packed_file_incomplete(tmp_path, multith
     creator = DatasetCreator(
         dataloader=dataloader,
         root=tmp_path,
-        file_handler=BatchedHDF5Writer,
+        file_handler=PackedHDF5Writer,
         multithreading=multithreading,
     )
 
@@ -106,7 +106,7 @@ def test_dataset_creator_failure_leaves_packed_file_incomplete(tmp_path, multith
     with h5py.File(tmp_path / "data.h5", "r") as handle:
         assert not bool(handle.attrs["complete"])
     with pytest.raises(ValueError, match="file is incomplete"):
-        BatchedHDF5Reader(tmp_path).read(0)
+        PackedHDF5Reader(tmp_path).read(0)
     writer_info = yaml.safe_load((tmp_path / "writer_info.yaml").read_text())
     assert writer_info["complete"] is False
 
@@ -123,7 +123,7 @@ def test_dataset_creator_forwards_and_records_packed_writer_options(
     DatasetCreator(
         dataloader=DataLoader(_SignalDataset(), batch_size=3),
         root=tmp_path,
-        file_handler=BatchedHDF5Writer,
+        file_handler=PackedHDF5Writer,
         multithreading=False,
         **options,
     ).create()
@@ -166,17 +166,17 @@ def test_dataset_creator_normalizes_legacy_writer_alias_and_class_option(
         root=tmp_path,
         file_writer=_OptionRecordingWriter,
         multithreading=False,
-        required_option=BatchedHDF5Writer,
+        required_option=PackedHDF5Writer,
     ).create()
 
     assert _OptionRecordingWriter.observed_options == [
-        BatchedHDF5Writer,
-        BatchedHDF5Writer,
+        PackedHDF5Writer,
+        PackedHDF5Writer,
     ]
     writer_info = yaml.safe_load((tmp_path / "writer_info.yaml").read_text())
     assert writer_info["file_handler"] == "_OptionRecordingWriter"
     assert writer_info["file_handler_kwargs"] == {
         "required_option": (
-            "torchsig.utils.file_handlers.batched_hdf5.BatchedHDF5Writer"
+            "torchsig.utils.file_handlers.packed_hdf5.PackedHDF5Writer"
         )
     }

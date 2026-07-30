@@ -24,7 +24,7 @@ import numpy as np
 from torchsig.signals.signal_types import Signal
 from torchsig.utils.abstractions import HierarchicalMetadataObject
 from torchsig.utils.file_handlers.base_handler import FileReader, FileWriter
-from torchsig.utils.file_handlers.batched_hdf5 import (
+from torchsig.utils.file_handlers.packed_hdf5 import (
     _decode_metadata,
     _encode_metadata,
 )
