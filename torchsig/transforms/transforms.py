@@ -1869,7 +1869,7 @@ class Spectrogram(SignalTransform):
         fft_size: The FFT size (number of bins) in the spectrogram.
     """
 
-    def __init__(self, fft_size: int, **kwargs):
+    def __init__(self, fft_size: int, fft_stride: int = None, **kwargs):
         """Initialize the Spectrogram transform.
 
         Args:
@@ -1881,7 +1881,7 @@ class Spectrogram(SignalTransform):
         )
         self.fft_size = fft_size
         # fft_stride is the number of data points to move or "hop" over when computing the next FF
-        self.fft_stride = copy(fft_size)
+        self.fft_stride = copy(fft_size) if fft_stride is None else fft_stride
 
     def __apply__(self, signal: Signal) -> Signal:
         """Apply spectrogram computation to the signal.
@@ -2186,7 +2186,8 @@ class TimeVaryingNoise(SignalTransform):
 class Spurs(SignalTransform):
     """Simulates spurs by adding tones into the receive signal.
 
-    This transform adds spurious signals (tones) at specified frequencies with specified power levels.
+    This transform adds spurious signals (tones) at specified frequencies with specified power levels. Be aware that Spurs applied
+    to component signals can impact estimates of SNR, Bandwidth, and metadata like bounding boxes.
 
     Attributes:
         num_spurs: The range of numbers of spurs to add. Defaults to (1,4).

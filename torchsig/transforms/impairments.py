@@ -27,7 +27,6 @@ from torchsig.transforms.transforms import (
     Quantize,
     RandomDropSamples,
     SpectralInversion,
-    Spurs,
     TimeReversal,
 )
 
@@ -80,7 +79,6 @@ class Impairments(Transform):
             RandomApply(CarrierPhaseOffset(), 1.0),
             RandomApply(IntermodulationProducts(), 0.5),
             RandomApply(NonlinearAmplifier(), 0.75),
-            RandomApply(Spurs(), 0.75),
             RandomApply(SpectralInversion(), 0.25),
         ]
 
@@ -88,7 +86,6 @@ class Impairments(Transform):
             RandomApply(IntermodulationProducts(), 0.5),
             RandomApply(NonlinearAmplifier(), 0.75),
             RandomApply(CoarseGainChange(), 0.25),
-            RandomApply(Spurs(), 0.75),
             RandomApply(IQImbalance(), 0.5),
             RandomApply(CarrierPhaseNoise(), 0.75),
             RandomApply(CarrierFrequencyDrift(), 0.75),

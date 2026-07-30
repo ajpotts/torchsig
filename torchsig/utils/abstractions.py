@@ -123,7 +123,7 @@ class HierarchicalMetadataObject(Seedable):
         """
         return self.__class__(
             parent=self.parent if preserve_parent else None,
-            seed=self.seed,
+            seed=self.rng_seed,
             metadata=self._metadata.copy(),
         )
 
@@ -214,9 +214,9 @@ class HierarchicalMetadataObject(Seedable):
         """
         try:
             return self[key]
-        except MetadataAttributeError as e:
-            e.add_note("key missing: '" + str(key) + "'; ")
-            raise e
+        except MetadataAttributeError as exc:
+            message = f"{exc}; key missing: {key!r}"
+            raise MetadataAttributeError(message) from exc
 
     def __setstate__(self, data):
         """Workaround pickling with multiple workers."""

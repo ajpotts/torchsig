@@ -19,14 +19,14 @@ class BaseSignalGenerator(HierarchicalMetadataObject):
         transforms: Transforms to be applied to generated signals before returning them in the __call__() method
     """
 
-    def __init__(self, transforms: list[Any] = [], **kwargs: dict[str, Any]) -> None:
+    def __init__(self, transforms: list[Any] | None = None, **kwargs: dict[str, Any]) -> None:
         """Initializes Signal Builder.
 
         Args:
             transforms: List of transforms to be applied to generated signals before returning them in the __call__() method
             **kwargs: Additional keyword arguments to pass to the parent class (HierarchicalMetadataObject)
         """
-        self.transforms = transforms
+        self.transforms = [] if transforms is None else transforms
         HierarchicalMetadataObject.__init__(self, **kwargs)
 
     def set_default_class_name(self, name: str) -> None:
@@ -62,7 +62,10 @@ class BaseSignalGenerator(HierarchicalMetadataObject):
             self,
             preserve_parent=preserve_parent,
         )
-        cpy.transforms = [transform.copy() for transform in self.transforms]
+        cpy.transforms = [
+            transform.copy() if hasattr(transform, "copy") else transform
+            for transform in self.transforms
+        ]
         return cpy
 
     def validate_metadata_fields(self) -> None:
@@ -77,7 +80,7 @@ class BaseSignalGenerator(HierarchicalMetadataObject):
         """
         try:
             _ = self.required_metadata_fields
-        except:
+        except AttributeError:
             return
         for key in self.required_metadata_fields:
             if not isinstance(key, str):
@@ -163,15 +166,15 @@ class ConcatSignalGenerator(BaseSignalGenerator):
             TypeError: If any of the signal_generators are not BaseSignalGenerator instances.
         """
         BaseSignalGenerator.__init__(self, **kwargs)
+
+        for signal_generator in signal_generators:
+            if not isinstance(signal_generator, BaseSignalGenerator):
+                raise TypeError("signal_generator must be type BaseSignalGenerator.")
+
         self.signal_generators = signal_generators
+
         for signal_generator in self.signal_generators:
-            if True:  # isinstance(signal_generator, Seedable):
-                signal_generator.add_parent(self)
-        try:
-            if self.validate_init:
-                signal_generator.validate_metadata_fields()
-        except AttributeError:
-            pass  # there is no validate function; ignore and assume the best; a user who doesn't write a validate function does so at their own risk
+            signal_generator.add_parent(self)
 
     def copy(
         self,
@@ -194,15 +197,22 @@ class ConcatSignalGenerator(BaseSignalGenerator):
             A new ``ConcatSignalGenerator`` with copied metadata,
             transforms, and signal generators.
         """
-        cpy = BaseSignalGenerator.copy(
-            self,
-            preserve_parent=preserve_parent,
-        )
-        cpy.signal_generators = [
-            signal_generator.copy(preserve_parent=preserve_parent)
+        copied_signal_generators = [
+            signal_generator.copy(preserve_parent=False)
             for signal_generator in self.signal_generators
         ]
-        return cpy
+
+        return ConcatSignalGenerator(
+            signal_generators=copied_signal_generators,
+            transforms=[
+                transform.copy() if hasattr(transform, "copy") else transform
+                for transform in self.transforms
+            ],
+            parent=self.parent if preserve_parent else None,
+            seed=self.rng_seed,
+            metadata=self._metadata.copy(),
+        )
+
 
     def validate_metadata_fields(self) -> bool:
         """Validates metadata fields for all wrapped signal generators.

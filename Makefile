@@ -79,6 +79,11 @@ publish: verify
 # Testing
 TEST_MODE ?= fast
 
+# Report configuration
+JUNIT_REPORT ?= report.xml
+COVERAGE_XML ?= coverage.xml
+COVERAGE_TERM ?= term-missing
+
 test:
 	@echo "Running tests ($(TEST_MODE) mode) with $(PYTEST_NPROCS) workers..."
 	$(PYTEST) \
@@ -86,16 +91,28 @@ test:
 		--dist=loadfile \
 		--ignore=benchmarks \
 		--test-mode=$(TEST_MODE) \
+		--junitxml=$(JUNIT_REPORT) \
 		$(TEST_DIR)
 
 test-debug:
 	@echo "Running tests (debug sequential)..."
-	$(PYTEST) -n 0 $(TEST_DIR)
+	$(PYTEST) \
+		-n 0 \
+		--junitxml=$(JUNIT_REPORT) \
+		$(TEST_DIR)
 
 test-cov:
 	@echo "Running tests with coverage (parallel)..."
-# 	$(PYTEST) --cov=$(SRC_DIR) --cov-report=term-missing $(TEST_DIR)
-	$(PYTEST) -n $(PYTEST_NPROCS) --dist loadfile --ignore=benchmarks --cov=$(SRC_DIR) --cov-report=xml --cov-report=term-missing $(TEST_DIR)
+	$(PYTEST) \
+		-n $(PYTEST_NPROCS) \
+		--dist=loadfile \
+		--ignore=benchmarks \
+		--test-mode=$(TEST_MODE) \
+		--junitxml=$(JUNIT_REPORT) \
+		--cov=$(SRC_DIR) \
+		--cov-report=xml:$(COVERAGE_XML) \
+		--cov-report=$(COVERAGE_TERM) \
+		$(TEST_DIR)
 
 # test-notebooks target
 HAS_GPU := $(shell python3 -c "import torch; print(int(torch.cuda.is_available()))")
@@ -167,16 +184,27 @@ open-docs: docs
 # Benchmarks
 BENCHMARK_FILES = \
 	benchmarks/benchmark_transforms_functional.py
+BENCHMARK_DIR ?= .benchmarks
+BENCHMARK_OUTPUT ?= $(BENCHMARK_DIR)/benchmark_output.txt
+BENCHMARK_JSON ?= $(BENCHMARK_DIR)/benchmark.json
 
 benchmarks:  ## Run performance benchmarks
 	@echo "Running benchmarks..."
-	mkdir -p .benchmarks
-	$(PYTEST) $(BENCHMARK_FILES) --benchmark-only --benchmark-save=.benchmarks \
-                       --benchmark-histogram --benchmark-compare -v --no-cov
+	mkdir -p $(BENCHMARK_DIR)
+	$(PYTEST) $(BENCHMARK_FILES) \
+		--benchmark-only \
+		--benchmark-save=$(BENCHMARK_DIR) \
+		--benchmark-json=$(BENCHMARK_JSON) \
+		--benchmark-histogram \
+		--benchmark-compare \
+		-v \
+		--no-cov 2>&1 | tee $(BENCHMARK_OUTPUT)
+
 
 benchmarks-clean:  ## Remove benchmark data
 	@echo "Cleaning benchmark data..."
-	rm -rf .benchmarks/
+	rm -rf $(BENCHMARK_DIR)
+
 
 # Maintenance
 clean:

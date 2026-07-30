@@ -390,7 +390,7 @@ def test_coarse_gain_change(data: Any, params: dict, expected: bool, is_error: b
 
         data = coarse_gain_change(data=data, gain_change_db=gain_change_db, start_idx=start_idx)
 
-        gain_change_linear = 10 ** (gain_change_db / 10)
+        gain_change_linear = 10 ** (gain_change_db / 20)
         assert (np.allclose(data[start_idx:], gain_change_linear * data_test[start_idx:], RTOL)) == expected
         assert (type(data) == type(data_test)) == expected
         assert (data.dtype == TorchSigComplexDataType) == expected
@@ -970,25 +970,30 @@ def test_normalize(data: Any, params: dict, expected: np.ndarray | ValueError, i
 
 
 @pytest.mark.parametrize(
-    "params, expected_success, is_error",
+    "params, expected_success, is_error, is_warning",
     [
         # Test Case 1: Basic functionality, smooth phases
-        ({"num_taps": 101, "max_ripple_db": 1.0, "ripple_freq": 4.5, "passband_fuzz": "smooth", "stopband_fuzz": "smooth", "fallback": "original"}, True, False),
+        ({"num_taps": 101, "max_ripple_db": 1.0, "ripple_freq": 4.5, "passband_fuzz": "smooth", "stopband_fuzz": "smooth", "fallback": "original"}, True, False, False),
         # Test Case 2: Random phases, larger filter
-        ({"num_taps": 255, "max_ripple_db": 3.0, "ripple_freq": 4.5, "passband_fuzz": "random", "stopband_fuzz": "random", "fallback": "original"}, True, False),
+        ({"num_taps": 255, "max_ripple_db": 3.0, "ripple_freq": 4.5, "passband_fuzz": "random", "stopband_fuzz": "random", "fallback": "original"}, True, False, False),
         # Test Case 3: Even num_taps (should be handled internally by incrementing to odd)
-        ({"num_taps": 100, "max_ripple_db": 2.0, "ripple_freq": 4.5, "passband_fuzz": "random", "stopband_fuzz": "smooth", "fallback": "original"}, True, False),
+        ({"num_taps": 100, "max_ripple_db": 2.0, "ripple_freq": 4.5, "passband_fuzz": "random", "stopband_fuzz": "smooth", "fallback": "original"}, True, False, False),
         # Test Case 4: Error handling - force a failure by passing an invalid phase (will trigger the try-except)
-        ({"num_taps": 101, "max_ripple_db": 1.0, "ripple_freq": 4.5, "passband_fuzz": "invalid_option", "stopband_fuzz": "smooth", "fallback": "raise"}, ValueError, True),
+        ({"num_taps": 101, "max_ripple_db": 1.0, "ripple_freq": 4.5, "passband_fuzz": "invalid_option", "stopband_fuzz": "smooth", "fallback": "raise"}, ValueError, True, False),
+        # Test Case 5: Error handling - invalid num_taps
+        ({"num_taps": -55, "max_ripple_db": 1.0, "ripple_freq": 4.5, "passband_fuzz": "smooth", "stopband_fuzz": "smooth", "fallback": "raise"}, ValueError, True, False),
+        # Test Case 6: input argument handling, automatically handling below minimum num_taps while producing warning
+        ({"num_taps": 14, "max_ripple_db": 1.0, "ripple_freq": 4.5, "passband_fuzz": "smooth", "stopband_fuzz": "smooth", "fallback": "raise"}, True, False, True),
     ],
 )
-def test_passband_ripple(params: dict, expected_success: Any, is_error: bool) -> None:
+def test_passband_ripple(params: dict, expected_success: Any, is_error: bool, is_warning: bool) -> None:
     """Test the passband_ripple function with pytest.
     
     Args:
         params (dict): Function call parameters.
         expected_success (bool | type): Expected result (True if success, or Exception type if is_error is True).
         is_error (bool): Whether a test error is expected.
+        is_warning (bool): Whether a test warning is expected.
     """
     rng = np.random.default_rng(42)
 
@@ -1001,6 +1006,10 @@ def test_passband_ripple(params: dict, expected_success: Any, is_error: bool) ->
         # We expect a specific error (e.g., RuntimeError) when fallback="raise"
         with pytest.raises(expected_success):
             passband_ripple(data=data, **params)
+    elif is_warning:
+        num_taps = params["num_taps"]
+        with pytest.warns(UserWarning, match=f"The num_taps '{num_taps}' is below the enforced minimum '65', and will be increased."):
+            result = passband_ripple(data=data, **params)
     else:
         # Execute the function
         result = passband_ripple(data=data, **params)

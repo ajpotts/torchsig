@@ -10,6 +10,15 @@ from torchsig.signals.builders.fsk import FSKSignalGenerator
 from torchsig.signals.builders.lfm import LFMSignalGenerator
 from torchsig.signals.builders.ofdm import OFDMSignalGenerator
 from torchsig.signals.builders.tone import ToneSignalGenerator
+from torchsig.signals.builders.adsb import AdsBSignalGenerator
+from torchsig.signals.builders.btle import BTLESignalGenerator
+from torchsig.signals.builders.cellular import GSMSignalGenerator
+from torchsig.signals.builders.dvb import DVBS2SignalGenerator
+from torchsig.signals.builders.lmr import DMRSignalGenerator, P25SignalGenerator
+from torchsig.signals.builders.lora import LoraSignalGenerator
+from torchsig.signals.builders.wifi import Wifi80211aSignalGenerator
+from torchsig.signals.builders.zigbee import ZigBeeSignalGenerator
+
 
 __all__ = ["family_names", "lookup_signal_generator_by_string", "num_subcarrier_values", "signal_generator_lookup_table"]
 
@@ -50,6 +59,22 @@ def _family_name(signal_name: str) -> str | None:
         return "qam"
     if "ask" in signal_name:
         return "ask"
+    if "adsb" in signal_name:
+        return "adsb"
+    if "btle" in signal_name:
+        return "btle"
+    if "gsm" in signal_name:
+        return "cellular"          
+    if "dvb" in signal_name:
+        return "dvb"  
+    if ("dmr" in signal_name) or ("p25" in signal_name):
+        return "lmr"
+    if "lora" in signal_name:
+        return "lora"
+    if "80211a" in signal_name:
+        return "wifi"
+    if "zigbee" in signal_name:
+        return "zigbee"        
     return None
 
 
@@ -93,6 +118,21 @@ for am_mode in ["dsb", "dsb-sc", "usb", "lsb"]:
         {"am_mode": am_mode},
     )
 
+_add_signal_generator("adsb-long", AdsBSignalGenerator, {"frame_type": "long"})
+_add_signal_generator("adsb-short", AdsBSignalGenerator, {"frame_type": "short"})
+_add_signal_generator("btle", BTLESignalGenerator, {})
+_add_signal_generator("gsm", GSMSignalGenerator, {})
+_add_signal_generator("dvbs2", DVBS2SignalGenerator, {})
+_add_signal_generator("dmr", DMRSignalGenerator, {})
+_add_signal_generator("p25", P25SignalGenerator, {})
+_add_signal_generator("lora", LoraSignalGenerator, {})
+_add_signal_generator("80211a", Wifi80211aSignalGenerator, {"frame_type": "data"})
+_add_signal_generator("80211a_ack", Wifi80211aSignalGenerator, {"frame_type": "ack"})
+_add_signal_generator("80211a_cts", Wifi80211aSignalGenerator, {"frame_type": "cts"})
+_add_signal_generator("80211a_rts", Wifi80211aSignalGenerator, {"frame_type": "rts"})
+_add_signal_generator("zigbee", ZigBeeSignalGenerator, {})
+
+# convert to list 
 concrete_generator_names = list(signal_generator_lookup_table)
 
 signal_generator_lookup_table["all"] = (
@@ -101,7 +141,7 @@ signal_generator_lookup_table["all"] = (
     {},
 )
 
-family_names = ["ofdm", "am", "fm", "fsk", "psk", "qam", "ask", "lfm", "msk"]
+family_names = ["ofdm", "am", "fm", "fsk", "psk", "qam", "ask", "lfm", "msk", "adsb"]
 for family_name in family_names:
     signal_generator_lookup_table[family_name] = (
         ConcatSignalGenerator,
