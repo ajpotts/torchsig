@@ -1,4 +1,4 @@
-"""Tests for the experimental packed HDF5 format."""
+"""Tests for the packed HDF5 format."""
 
 import sys
 from concurrent.futures import ThreadPoolExecutor

@@ -36,12 +36,19 @@ schema.
 
 ### Packed HDF5
 
+- Uses the frozen format identifier `torchsig-packed` and schema version `1.0`.
+- Readers reject unsupported major versions and unknown required features.
+- Minor releases may add optional fields or features while remaining readable
+  by version 1 readers.
 - Allows variable top-level shapes and dtypes.
 - Allows variable component counts, shapes, and dtypes.
 - Suitable as the flexible default for newly generated datasets.
 
 ### Homogeneous HDF5
 
+- Uses the frozen format identifier `torchsig-homogeneous` and schema version
+  `1`.
+- Readers reject other format identifiers and schema versions.
 - Requires every top-level observation to have the same shape and dtype.
 - Supports IQ, wideband IQ, and spectrogram observations.
 - Allows variable component counts, component shapes, and component dtypes.

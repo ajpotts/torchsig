@@ -1,4 +1,4 @@
-"""Prototype HDF5 format with homogeneous top-level signal arrays.
+"""HDF5 format with homogeneous top-level signal arrays.
 
 Top-level arrays share one fixed dtype and shape and are stored in a native
 ``(num_signals, *signal_shape)`` dataset. Component signals remain ragged:
@@ -6,10 +6,9 @@ each sample indexes a variable-length range of component records whose sample
 arrays are stored in flattened dtype streams.
 
 Parent metadata is flattened into each signal's own metadata during writing;
-parent object identity and hierarchy are therefore not reconstructed. This
-prototype still rejects nested component signals. It is separate from the
-versioned packed HDF5 schema and is intended for layout and performance
-evaluation.
+parent object identity and hierarchy are therefore not reconstructed. The
+format does not support nested component signals. It is separate from the
+versioned packed HDF5 schema.
 """
 
 from __future__ import annotations
@@ -31,7 +30,7 @@ from torchsig.utils.file_handlers.packed_hdf5 import (
 
 __all__ = ["HomogeneousHDF5Reader", "HomogeneousHDF5Writer"]
 
-_FORMAT = "torchsig-homogeneous-prototype"
+_FORMAT = "torchsig-homogeneous"
 _SCHEMA_VERSION = 1
 _TARGET_CHUNK_BYTES = 1024**2
 _LARGE_COMPRESSED_SAMPLE_BYTES = 64 * 1024
@@ -204,7 +203,7 @@ class HomogeneousHDF5Writer(FileWriter):
             raise TypeError("Homogeneous HDF5 does not support object arrays")
         for component in signal.component_signals:
             if component.component_signals:
-                raise ValueError("Homogeneous HDF5 prototype does not support nested components")
+                raise ValueError("Homogeneous HDF5 does not support nested components")
             component_array = np.asarray(component.data)
             if component_array.dtype.hasobject:
                 raise TypeError("Homogeneous HDF5 does not support object arrays")
@@ -318,7 +317,7 @@ class HomogeneousHDF5Writer(FileWriter):
         if batch_idx < 0:
             raise ValueError("Homogeneous HDF5 batch index must be non-negative")
         if batch_idx != self._next_batch_idx:
-            raise ValueError(f"Homogeneous HDF5 prototype requires sequential batch indices; expected {self._next_batch_idx}, got {batch_idx}")
+            raise ValueError(f"Homogeneous HDF5 requires sequential batch indices; expected {self._next_batch_idx}, got {batch_idx}")
         if not data:
             raise ValueError("Homogeneous HDF5 batches must not be empty")
         try:
@@ -348,7 +347,7 @@ class HomogeneousHDF5Writer(FileWriter):
         return len(self._metadata)
 
     def teardown(self) -> None:
-        """Finalize and close the prototype file."""
+        """Finalize and close the homogeneous HDF5 file."""
         if self._file is None:
             return
         try:
@@ -423,11 +422,11 @@ class HomogeneousHDF5Reader(FileReader):
 
     def _validate_file(self) -> None:
         if self._file.attrs.get("format") != _FORMAT:
-            raise ValueError("Not a homogeneous HDF5 prototype file")
+            raise ValueError("Not a homogeneous TorchSig HDF5 file")
         if self._file.attrs.get("schema_version") != _SCHEMA_VERSION:
             raise ValueError(f"Unsupported homogeneous HDF5 schema version: {self._file.attrs.get('schema_version')!r}")
         if not bool(self._file.attrs.get("complete", False)):
-            raise ValueError("Homogeneous HDF5 prototype file is incomplete")
+            raise ValueError("Homogeneous HDF5 file is incomplete")
         cache_key = str(self.datapath)
         fingerprint = self._fingerprint()
         if _VALIDATED_FILES.get(cache_key) == fingerprint:
@@ -675,7 +674,7 @@ class HomogeneousHDF5Reader(FileReader):
         return self._data[start:stop]
 
     def teardown(self) -> None:
-        """Close the prototype file."""
+        """Close the homogeneous HDF5 file."""
         if self._file is not None:
             self._file.close()
             self._file = None

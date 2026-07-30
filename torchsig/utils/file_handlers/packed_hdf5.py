@@ -721,7 +721,7 @@ class PackedHDF5Writer(FileWriter):
 
 
 class PackedHDF5Reader(FileReader):
-    """Read signals from the experimental packed HDF5 schema.
+    """Read signals from the packed HDF5 schema.
 
     Stored arrays are reconstructed with their original NumPy dtype and shape.
     The reader supports both one-dimensional complex IQ and multidimensional

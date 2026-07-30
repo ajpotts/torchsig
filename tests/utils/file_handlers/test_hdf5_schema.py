@@ -7,13 +7,13 @@ import numpy as np
 import pytest
 
 from torchsig.signals.signal_types import Signal
-from torchsig.utils.file_handlers.packed_hdf5 import (
-    PackedHDF5Reader,
-    PackedHDF5Writer,
-)
 from torchsig.utils.file_handlers.hdf5_schema import (
     default_packed_schema,
     read_schema,
+)
+from torchsig.utils.file_handlers.packed_hdf5 import (
+    PackedHDF5Reader,
+    PackedHDF5Writer,
 )
 
 
@@ -32,17 +32,18 @@ def _update_schema(root, update) -> None:
         handle["schema"][()] = json.dumps(value, separators=(",", ":"))
 
 
-def test_batched_writer_embeds_readable_schema(tmp_path) -> None:
+def test_packed_writer_embeds_frozen_schema(tmp_path) -> None:
     _write_file(tmp_path)
     with h5py.File(tmp_path / "data.h5", "r") as handle:
         schema = read_schema(handle)
 
     assert schema == default_packed_schema()
-    assert schema.schema_major == 0
-    assert schema.schema_minor == 1
+    assert schema.format == "torchsig-packed"
+    assert schema.schema_major == 1
+    assert schema.schema_minor == 0
 
 
-def test_batched_reader_rejects_unsupported_schema_major(tmp_path) -> None:
+def test_packed_reader_rejects_unsupported_schema_major(tmp_path) -> None:
     _write_file(tmp_path)
     _update_schema(tmp_path, lambda value: value.update(schema_major=999))
 
@@ -52,7 +53,16 @@ def test_batched_reader_rejects_unsupported_schema_major(tmp_path) -> None:
     assert reader._file is None  # noqa: SLF001
 
 
-def test_batched_reader_rejects_unknown_required_feature(tmp_path) -> None:
+def test_packed_reader_rejects_other_format(tmp_path) -> None:
+    _write_file(tmp_path)
+    _update_schema(tmp_path, lambda value: value.update(format="other-format"))
+
+    reader = PackedHDF5Reader(tmp_path)
+    with pytest.raises(ValueError, match="Unsupported HDF5 format"):
+        reader.read(0)
+
+
+def test_packed_reader_rejects_unknown_required_feature(tmp_path) -> None:
     _write_file(tmp_path)
 
     def add_feature(value) -> None:
@@ -64,7 +74,7 @@ def test_batched_reader_rejects_unknown_required_feature(tmp_path) -> None:
         reader.read(0)
 
 
-def test_batched_reader_rejects_missing_declared_path(tmp_path) -> None:
+def test_packed_reader_rejects_missing_declared_path(tmp_path) -> None:
     _write_file(tmp_path)
     with h5py.File(tmp_path / "data.h5", "r+") as handle:
         del handle["shapes"]
@@ -74,7 +84,7 @@ def test_batched_reader_rejects_missing_declared_path(tmp_path) -> None:
         reader.read(0)
 
 
-def test_batched_reader_rejects_colliding_schema_paths(tmp_path) -> None:
+def test_packed_reader_rejects_colliding_schema_paths(tmp_path) -> None:
     _write_file(tmp_path)
 
     def collide_paths(value) -> None:
@@ -87,7 +97,7 @@ def test_batched_reader_rejects_colliding_schema_paths(tmp_path) -> None:
 
 
 @pytest.mark.parametrize("sentinel", [-1, 1 << 64])
-def test_batched_reader_rejects_out_of_range_parent_sentinel(tmp_path, sentinel) -> None:
+def test_packed_reader_rejects_out_of_range_parent_sentinel(tmp_path, sentinel) -> None:
     _write_file(tmp_path)
 
     def update_sentinel(value) -> None:
@@ -99,7 +109,7 @@ def test_batched_reader_rejects_out_of_range_parent_sentinel(tmp_path, sentinel)
         reader.read(0)
 
 
-def test_batched_reader_rejects_incomplete_file(tmp_path) -> None:
+def test_packed_reader_rejects_incomplete_file(tmp_path) -> None:
     _write_file(tmp_path)
     with h5py.File(tmp_path / "data.h5", "r+") as handle:
         handle.attrs["complete"] = False
@@ -110,7 +120,7 @@ def test_batched_reader_rejects_incomplete_file(tmp_path) -> None:
     assert reader._file is None  # noqa: SLF001
 
 
-def test_batched_reader_rejects_missing_completeness_marker(tmp_path) -> None:
+def test_packed_reader_rejects_missing_completeness_marker(tmp_path) -> None:
     _write_file(tmp_path)
     with h5py.File(tmp_path / "data.h5", "r+") as handle:
         del handle.attrs["complete"]

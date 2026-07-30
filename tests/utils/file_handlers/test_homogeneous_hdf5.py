@@ -1,4 +1,4 @@
-"""Tests for the homogeneous-top-level HDF5 prototype."""
+"""Tests for the homogeneous-top-level HDF5 format."""
 
 import h5py
 import numpy as np
@@ -178,10 +178,11 @@ def test_homogeneous_hdf5_rejects_setup_while_open(tmp_path) -> None:
         writer.write(0, [_signals()[0]])
 
 
-def test_homogeneous_hdf5_writes_schema_version(tmp_path) -> None:
+def test_homogeneous_hdf5_writes_frozen_format_version(tmp_path) -> None:
     _write_signals(tmp_path)
 
     with h5py.File(tmp_path / "data.h5", "r") as file:
+        assert file.attrs["format"] == "torchsig-homogeneous"
         assert file.attrs["schema_version"] == 1
 
 
@@ -191,6 +192,15 @@ def test_homogeneous_hdf5_rejects_unsupported_schema_version(tmp_path) -> None:
         file.attrs["schema_version"] = 2
 
     with pytest.raises(ValueError, match=r"Unsupported.*schema version"):
+        len(HomogeneousHDF5Reader(tmp_path))
+
+
+def test_homogeneous_hdf5_rejects_other_format(tmp_path) -> None:
+    _write_signals(tmp_path)
+    with h5py.File(tmp_path / "data.h5", "r+") as file:
+        file.attrs["format"] = "other-format"
+
+    with pytest.raises(ValueError, match="Not a homogeneous"):
         len(HomogeneousHDF5Reader(tmp_path))
 
 

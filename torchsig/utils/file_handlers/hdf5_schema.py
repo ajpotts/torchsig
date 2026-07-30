@@ -1,4 +1,4 @@
-"""Schema definitions for TorchSig's experimental packed HDF5 format."""
+"""Schema definitions for TorchSig's packed HDF5 format."""
 
 from __future__ import annotations
 
@@ -19,7 +19,8 @@ __all__ = [
 
 SCHEMA_DATASET_PATH = "/schema"
 SUPPORTED_FORMAT = "torchsig-packed"
-SUPPORTED_SCHEMA_MAJOR = 0
+SUPPORTED_SCHEMA_MAJOR = 1
+SUPPORTED_SCHEMA_MINOR = 0
 SUPPORTED_METADATA_ENCODINGS = {("torchsig-json", 1)}
 SUPPORTED_FEATURES = {
     "mixed_dtypes",
@@ -90,12 +91,12 @@ class PackedHDF5Schema:
 
 
 def default_packed_schema() -> PackedHDF5Schema:
-    """Return the schema emitted by the current experimental writer."""
+    """Return the schema emitted by the current writer."""
     metadata_encoding = MetadataEncoding(name="torchsig-json", version=1)
     return PackedHDF5Schema(
         format=SUPPORTED_FORMAT,
-        schema_major=0,
-        schema_minor=1,
+        schema_major=SUPPORTED_SCHEMA_MAJOR,
+        schema_minor=SUPPORTED_SCHEMA_MINOR,
         required_features=(
             "mixed_dtypes",
             "variable_shapes",
