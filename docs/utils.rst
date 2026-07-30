@@ -51,12 +51,25 @@ YAML Utils
 
 File Handlers
 -------------------------------------
+For guidance on selecting and using an HDF5 backend, see
+:doc:`hdf5_readers`.
+
 .. automodule:: torchsig.utils.file_handlers.base_handler
     :members:
     :undoc-members:
     :show-inheritance:
 
 .. automodule:: torchsig.utils.file_handlers.hdf5
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+.. automodule:: torchsig.utils.file_handlers.packed_hdf5
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+.. automodule:: torchsig.utils.file_handlers.homogeneous_hdf5
     :members:
     :undoc-members:
     :show-inheritance:

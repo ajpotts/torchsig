@@ -204,7 +204,7 @@ class PackedHDF5Writer(FileWriter):
     object arrays are not supported.
 
     Component counts, component shapes, and component dtypes may vary.
-    Hierarchical parent metadata and shared parent identity are preserved.
+    Hierarchical parent relationships are preserved on disk and reconstructed.
     """
 
     def __init__(
@@ -666,7 +666,8 @@ class PackedHDF5Reader(FileReader):
     Top-level and component arrays are reconstructed with their original NumPy
     dtype and shape. This supports IQ, wideband arrays, spectrograms, and other
     non-object NumPy-compatible arrays. Parent metadata hierarchy and shared
-    parent identity are reconstructed.
+    parent relationships are reconstructed. Python object identity is not
+    guaranteed across separate calls to :meth:`read`.
     """
 
     def __init__(self, root) -> None:
