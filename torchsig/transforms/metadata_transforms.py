@@ -163,14 +163,16 @@ class GroupingLabel(MetadataTransform):
     - ``values``: A list of exact source values.
     - ``regex``: A regular expression searched against the string source value.
     - ``formula``: A restricted boolean expression using ``value``.
+    - ``default: true``: Match any value not handled by an earlier group.
 
     Groups are evaluated in order and the first match wins. Their order also
     determines the numeric group index.
 
-    The formula language supports boolean operators, comparisons, membership,
-    literals, and the safe string methods ``startswith``, ``endswith``,
-    ``lower``, ``upper``, ``isdigit``, and ``isalpha``. It cannot import
-    modules, access arbitrary attributes, or call arbitrary functions.
+    The formula language supports arithmetic, boolean operators, comparisons,
+    membership, literals, and the safe string methods ``startswith``,
+    ``endswith``, ``lower``, ``upper``, ``isdigit``, and ``isalpha``. It
+    cannot import modules, access arbitrary attributes, or call arbitrary
+    functions.
 
     Example YAML:
         .. code-block:: yaml
@@ -186,6 +188,8 @@ class GroupingLabel(MetadataTransform):
                 regex: '^[248]g?fsk$'
               - name: high_order_qam
                 formula: 'value.endswith("qam") and value != "16qam"'
+              - name: all
+                default: true
 
     Args:
         config: YAML file path or a mapping with the same schema.
@@ -207,6 +211,15 @@ class GroupingLabel(MetadataTransform):
         ast.Or,
         ast.UnaryOp,
         ast.Not,
+        ast.UAdd,
+        ast.USub,
+        ast.BinOp,
+        ast.Add,
+        ast.Sub,
+        ast.Mult,
+        ast.Div,
+        ast.FloorDiv,
+        ast.Mod,
         ast.Compare,
         ast.Eq,
         ast.NotEq,
@@ -278,7 +291,7 @@ class GroupingLabel(MetadataTransform):
             raise ValueError("groups must be a non-empty list")
 
         names = []
-        for group in self.groups:
+        for group_index, group in enumerate(self.groups):
             if not isinstance(group, dict):
                 raise TypeError("each group must be a mapping")
             name = group.get("name")
@@ -286,18 +299,33 @@ class GroupingLabel(MetadataTransform):
                 raise ValueError("each group name must be a non-empty string")
             names.append(name)
 
-            rule_names = {"values", "regex", "formula"} & group.keys()
+            rule_names = {
+                "values",
+                "regex",
+                "formula",
+                "default",
+            } & group.keys()
             if len(rule_names) != 1:
                 raise ValueError(
                     f"group {name!r} must define exactly one of values, "
-                    "regex, or formula"
+                    "regex, formula, or default"
                 )
+            if "default" in group:
+                if group["default"] is not True:
+                    raise ValueError(
+                        f"group {name!r} default rule must be true"
+                    )
+                if group_index != len(self.groups) - 1:
+                    raise ValueError("the default group must be last")
 
         if len(names) != len(set(names)):
             raise ValueError("group names must be unique")
 
     def _compile_rule(self, group: dict[str, Any]) -> tuple[str, Any]:
         """Validate and compile one configured matching rule."""
+        if "default" in group:
+            return "default", None
+
         if "values" in group:
             values = group["values"]
             if not isinstance(values, list) or not values:
@@ -390,7 +418,26 @@ class GroupingLabel(MetadataTransform):
                 for item in node.values
             )
         if isinstance(node, ast.UnaryOp):
-            return not bool(self._evaluate_formula(node.operand, value))
+            operand = self._evaluate_formula(node.operand, value)
+            if isinstance(node.op, ast.Not):
+                return not bool(operand)
+            if isinstance(node.op, ast.UAdd):
+                return +operand
+            return -operand
+        if isinstance(node, ast.BinOp):
+            left = self._evaluate_formula(node.left, value)
+            right = self._evaluate_formula(node.right, value)
+            if isinstance(node.op, ast.Add):
+                return left + right
+            if isinstance(node.op, ast.Sub):
+                return left - right
+            if isinstance(node.op, ast.Mult):
+                return left * right
+            if isinstance(node.op, ast.Div):
+                return left / right
+            if isinstance(node.op, ast.FloorDiv):
+                return left // right
+            return left % right
         if isinstance(node, ast.Compare):
             left = self._evaluate_formula(node.left, value)
             for operator, comparator in zip(
@@ -442,6 +489,8 @@ class GroupingLabel(MetadataTransform):
             return value in rule
         if rule_type == "regex":
             return rule.search(str(value)) is not None
+        if rule_type == "default":
+            return True
         return bool(self._evaluate_formula(rule, value))
 
     def __apply__(self, signal: Signal) -> Signal:

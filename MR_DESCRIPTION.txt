@@ -1,0 +1,117 @@
+Title: Generalize label grouping with YAML-configured rules
+
+Summary
+
+This MR replaces hard-coded family-specific labeling with a generic
+GroupingLabel metadata transform. Users can define task-specific groupings in
+YAML, choose the source metadata field, customize the output label names, and
+use exact values, regular expressions, restricted formulas, or an explicit
+catch-all rule.
+
+The grouping transform works with standalone and composite signals, integrates
+with TorchSigIterableDataset target extraction and WorkerSeedingDataLoader, and
+preserves generated group metadata through an HDF5 write/read round trip.
+
+Configuration
+
+A grouping YAML file defines the source metadata, output labels, and ordered
+groups:
+
+    source: class_name
+    labels:
+      name: modulation_group
+      index: modulation_group_index
+    groups:
+      - name: linear
+        values: [bpsk, qpsk]
+      - name: frequency_shift
+        regex: '^[248]g?fsk$'
+      - name: all
+        default: true
+
+Groups are evaluated in order, and the first matching rule wins. Group order
+also determines the numeric group index. A default group must be last and
+matches values not handled by an earlier rule.
+
+Supported rules
+
+- values: Exact matching against a list of configured values.
+- regex: Regular-expression search against the string representation of the
+  source value.
+- formula: A restricted expression using the source value through the name
+  "value".
+- default: An explicit catch-all rule for unmatched values.
+
+Formula expressions support:
+
+- Boolean operators: and, or, and not.
+- Comparisons and membership operations.
+- Arithmetic: +, -, *, /, //, and %.
+- String methods including startswith, endswith, lower, upper, isdigit, and
+  isalpha.
+- String, numeric, list, tuple, and set literals.
+
+Formula expressions are parsed and evaluated through an allowlisted AST
+interpreter. They do not use Python eval and cannot import modules, access
+arbitrary attributes, or call arbitrary functions.
+
+Data-loader integration
+
+GroupingLabel can be placed in a TorchSigIterableDataset transform chain, and
+its configured numeric output can be requested through target_labels:
+
+    grouping = GroupingLabel("grouping.yaml")
+    dataset = TorchSigIterableDataset(
+        transforms=[
+            Spectrogram(fft_size=32),
+            grouping,
+        ],
+        target_labels=[grouping.index_label],
+        ...
+    )
+    dataloader = WorkerSeedingDataLoader(dataset, batch_size=8)
+
+Examples
+
+Two CPU-friendly training examples are included:
+
+- train_grouping_string_classifier.py uses exact string values, regex, and an
+  "all" fallback group.
+- train_grouping_arithmetic_classifier.py groups generated signals using
+  arithmetic formulas applied to bandwidth metadata.
+
+Both examples generate real TorchSIG signals with TorchSigIterableDataset,
+produce spectrograms, receive grouped indices from WorkerSeedingDataLoader,
+and train small PyTorch classifiers.
+
+Compatibility
+
+An HDF5 regression test applies YAML grouping rules to a composite signal,
+writes it with HDF5Writer, reads it with HDF5Reader, and verifies that class
+names, custom group names, and custom group indices are unchanged. The test
+covers exact-value, regex, and default rules.
+
+Testing
+
+    pytest -q tests/transforms/test_metadata_transforms.py
+    21 passed
+
+    pytest -q tests/utils/test_hdf5.py tests/transforms/test_metadata_transforms.py
+    22 passed
+
+    python examples/scripts/train_grouping_string_classifier.py
+    Validation accuracy: 62.5%
+
+    python examples/scripts/train_grouping_arithmetic_classifier.py
+    Validation accuracy: 92.5%
+
+    ruff check torchsig/transforms/metadata_transforms.py \
+        examples/scripts/train_grouping_string_classifier.py \
+        examples/scripts/train_grouping_arithmetic_classifier.py
+    passed
+
+    git diff --check
+    passed
+
+The PyTorch test and example runs emit an environment-specific warning that
+NVML could not be initialized. This warning is unrelated to the changes.

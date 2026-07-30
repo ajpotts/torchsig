@@ -205,6 +205,31 @@ groups:
     assert qam_signal.group_index == 1
 
 
+def test_grouping_label_supports_arithmetic_formula_and_default():
+    transform = GroupingLabel(
+        {
+            "source": "bandwidth",
+            "groups": [
+                {
+                    "name": "narrow",
+                    "formula": "value / 1000 < 2",
+                },
+                {
+                    "name": "even_khz",
+                    "formula": "(value // 1000) % 2 == 0",
+                },
+                {"name": "all", "default": True},
+            ],
+        }
+    )
+
+    assert transform(Signal(bandwidth=1_000)).group_name == "narrow"
+    assert transform(Signal(bandwidth=4_000)).group_name == "even_khz"
+    fallback = transform(Signal(bandwidth=7_000))
+    assert fallback.group_name == "all"
+    assert fallback.group_index == 2
+
+
 def test_grouping_label_values_are_available_as_dataset_targets(parent_signal):
     parent_signal["num_signals_max"] = 2
     parent_signal.component_signals[0]["class_name"] = "bpsk"
@@ -255,6 +280,23 @@ def test_grouping_label_rejects_unmatched_value():
                 ]
             },
             "must define exactly one",
+        ),
+        (
+            {
+                "groups": [
+                    {"name": "all", "default": True},
+                    {"name": "linear", "values": ["bpsk"]},
+                ]
+            },
+            "default group must be last",
+        ),
+        (
+            {
+                "groups": [
+                    {"name": "all", "default": False},
+                ]
+            },
+            "default rule must be true",
         ),
         (
             {
