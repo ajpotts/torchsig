@@ -634,6 +634,40 @@ class HomogeneousHDF5Reader(FileReader):
             metadata=_decode_metadata(self._metadata[idx]),
         )
 
+    def read_signals_batch(self, start: int, stop: int) -> list[Signal]:
+        """Read contiguous signals while preserving metadata and components.
+
+        The top-level arrays, metadata records, component offsets, and complete
+        component range are each fetched with one contiguous HDF5 read.
+        """
+        if start < 0 or stop < start or stop > len(self):
+            raise IndexError(
+                f"Homogeneous HDF5 batch range out of bounds: [{start}, {stop})"
+            )
+        if start == stop:
+            return []
+
+        data = self._data[start:stop]
+        metadata = self._metadata[start:stop]
+        offsets = self._component_offsets[start : stop + 1]
+        component_start = int(offsets[0])
+        components = self._read_components(component_start, int(offsets[-1]))
+
+        signals = []
+        for batch_idx, (signal_data, signal_metadata) in enumerate(
+            zip(data, metadata, strict=True)
+        ):
+            local_start = int(offsets[batch_idx]) - component_start
+            local_stop = int(offsets[batch_idx + 1]) - component_start
+            signals.append(
+                Signal(
+                    data=signal_data,
+                    component_signals=components[local_start:local_stop],
+                    metadata=_decode_metadata(signal_metadata),
+                )
+            )
+        return signals
+
     def read_batch(self, start: int, stop: int) -> np.ndarray:
         """Read a contiguous batch of top-level arrays without components."""
         if start < 0 or stop < start or stop > len(self):

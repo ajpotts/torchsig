@@ -1,7 +1,9 @@
-"""Compare packed and homogeneous HDF5 layouts across signal workloads.
+"""Compare standard, packed, and homogeneous HDF5 across signal workloads.
 
 The matrix covers narrowband IQ, wideband IQ, and spectrogram observations,
 each with variable component counts and with compression enabled and disabled.
+It also measures end-to-end ``DatasetCreator`` writes and sequential or
+shuffled DataLoader epochs with 0, 2, and 8 workers.
 
 Run the complete matrix with:
     pytest benchmarks/optional/benchmark_hdf5_homogeneous.py --benchmark-only
@@ -19,10 +21,13 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from torch.utils.data import DataLoader, Dataset
+import torch
+from torch.utils.data import DataLoader
 
 import torchsig.utils.file_handlers.hdf5_homogeneous as homogeneous_module
+from torchsig.datasets.datasets import StaticTorchSigDataset
 from torchsig.signals.signal_types import Signal
+from torchsig.utils.file_handlers.hdf5 import HDF5Reader, HDF5Writer
 from torchsig.utils.file_handlers.hdf5_batched import (
     BatchedHDF5Reader,
     BatchedHDF5Writer,
@@ -31,6 +36,7 @@ from torchsig.utils.file_handlers.hdf5_homogeneous import (
     HomogeneousHDF5Reader,
     HomogeneousHDF5Writer,
 )
+from torchsig.utils.writer import DatasetCreator, identity_collate_fn
 
 
 @dataclass(frozen=True)
@@ -77,6 +83,7 @@ WORKLOADS = (
 )
 
 FORMATS: dict[str, tuple[Callable, Callable]] = {
+    "standard": (HDF5Writer, HDF5Reader),
     "packed": (BatchedHDF5Writer, BatchedHDF5Reader),
     "homogeneous": (HomogeneousHDF5Writer, HomogeneousHDF5Reader),
 }
@@ -87,7 +94,13 @@ COMPRESSIONS = {
 CASES = tuple(
     (workload, compression_name, compression, format_name, *classes) for workload in WORKLOADS for compression_name, compression in COMPRESSIONS.items() for format_name, classes in FORMATS.items()
 )
-WORKER_CASES = tuple((workload, num_workers) for workload in WORKLOADS for num_workers in (0, 2, 4))
+WORKER_CASES = tuple(
+    (workload, format_name, *classes, num_workers, shuffled)
+    for workload in WORKLOADS
+    for format_name, classes in FORMATS.items()
+    for num_workers in (0, 2, 8)
+    for shuffled in (False, True)
+)
 
 
 def _case_id(case: tuple) -> str:
@@ -95,24 +108,10 @@ def _case_id(case: tuple) -> str:
     return f"{workload.name}-{compression_name}-{format_name}"
 
 
-def _worker_case_id(case: tuple[Workload, int]) -> str:
-    workload, num_workers = case
-    return f"{workload.name}-{num_workers}-workers"
-
-
-class _HomogeneousWorkerDataset(Dataset):
-    def __init__(self, root: Path, length: int) -> None:
-        self.reader = HomogeneousHDF5Reader(root)
-        self.length = length
-
-    def __len__(self) -> int:
-        return self.length
-
-    def __getitem__(self, idx: int) -> np.ndarray:
-        return self.reader.read(idx).data
-
-    def __del__(self) -> None:
-        self.reader.teardown()
+def _worker_case_id(case: tuple) -> str:
+    workload, format_name, _, _, num_workers, shuffled = case
+    access = "shuffled" if shuffled else "sequential"
+    return f"{workload.name}-{format_name}-{access}-{num_workers}-workers"
 
 
 def _identity_worker_collate(batch: list[np.ndarray]) -> list[np.ndarray]:
@@ -201,6 +200,54 @@ def _write(
     return (root / "data.h5").stat().st_size
 
 
+def _dataset_creator_write(
+    writer_class: Callable,
+    root: Path,
+    signals: list[Signal],
+    workload: Workload,
+    compression: str | None,
+) -> int:
+    loader = DataLoader(
+        signals,
+        batch_size=workload.batch_size,
+        collate_fn=identity_collate_fn,
+    )
+    DatasetCreator(
+        dataloader=loader,
+        root=root,
+        overwrite=True,
+        file_handler=writer_class,
+        multithreading=False,
+        compression=compression,
+        shuffle=compression is not None,
+        fletcher32=False,
+        tqdm_desc="Benchmark creation",
+    ).create()
+    return (root / "data.h5").stat().st_size
+
+
+def _profile_dataset_creator_write(
+    writer_class: Callable,
+    root: Path,
+    signals: list[Signal],
+    workload: Workload,
+    compression: str | None,
+) -> tuple[int, int]:
+    tracemalloc.start()
+    try:
+        file_size = _dataset_creator_write(
+            writer_class,
+            root,
+            signals,
+            workload,
+            compression,
+        )
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    return file_size, peak
+
+
 def _random_read(reader, indices: tuple[int, ...]) -> float:
     return sum(float(reader.read(idx).data.reshape(-1)[0].real) for idx in indices)
 
@@ -211,6 +258,15 @@ def _packed_contiguous_read(
     stop: int,
 ) -> np.ndarray:
     return np.stack([reader.read(idx).data for idx in range(start, stop)])
+
+
+def _contiguous_signal_read(reader, start: int, stop: int) -> int:
+    signals = (
+        reader.read_signals_batch(start, stop)
+        if isinstance(reader, HomogeneousHDF5Reader)
+        else [reader.read(idx) for idx in range(start, stop)]
+    )
+    return sum(1 + len(signal.component_signals) for signal in signals)
 
 
 def _open_reader(reader_class: Callable, root: Path) -> int:
@@ -239,24 +295,43 @@ def _cold_reader_open_peak(
 def _worker_loader(
     root: Path,
     workload: Workload,
+    reader_class: Callable,
     num_workers: int,
+    shuffled: bool,
 ) -> DataLoader:
     context = "fork" if "fork" in multiprocessing.get_all_start_methods() else "spawn"
+    generator = torch.Generator().manual_seed(0)
     return DataLoader(
-        _HomogeneousWorkerDataset(root, workload.signal_count),
+        StaticTorchSigDataset(
+            root=root,
+            file_handler_class=reader_class,
+            target_labels=[],
+        ),
         batch_size=workload.read_count,
         num_workers=num_workers,
         multiprocessing_context=context if num_workers else None,
         collate_fn=_identity_worker_collate,
+        shuffle=shuffled,
+        generator=generator,
     )
 
 
 def _first_worker_batch(
     root: Path,
     workload: Workload,
+    reader_class: Callable,
     num_workers: int,
+    shuffled: bool,
 ) -> tuple[int, ...]:
-    iterator = iter(_worker_loader(root, workload, num_workers))
+    iterator = iter(
+        _worker_loader(
+            root,
+            workload,
+            reader_class,
+            num_workers,
+            shuffled,
+        )
+    )
     try:
         batch = next(iterator)
         return (len(batch), *batch[0].shape)
@@ -268,10 +343,18 @@ def _first_worker_batch(
 def _worker_epoch(
     root: Path,
     workload: Workload,
+    reader_class: Callable,
     num_workers: int,
+    shuffled: bool,
 ) -> int:
     count = 0
-    for batch in _worker_loader(root, workload, num_workers):
+    for batch in _worker_loader(
+        root,
+        workload,
+        reader_class,
+        num_workers,
+        shuffled,
+    ):
         count += len(batch)
     return count
 
@@ -329,11 +412,18 @@ def test_benchmark_homogeneous_worker_startup(
     case,
 ) -> None:
     """Measure DataLoader construction and first-batch latency."""
-    workload, num_workers = case
+    (
+        workload,
+        format_name,
+        writer_class,
+        reader_class,
+        num_workers,
+        shuffled,
+    ) = case
     signals = _make_signals(workload)
-    root = tmp_path / "dataset"
+    root = tmp_path / f"dataset-{format_name}"
     _write(
-        HomogeneousHDF5Writer,
+        writer_class,
         root,
         signals,
         workload,
@@ -343,11 +433,15 @@ def test_benchmark_homogeneous_worker_startup(
         _first_worker_batch,
         root,
         workload,
+        reader_class,
         num_workers,
+        shuffled,
     )
     assert shape == (workload.read_count, *workload.shape)
     benchmark.extra_info["workload"] = workload.name
+    benchmark.extra_info["format"] = format_name
     benchmark.extra_info["workers"] = num_workers
+    benchmark.extra_info["access"] = "shuffled" if shuffled else "sequential"
     benchmark.extra_info["batch_size"] = workload.read_count
 
 
@@ -359,11 +453,18 @@ def test_benchmark_homogeneous_worker_epoch(
     case,
 ) -> None:
     """Measure full-epoch DataLoader throughput."""
-    workload, num_workers = case
+    (
+        workload,
+        format_name,
+        writer_class,
+        reader_class,
+        num_workers,
+        shuffled,
+    ) = case
     signals = _make_signals(workload)
-    root = tmp_path / "dataset"
+    root = tmp_path / f"dataset-{format_name}"
     _write(
-        HomogeneousHDF5Writer,
+        writer_class,
         root,
         signals,
         workload,
@@ -373,12 +474,62 @@ def test_benchmark_homogeneous_worker_epoch(
         _worker_epoch,
         root,
         workload,
+        reader_class,
         num_workers,
+        shuffled,
     )
     assert count == workload.signal_count
     benchmark.extra_info["workload"] = workload.name
+    benchmark.extra_info["format"] = format_name
     benchmark.extra_info["workers"] = num_workers
+    benchmark.extra_info["access"] = "shuffled" if shuffled else "sequential"
     benchmark.extra_info["signals"] = workload.signal_count
+
+
+@pytest.mark.benchmark
+@pytest.mark.parametrize("case", CASES, ids=_case_id)
+def test_benchmark_dataset_creator_write(
+    benchmark,
+    tmp_path,
+    case,
+) -> None:
+    """Measure end-to-end DatasetCreator time, size, and peak allocation."""
+    (
+        workload,
+        compression_name,
+        compression,
+        format_name,
+        writer_class,
+        _,
+    ) = case
+    signals = _make_signals(workload)
+    profile_root = tmp_path / f"profile-{format_name}"
+    file_size, peak_bytes = _profile_dataset_creator_write(
+        writer_class,
+        profile_root,
+        signals,
+        workload,
+        compression,
+    )
+    benchmark_root = tmp_path / f"benchmark-{format_name}"
+    measured_size = benchmark.pedantic(
+        _dataset_creator_write,
+        args=(
+            writer_class,
+            benchmark_root,
+            signals,
+            workload,
+            compression,
+        ),
+        iterations=1,
+        rounds=1,
+    )
+    size_tolerance = max(4_096, file_size // 100)
+    assert abs(measured_size - file_size) <= size_tolerance
+    _set_extra_info(benchmark, workload, compression_name, measured_size)
+    benchmark.extra_info["format"] = format_name
+    benchmark.extra_info["peak_python_mib"] = peak_bytes / (1024**2)
+    benchmark.extra_info["profile_file_size_mib"] = file_size / (1024**2)
 
 
 @pytest.mark.benchmark
@@ -492,6 +643,48 @@ def test_benchmark_homogeneous_format_contiguous_batch_read(
             )
         )
         assert actual.shape == (workload.read_count, *workload.shape)
+    finally:
+        reader.teardown()
+    _set_extra_info(benchmark, workload, compression_name, file_size)
+
+
+@pytest.mark.benchmark
+@pytest.mark.parametrize("case", CASES, ids=_case_id)
+def test_benchmark_homogeneous_contiguous_signal_batch_read(
+    benchmark,
+    tmp_path,
+    case,
+) -> None:
+    """Measure contiguous reads preserving metadata and variable components."""
+    (
+        workload,
+        compression_name,
+        compression,
+        format_name,
+        writer_class,
+        reader_class,
+    ) = case
+    signals = _make_signals(workload)
+    root = tmp_path / f"dataset-{format_name}"
+    file_size = _write(
+        writer_class,
+        root,
+        signals,
+        workload,
+        compression,
+    )
+    start = (workload.signal_count - workload.read_count) // 2
+    stop = start + workload.read_count
+    expected_count = sum(
+        1 + len(signal.component_signals)
+        for signal in signals[start:stop]
+    )
+    reader = reader_class(root)
+    try:
+        assert (
+            benchmark(_contiguous_signal_read, reader, start, stop)
+            == expected_count
+        )
     finally:
         reader.teardown()
     _set_extra_info(benchmark, workload, compression_name, file_size)

@@ -235,7 +235,7 @@ class HDF5Writer(FileWriter):
 
         # Set global attributes
         self._file.attrs["torchsig_version"] = torchsig_cache_version()
-        self._file.attrs["compression"] = self.compression
+        self._file.attrs["compression"] = self.compression or "none"
         self._file.attrs["created_by"] = "TorchSig HDF5FileHandler"
         self._file.create_group("data")
         self._file.create_group("metadata")

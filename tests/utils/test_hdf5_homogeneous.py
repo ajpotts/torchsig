@@ -348,6 +348,53 @@ def test_homogeneous_hdf5_reads_native_contiguous_batch(tmp_path) -> None:
         reader.teardown()
 
 
+def test_homogeneous_hdf5_reads_contiguous_signal_batch(tmp_path) -> None:
+    signals = _signals()
+    with HomogeneousHDF5Writer(tmp_path) as writer:
+        writer.write(0, signals)
+
+    reader = HomogeneousHDF5Reader(tmp_path)
+    try:
+        actual = reader.read_signals_batch(0, len(signals))
+        assert len(actual) == len(signals)
+        for actual_signal, expected_signal in zip(actual, signals, strict=True):
+            np.testing.assert_array_equal(actual_signal.data, expected_signal.data)
+            assert actual_signal.metadata == expected_signal.metadata
+            assert len(actual_signal.component_signals) == len(
+                expected_signal.component_signals
+            )
+            for actual_component, expected_component in zip(
+                actual_signal.component_signals,
+                expected_signal.component_signals,
+                strict=True,
+            ):
+                np.testing.assert_array_equal(
+                    actual_component.data,
+                    expected_component.data,
+                )
+                assert actual_component.metadata == expected_component.metadata
+    finally:
+        reader.teardown()
+
+
+@pytest.mark.parametrize(
+    ("start", "stop"),
+    [(-1, 1), (0, 4), (2, 1)],
+)
+def test_homogeneous_hdf5_rejects_invalid_signal_batch_range(
+    tmp_path,
+    start,
+    stop,
+) -> None:
+    _write_signals(tmp_path)
+    reader = HomogeneousHDF5Reader(tmp_path)
+    try:
+        with pytest.raises(IndexError, match="batch range out of bounds"):
+            reader.read_signals_batch(start, stop)
+    finally:
+        reader.teardown()
+
+
 @pytest.mark.parametrize(
     ("shape", "dtype", "expected_chunks"),
     [
