@@ -8,7 +8,8 @@ arrays are stored in flattened dtype streams.
 Parent metadata is flattened into each signal's own metadata during writing;
 parent object identity and hierarchy are therefore not reconstructed. The
 format does not support nested component signals. It is separate from the
-versioned packed HDF5 schema.
+versioned packed HDF5 schema. Its frozen format identifier is
+``torchsig-homogeneous`` and its current schema version is ``1``.
 """
 
 from __future__ import annotations
@@ -102,6 +103,17 @@ class HomogeneousHDF5Writer(FileWriter):
         fletcher32: bool = True,
         chunk_samples: int = 32,
     ) -> None:
+        """Initialize a homogeneous HDF5 writer.
+
+        Args:
+            root: Directory in which ``data.h5`` is created.
+            compression: HDF5 compression filter name, or ``None``.
+            compression_opts: Options passed to the selected compression
+                filter.
+            shuffle: Whether to apply the HDF5 shuffle filter.
+            fletcher32: Whether to apply the Fletcher32 checksum filter.
+            chunk_samples: Upper bound on top-level samples per HDF5 chunk.
+        """
         super().__init__(root=root)
         if chunk_samples < 1:
             raise ValueError("chunk_samples must be positive")
@@ -370,9 +382,16 @@ class HomogeneousHDF5Writer(FileWriter):
 
 
 class HomogeneousHDF5Reader(FileReader):
-    """Read homogeneous top-level arrays and ragged component signals."""
+    """Read fixed-shape top-level arrays and ragged component signals.
+
+    :meth:`read` and :meth:`read_signals_batch` reconstruct complete
+    :class:`~torchsig.signals.signal_types.Signal` objects. :meth:`read_batch`
+    is the lower-overhead path for contiguous top-level arrays and deliberately
+    omits metadata and component signals.
+    """
 
     def __init__(self, root) -> None:
+        """Initialize a process-safe lazy reader for ``root/data.h5``."""
         super().__init__(root=root)
         self.datapath = self.root / "data.h5"
         self._file: h5py.File | None = None
@@ -622,7 +641,7 @@ class HomogeneousHDF5Reader(FileReader):
         return components
 
     def read(self, idx: int) -> Signal:
-        """Read one signal and its variable-length component list."""
+        """Read one complete signal by top-level dataset index."""
         if idx < 0 or idx >= len(self):
             raise IndexError(f"Homogeneous HDF5 sample index out of range: {idx}")
         component_start = int(self._component_offsets[idx])
@@ -634,7 +653,7 @@ class HomogeneousHDF5Reader(FileReader):
         )
 
     def read_signals_batch(self, start: int, stop: int) -> list[Signal]:
-        """Read contiguous signals while preserving metadata and components.
+        """Read complete signals in the half-open range ``[start, stop)``.
 
         The top-level arrays, metadata records, component offsets, and complete
         component range are each fetched with one contiguous HDF5 read.
@@ -668,7 +687,11 @@ class HomogeneousHDF5Reader(FileReader):
         return signals
 
     def read_batch(self, start: int, stop: int) -> np.ndarray:
-        """Read a contiguous batch of top-level arrays without components."""
+        """Read top-level arrays in ``[start, stop)``.
+
+        This optimized method returns only a NumPy array. It does not decode
+        signal metadata or reconstruct component signals.
+        """
         if start < 0 or stop < start or stop > len(self):
             raise IndexError(f"Homogeneous HDF5 batch range out of bounds: [{start}, {stop})")
         return self._data[start:stop]

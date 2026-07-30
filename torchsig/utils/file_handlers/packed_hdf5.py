@@ -1,4 +1,4 @@
-"""Experimental packed HDF5 reader and writer for TorchSIG signals.
+"""Packed HDF5 reader and writer for TorchSig signals.
 
 Unlike the current one-dataset-per-signal layout, this format stores signal
 sample arrays, record descriptors, component links, and metadata in a small
@@ -7,8 +7,9 @@ complex IQ: any non-object NumPy-compatible array is flattened for storage and
 restored to its original shape and dtype when read. This includes real or
 complex multidimensional data such as spectrograms.
 
-The format is intentionally separate because its on-disk schema is not
-backward compatible with :mod:`torchsig.utils.file_handlers.hdf5`.
+The frozen on-disk format identifier is ``torchsig-packed`` and its current
+schema version is ``1.0``. It is not compatible with the legacy
+object-per-record layout in :mod:`torchsig.utils.file_handlers.hdf5`.
 """
 
 from __future__ import annotations
@@ -201,6 +202,9 @@ class PackedHDF5Writer(FileWriter):
     Batches may therefore mix dtypes and shapes, including one-dimensional
     complex IQ and multidimensional real or complex spectrogram data. NumPy
     object arrays are not supported.
+
+    Component counts, component shapes, and component dtypes may vary.
+    Hierarchical parent metadata and shared parent identity are preserved.
     """
 
     def __init__(
@@ -213,6 +217,19 @@ class PackedHDF5Writer(FileWriter):
         chunk_cache_size: int = 10 * 1024 * 1024,
         max_batches_in_memory: int = 4,
     ) -> None:
+        """Initialize a packed HDF5 writer.
+
+        Args:
+            root: Directory in which ``data.h5`` is created.
+            compression: HDF5 compression filter name, or ``None``.
+            compression_opts: Options passed to the selected compression
+                filter.
+            shuffle: Whether to apply the HDF5 shuffle filter.
+            fletcher32: Whether to apply the Fletcher32 checksum filter.
+            chunk_cache_size: HDF5 raw chunk cache size in bytes.
+            max_batches_in_memory: Maximum out-of-order batches retained while
+                waiting for a contiguous batch-index prefix.
+        """
         super().__init__(root=root)
         self.datapath = self.root.joinpath("data.h5")
         self.compression = compression
@@ -646,12 +663,14 @@ class PackedHDF5Writer(FileWriter):
 class PackedHDF5Reader(FileReader):
     """Read signals from the packed HDF5 schema.
 
-    Stored arrays are reconstructed with their original NumPy dtype and shape.
-    The reader supports both one-dimensional complex IQ and multidimensional
-    representations such as spectrograms.
+    Top-level and component arrays are reconstructed with their original NumPy
+    dtype and shape. This supports IQ, wideband arrays, spectrograms, and other
+    non-object NumPy-compatible arrays. Parent metadata hierarchy and shared
+    parent identity are reconstructed.
     """
 
     def __init__(self, root) -> None:
+        """Initialize a lazy reader for ``root/data.h5``."""
         super().__init__(root=root)
         self.datapath = self.root.joinpath("data.h5")
         self._file: h5py.File | None = None

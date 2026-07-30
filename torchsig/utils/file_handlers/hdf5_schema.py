@@ -1,4 +1,9 @@
-"""Schema definitions for TorchSig's packed HDF5 format."""
+"""Frozen schema definitions for TorchSig's packed HDF5 format.
+
+Readers accept schema major version 1 and reject unknown required features.
+Minor-version additions remain compatible when they use known required
+features and metadata encodings.
+"""
 
 from __future__ import annotations
 
@@ -51,7 +56,7 @@ class DatasetSpec:
 
 @dataclass(frozen=True)
 class PackedHDF5Schema:
-    """Small, versioned vocabulary describing a packed TorchSig file."""
+    """Versioned vocabulary embedded in every packed TorchSig HDF5 file."""
 
     format: str
     schema_major: int
@@ -91,7 +96,7 @@ class PackedHDF5Schema:
 
 
 def default_packed_schema() -> PackedHDF5Schema:
-    """Return the schema emitted by the current writer."""
+    """Return frozen packed schema version 1.0 emitted by the writer."""
     metadata_encoding = MetadataEncoding(name="torchsig-json", version=1)
     return PackedHDF5Schema(
         format=SUPPORTED_FORMAT,
@@ -166,7 +171,7 @@ def write_schema(file: h5py.File, schema: PackedHDF5Schema) -> None:
 
 
 def read_schema(file: h5py.File) -> PackedHDF5Schema:
-    """Read and validate the schema features understood by this release."""
+    """Read a packed schema and validate its compatibility with this reader."""
     if SCHEMA_DATASET_PATH not in file:
         raise ValueError("Not a packed TorchSig HDF5 file: missing /schema")
     payload = file[SCHEMA_DATASET_PATH][()]
