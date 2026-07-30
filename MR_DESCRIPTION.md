@@ -2,7 +2,7 @@
 
 ## Summary
 
-This MR adds optimized HDF5 storage paths for TorchSIG static datasets:
+This MR adds optimized HDF5 storage paths for TorchSig static datasets:
 
 - **Packed HDF5** supports variable top-level shapes and dtypes while reducing
   the object-per-record overhead of the legacy format.
@@ -10,11 +10,14 @@ This MR adds optimized HDF5 storage paths for TorchSIG static datasets:
   one native multidimensional dataset for efficient slicing and batch reads.
 - Variable component counts, component shapes, component dtypes, and metadata
   remain supported by both optimized formats.
-- `DatasetCreator` and the TorchSIG data modules infer the matching reader for
+- `DatasetCreator` and the TorchSig data modules infer the matching reader for
   known writer classes and reject incompatible explicit pairings.
 - `StaticTorchSigDataset` uses native homogeneous full-signal batch reads for
   contiguous DataLoader batches while preserving metadata, components,
   transforms, and target labels.
+- Packed and homogeneous HDF5 share one versioned TorchSig JSON metadata codec.
+- Golden files lock reader compatibility with the first stable packed and
+  homogeneous schemas.
 
 The existing HDF5 backend remains available for compatibility. Packed HDF5 is
 the general-purpose option, while homogeneous HDF5 is an opt-in optimized
@@ -42,6 +45,8 @@ schema.
   by version 1 readers.
 - Allows variable top-level shapes and dtypes.
 - Allows variable component counts, shapes, and dtypes.
+- Preserves and reconstructs hierarchical parent relationships. Python parent
+  object identity is not guaranteed across separate reader calls.
 - Suitable as the flexible default for newly generated datasets.
 
 ### Homogeneous HDF5
@@ -118,6 +123,13 @@ pytest benchmarks/optional/benchmark_homogeneous_hdf5.py --benchmark-only
   inference, incompatible reader/writer rejection, schema validation,
   corruption detection, process-safe reader reopening, and contiguous
   full-signal batch reads.
+- Committed packed `1.0` and homogeneous `1` golden files verify compatibility
+  without invoking the current writers.
+- Shared metadata-codec tests lock the encoded representation and cover NumPy
+  values, bytes, complex values, tuples, reserved marker dictionaries, and
+  invalid inputs.
+- User documentation compares all three HDF5 readers and covers reader
+  selection, compatibility, metadata, components, and batch-read APIs.
 - Existing standard and packed writer integration tests continue to pass.
 
 ## Recommended usage
