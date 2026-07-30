@@ -23,8 +23,21 @@ from torchsig.utils.file_handlers import (
     BatchedHDF5Writer,
     HDF5Reader,
     HDF5Writer,
+    HomogeneousHDF5Reader,
+    HomogeneousHDF5Writer,
 )
 from torchsig.utils.writer import identity_collate_fn
+
+
+def _signal_summary_collate(batch):
+    return [
+        (
+            signal["duration_in_samples"],
+            signal.data.shape,
+            signal.data.dtype.str,
+        )
+        for signal in batch
+    ]
 
 
 @pytest.fixture
@@ -879,11 +892,75 @@ def test_torchsig_datamodule_infers_packed_reader_end_to_end(
     )
 
 
+@pytest.mark.parametrize("num_workers", [0, 2])
+@pytest.mark.parametrize(
+    ("transforms", "expected_ndim"),
+    [([], 1), ([Spectrogram(fft_size=64)], 2)],
+    ids=["iq", "spectrogram"],
+)
+def test_torchsig_datamodule_infers_homogeneous_reader_end_to_end(
+    tmp_path,
+    transforms,
+    expected_ndim,
+    num_workers,
+):
+    metadata = TorchSigDefaults().default_dataset_metadata.copy()
+    metadata.update(
+        {
+            "num_iq_samples_dataset": 4_096,
+            "fft_size": 64,
+            "fft_stride": 64,
+            "num_signals_min": 1,
+            "num_signals_max": 1,
+            "signal_duration_in_samples_min": 3_276,
+            "signal_duration_in_samples_max": 4_096,
+        }
+    )
+    dm = TorchSigDataModule(
+        root=tmp_path,
+        metadata=metadata,
+        dataset_size=6,
+        dataset_splits=[4, 1, 1],
+        create_batch_size=2,
+        create_num_workers=0,
+        file_writer=HomogeneousHDF5Writer,
+        file_writer_kwargs={
+            "compression": None,
+            "shuffle": False,
+            "fletcher32": False,
+            "chunk_samples": 2,
+        },
+        overwrite=True,
+        impairment_level=0,
+        transforms=transforms,
+        collate_fn=identity_collate_fn,
+        num_workers=num_workers,
+    )
+
+    assert dm.file_reader is HomogeneousHDF5Reader
+    dm.prepare_data()
+    dm.setup()
+    full_dataset = dm.train.dataset
+    assert isinstance(full_dataset.reader, HomogeneousHDF5Reader)
+    assert full_dataset[0].data.ndim == expected_ndim
+    dm.collate_fn = _signal_summary_collate
+    batch = next(iter(dm.train_dataloader()))
+    assert batch
+    assert all(len(item[1]) == expected_ndim for item in batch)
+    full_dataset.reader.teardown()
+    with h5py.File(tmp_path / "data.h5", "r") as handle:
+        assert handle.attrs["compression"] == "none"
+        assert handle["data"].compression is None
+        assert handle["data"].chunks[0] == 2
+
+
 @pytest.mark.parametrize(
     ("file_writer", "file_reader"),
     [
         (BatchedHDF5Writer, HDF5Reader),
         (HDF5Writer, BatchedHDF5Reader),
+        (HomogeneousHDF5Writer, BatchedHDF5Reader),
+        (BatchedHDF5Writer, HomogeneousHDF5Reader),
     ],
 )
 def test_torchsig_datamodule_rejects_incompatible_handler_pair(

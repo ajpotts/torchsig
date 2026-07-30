@@ -5,9 +5,11 @@ Top-level arrays share one fixed dtype and shape and are stored in a native
 each sample indexes a variable-length range of component records whose sample
 arrays are stored in flattened dtype streams.
 
-This prototype intentionally rejects parent metadata hierarchies and nested
-component signals. It is separate from the versioned packed HDF5 schema and
-is intended for layout and performance evaluation.
+Parent metadata is flattened into each signal's own metadata during writing;
+parent object identity and hierarchy are therefore not reconstructed. This
+prototype still rejects nested component signals. It is separate from the
+versioned packed HDF5 schema and is intended for layout and performance
+evaluation.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ import h5py
 import numpy as np
 
 from torchsig.signals.signal_types import Signal
+from torchsig.utils.abstractions import HierarchicalMetadataObject
 from torchsig.utils.file_handlers.base_handler import FileReader, FileWriter
 from torchsig.utils.file_handlers.hdf5_batched import (
     _decode_metadata,
@@ -56,11 +59,35 @@ def _append(dataset: h5py.Dataset, values: Any) -> int:
     return start
 
 
+def _encode_flat_metadata(signal: Signal) -> str:
+    chain = []
+    active: set[int] = set()
+    current: HierarchicalMetadataObject | None = signal
+    while current is not None:
+        identity = id(current)
+        if identity in active:
+            raise ValueError(
+                "Homogeneous HDF5 parent metadata cycle detected"
+            )
+        active.add(identity)
+        chain.append(current)
+        current = current.parent
+    values = {}
+    for item in reversed(chain):
+        values.update({key: item[key] for key in item.keys()})  # noqa: SIM118
+    metadata = HierarchicalMetadataObject(
+        metadata=values,
+    )
+    return _encode_metadata(metadata)
+
+
 class HomogeneousHDF5Writer(FileWriter):
     """Write fixed-shape top-level arrays with ragged component signals.
 
     Every top-level signal must have the same NumPy dtype and shape. Component
     counts, component shapes, and component dtypes may vary by sample. The
+    effective metadata inherited from parent objects is flattened into each
+    stored signal; parent hierarchy and identity are not retained. The
     ``chunk_samples`` argument is an upper bound; large observations use fewer
     samples per chunk to keep top-level chunks at or below roughly one MiB.
     Compressed observations of at least 64 KiB use one sample per chunk to
@@ -172,14 +199,10 @@ class HomogeneousHDF5Writer(FileWriter):
     def _validate_signal(self, signal: Signal) -> np.ndarray:
         if not isinstance(signal, Signal):
             raise TypeError("Homogeneous HDF5 batches must contain Signal instances")
-        if signal.parent is not None:
-            raise ValueError("Homogeneous HDF5 prototype does not support parent metadata")
         array = np.asarray(signal.data)
         if array.dtype.hasobject:
             raise TypeError("Homogeneous HDF5 does not support object arrays")
         for component in signal.component_signals:
-            if component.parent is not None:
-                raise ValueError("Homogeneous HDF5 prototype does not support parent metadata")
             if component.component_signals:
                 raise ValueError("Homogeneous HDF5 prototype does not support nested components")
             component_array = np.asarray(component.data)
@@ -260,7 +283,7 @@ class HomogeneousHDF5Writer(FileWriter):
                         array.ndim,
                     )
                 )
-                metadata.append(_encode_metadata(component))
+                metadata.append(_encode_flat_metadata(component))
                 shapes.extend(array.shape)
                 data_by_dtype[dtype_id].append(array.reshape(-1))
                 data_offsets[dtype_id] += array.size
@@ -308,7 +331,10 @@ class HomogeneousHDF5Writer(FileWriter):
                 start = len(self._data)
                 self._data.resize(start + len(arrays), axis=0)
                 self._data[start:] = np.stack(arrays)
-            _append(self._metadata, [_encode_metadata(signal) for signal in data])
+            _append(
+                self._metadata,
+                [_encode_flat_metadata(signal) for signal in data],
+            )
             self._append_components(data)
             self._next_batch_idx += 1
         except Exception:

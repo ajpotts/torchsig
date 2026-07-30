@@ -32,6 +32,10 @@ from torchsig.utils.file_handlers.hdf5_batched import (
     BatchedHDF5Reader,
     BatchedHDF5Writer,
 )
+from torchsig.utils.file_handlers.hdf5_homogeneous import (
+    HomogeneousHDF5Reader,
+    HomogeneousHDF5Writer,
+)
 from torchsig.utils.writer import DatasetCreator
 from torchsig.utils.defaults import TorchSigDefaults
 from torchsig.utils.yaml import load_config_from_yaml
@@ -73,10 +77,15 @@ def _identity_collate(batch: list[Any]) -> list[Any]:
 
 
 def _resolve_file_reader(file_writer, file_reader):
-    """Infer or validate known HDF5 writer/reader format pairs."""
+    """Infer or validate known HDF5 writer/reader format pairs.
+
+    Homogeneous HDF5 is opt-in and requires fixed-shape, fixed-dtype top-level
+    samples. Component counts and component arrays may remain variable.
+    """
     known_pairs = {
         HDF5Writer: HDF5Reader,
         BatchedHDF5Writer: BatchedHDF5Reader,
+        HomogeneousHDF5Writer: HomogeneousHDF5Reader,
     }
     expected_reader = known_pairs.get(file_writer)
     if file_reader is None:

@@ -10,7 +10,12 @@ from torchsig.datasets import TorchSigDataModule
 from torchsig.datasets.datasets import TorchSigDatasetConfig
 from torchsig.transforms.metadata_transforms import YOLOLabel
 from torchsig.transforms.transforms import ComplexTo2D, Spectrogram
-from torchsig.utils.file_handlers import BatchedHDF5Reader, BatchedHDF5Writer
+from torchsig.utils.file_handlers import (
+    BatchedHDF5Reader,
+    BatchedHDF5Writer,
+    HomogeneousHDF5Reader,
+    HomogeneousHDF5Writer,
+)
 from torchsig.utils.yaml import load_config_from_yaml
 
 # Path to default configs directory
@@ -171,6 +176,31 @@ class TestDataModuleCreation:
             "shuffle": False,
             "fletcher32": False,
         }
+
+    def test_from_config_forwards_homogeneous_writer_options(
+        self,
+        tmp_path,
+    ):
+        config = load_config_from_yaml(
+            CONFIGS_DIR / "narrowband_toy_dataset.yaml"
+        )
+        options = {
+            "compression": None,
+            "shuffle": False,
+            "fletcher32": False,
+            "chunk_samples": 4,
+        }
+
+        dm = TorchSigDataModule.from_config(
+            config,
+            root=tmp_path,
+            file_writer=HomogeneousHDF5Writer,
+            file_writer_kwargs=options,
+        )
+        options["chunk_samples"] = 8
+
+        assert dm.file_reader is HomogeneousHDF5Reader
+        assert dm.file_writer_kwargs["chunk_samples"] == 4
 
     def test_narrowband_transforms(self, tmp_path):
         """Test narrowband configs produce expected transforms."""

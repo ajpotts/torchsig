@@ -394,15 +394,32 @@ def test_homogeneous_hdf5_rejects_heterogeneous_top_level_data(tmp_path, signal)
         assert not file.attrs["complete"]
 
 
-def test_homogeneous_hdf5_rejects_parent_metadata(tmp_path) -> None:
+def test_homogeneous_hdf5_flattens_parent_metadata(tmp_path) -> None:
     parent = HierarchicalMetadataObject(metadata={"sample_rate": 1.0})
     signal = Signal(
         data=np.ones((2, 8), dtype=np.complex64),
         parent=parent,
+        sample_index=3,
     )
+    with HomogeneousHDF5Writer(tmp_path) as writer:
+        writer.write(0, [signal])
+
+    reader = HomogeneousHDF5Reader(tmp_path)
+    try:
+        actual = reader.read(0)
+        assert actual.parent is None
+        assert actual["sample_rate"] == 1.0
+        assert actual["sample_index"] == 3
+    finally:
+        reader.teardown()
+
+
+def test_homogeneous_hdf5_rejects_parent_metadata_cycle(tmp_path) -> None:
+    signal = Signal(data=np.ones((2, 8), dtype=np.complex64))
+    signal.parent = signal
     with (
         HomogeneousHDF5Writer(tmp_path) as writer,
-        pytest.raises(ValueError, match="does not support parent metadata"),
+        pytest.raises(ValueError, match="parent metadata cycle"),
     ):
         writer.write(0, [signal])
 

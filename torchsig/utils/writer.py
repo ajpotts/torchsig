@@ -14,7 +14,15 @@ import yaml
 from torch.utils.data._utils.collate import default_collate as torch_default_collate
 from tqdm.auto import tqdm
 
-from torchsig.utils.file_handlers.hdf5 import HDF5Writer
+from torchsig.utils.file_handlers.hdf5 import HDF5Reader, HDF5Writer
+from torchsig.utils.file_handlers.hdf5_batched import (
+    BatchedHDF5Reader,
+    BatchedHDF5Writer,
+)
+from torchsig.utils.file_handlers.hdf5_homogeneous import (
+    HomogeneousHDF5Reader,
+    HomogeneousHDF5Writer,
+)
 
 if TYPE_CHECKING:
     from torch.utils.data import DataLoader
@@ -25,6 +33,23 @@ if TYPE_CHECKING:
 __all__ = ["default_collate_fn", "identity_collate_fn", "DatasetCreator"]
 
 _MISSING = object()
+_KNOWN_FILE_HANDLER_PAIRS = {
+    HDF5Writer: HDF5Reader,
+    BatchedHDF5Writer: BatchedHDF5Reader,
+    HomogeneousHDF5Writer: HomogeneousHDF5Reader,
+}
+
+
+def _resolve_file_reader(file_writer, file_reader):
+    expected_reader = _KNOWN_FILE_HANDLER_PAIRS.get(file_writer)
+    if file_reader is None:
+        return expected_reader
+    if expected_reader is not None and file_reader is not expected_reader:
+        raise ValueError(
+            f"Incompatible file handler pair: {file_writer.__name__} requires "
+            f"{expected_reader.__name__}, got {file_reader.__name__}"
+        )
+    return file_reader
 
 
 def _yaml_safe_value(value: Any) -> Any:
@@ -124,7 +149,10 @@ class DatasetCreator:
     This class generates a dataset if it does not already exist on disk.
     It processes the data in batches and saves it using a specified file handler.
     The class allows setting options like whether to overwrite existing datasets,
-    batch size, and number of worker threads.
+    batch size, and number of worker threads. Known HDF5 writers infer their
+    matching reader. ``HomogeneousHDF5Writer`` is an opt-in backend requiring
+    every top-level sample to share one shape and dtype; component counts,
+    component arrays, and effective metadata may vary.
 
     Attributes:
         dataloader (DataLoader): The DataLoader used to load data in batches.
@@ -157,6 +185,8 @@ class DatasetCreator:
             tqdm_desc (str): Description for the progress bar.
             file_handler (FileWriter): File handler used to write dataset. Defaults to HDF5Writer.
             file_reader: Optional reader class paired with the writer for metadata.
+                Known HDF5 writer classes infer their matching reader and reject
+                incompatible explicit pairings.
             multithreading (bool): Whether to use multithreading for writing batches. Defaults to True.
             max_inflight_futures (int): Maximum number of concurrent futures when using multithreading. Defaults to 32.
             **kwargs: Additional arguments for the file handler.
@@ -174,7 +204,7 @@ class DatasetCreator:
                 )
             file_handler = legacy_file_writer
         self.file_handler = file_handler
-        self.file_reader = file_reader
+        self.file_reader = _resolve_file_reader(file_handler, file_reader)
         self.kwargs = dict(kwargs)
         self.writer_info_kwargs = _yaml_safe_value(self.kwargs)
 
