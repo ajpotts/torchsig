@@ -883,11 +883,11 @@ def test_torchsig_datamodule_infers_packed_reader_end_to_end(
         assert not handle["data/0"].fletcher32
     writer_info = (tmp_path / "writer_info.yaml").read_text()
     assert (
-        "torchsig.utils.file_handlers.hdf5_batched.BatchedHDF5Writer"
+        "torchsig.utils.file_handlers.batched_hdf5.BatchedHDF5Writer"
         in writer_info
     )
     assert (
-        "torchsig.utils.file_handlers.hdf5_batched.BatchedHDF5Reader"
+        "torchsig.utils.file_handlers.batched_hdf5.BatchedHDF5Reader"
         in writer_info
     )
 

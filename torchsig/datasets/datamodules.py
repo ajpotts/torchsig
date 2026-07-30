@@ -28,7 +28,7 @@ from torchsig.transforms.metadata_transforms import YOLOLabel
 from torchsig.transforms.transforms import ComplexTo2D, Spectrogram
 from torchsig.utils.data_loading import WorkerSeedingDataLoader
 from torchsig.utils.file_handlers.hdf5 import HDF5Reader, HDF5Writer
-from torchsig.utils.file_handlers.hdf5_batched import (
+from torchsig.utils.file_handlers.batched_hdf5 import (
     BatchedHDF5Reader,
     BatchedHDF5Writer,
 )

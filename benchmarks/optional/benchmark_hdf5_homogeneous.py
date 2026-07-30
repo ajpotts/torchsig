@@ -28,7 +28,7 @@ import torchsig.utils.file_handlers.hdf5_homogeneous as homogeneous_module
 from torchsig.datasets.datasets import StaticTorchSigDataset
 from torchsig.signals.signal_types import Signal
 from torchsig.utils.file_handlers.hdf5 import HDF5Reader, HDF5Writer
-from torchsig.utils.file_handlers.hdf5_batched import (
+from torchsig.utils.file_handlers.batched_hdf5 import (
     BatchedHDF5Reader,
     BatchedHDF5Writer,
 )

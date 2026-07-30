@@ -177,6 +177,6 @@ def test_dataset_creator_normalizes_legacy_writer_alias_and_class_option(
     assert writer_info["file_handler"] == "_OptionRecordingWriter"
     assert writer_info["file_handler_kwargs"] == {
         "required_option": (
-            "torchsig.utils.file_handlers.hdf5_batched.BatchedHDF5Writer"
+            "torchsig.utils.file_handlers.batched_hdf5.BatchedHDF5Writer"
         )
     }

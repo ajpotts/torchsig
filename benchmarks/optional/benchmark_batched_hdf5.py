@@ -1,7 +1,7 @@
 """Optional comparison of object-per-record and packed HDF5 formats.
 
 Run with:
-    pytest benchmarks/optional/benchmark_hdf5_batched.py --benchmark-only
+    pytest benchmarks/optional/benchmark_batched_hdf5.py --benchmark-only
 """
 
 from collections.abc import Callable
@@ -12,11 +12,11 @@ import pytest
 
 from torchsig.signals.signal_types import Signal
 from torchsig.utils.abstractions import HierarchicalMetadataObject
-from torchsig.utils.file_handlers.hdf5 import HDF5Reader, HDF5Writer
-from torchsig.utils.file_handlers.hdf5_batched import (
+from torchsig.utils.file_handlers.batched_hdf5 import (
     BatchedHDF5Reader,
     BatchedHDF5Writer,
 )
+from torchsig.utils.file_handlers.hdf5 import HDF5Reader, HDF5Writer
 
 NUM_SIGNALS = 256
 NUM_SAMPLES = 2_048

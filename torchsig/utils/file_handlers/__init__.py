@@ -1,9 +1,9 @@
 """TorchSig File Handlers"""
 
-from . import base_handler, hdf5, hdf5_batched, hdf5_homogeneous, npy
+from . import base_handler, batched_hdf5, hdf5, hdf5_homogeneous, npy
 from .base_handler import BaseFileHandler, FileReader, FileWriter
+from .batched_hdf5 import BatchedHDF5Reader, BatchedHDF5Writer
 from .hdf5 import HDF5Reader, HDF5Writer
-from .hdf5_batched import BatchedHDF5Reader, BatchedHDF5Writer
 from .hdf5_homogeneous import (
     HomogeneousHDF5Reader,
     HomogeneousHDF5Writer,
@@ -30,8 +30,8 @@ __all__ = [
     "OGGReader",
     "WAVReader",
     "base_handler",
+    "batched_hdf5",
     "hdf5",
-    "hdf5_batched",
     "hdf5_homogeneous",
     "npy",
 ]

@@ -15,7 +15,7 @@ from torch.utils.data._utils.collate import default_collate as torch_default_col
 from tqdm.auto import tqdm
 
 from torchsig.utils.file_handlers.hdf5 import HDF5Reader, HDF5Writer
-from torchsig.utils.file_handlers.hdf5_batched import (
+from torchsig.utils.file_handlers.batched_hdf5 import (
     BatchedHDF5Reader,
     BatchedHDF5Writer,
 )

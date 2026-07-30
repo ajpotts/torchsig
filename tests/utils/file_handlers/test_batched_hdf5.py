@@ -10,8 +10,8 @@ import pytest
 from torchsig.signals.signal_types import Signal
 from torchsig.transforms.transforms import ComplexTo2D, Spectrogram
 from torchsig.utils.abstractions import HierarchicalMetadataObject
-from torchsig.utils.file_handlers import hdf5_batched
-from torchsig.utils.file_handlers.hdf5_batched import (
+from torchsig.utils.file_handlers import batched_hdf5
+from torchsig.utils.file_handlers.batched_hdf5 import (
     BatchedHDF5Reader,
     BatchedHDF5Writer,
 )
@@ -351,7 +351,7 @@ def test_batched_hdf5_invalid_batch_does_not_append_partial_data(
 
 @pytest.mark.parametrize("fail_on_append", [1, 3, 6, 9])
 def test_batched_hdf5_rolls_back_failed_batch_commit(tmp_path, monkeypatch, fail_on_append) -> None:
-    original_append = hdf5_batched._append  # noqa: SLF001
+    original_append = batched_hdf5._append  # noqa: SLF001
     append_count = 0
 
     def failing_append(dataset, values):
@@ -362,7 +362,7 @@ def test_batched_hdf5_rolls_back_failed_batch_commit(tmp_path, monkeypatch, fail
             raise OSError("injected HDF5 append failure")
         return result
 
-    monkeypatch.setattr(hdf5_batched, "_append", failing_append)
+    monkeypatch.setattr(batched_hdf5, "_append", failing_append)
     parent = HierarchicalMetadataObject(metadata={"split": "train"})
     component = Signal(data=np.ones(2, dtype=np.complex64))
     signal = Signal(
@@ -399,7 +399,7 @@ def test_batched_hdf5_rollback_preserves_committed_batches(tmp_path, monkeypatch
     writer = BatchedHDF5Writer(tmp_path, max_batches_in_memory=1)
     writer.setup()
     writer.write(0, [Signal(data=np.ones(4, dtype=np.complex64))])
-    original_append = hdf5_batched._append  # noqa: SLF001
+    original_append = batched_hdf5._append  # noqa: SLF001
     append_count = 0
 
     def failing_append(dataset, values):
@@ -410,7 +410,7 @@ def test_batched_hdf5_rollback_preserves_committed_batches(tmp_path, monkeypatch
             raise OSError("injected HDF5 append failure")
         return result
 
-    monkeypatch.setattr(hdf5_batched, "_append", failing_append)
+    monkeypatch.setattr(batched_hdf5, "_append", failing_append)
     parent = HierarchicalMetadataObject(metadata={"split": "test"})
     signal = Signal(
         data=np.ones(3, dtype=np.float32),

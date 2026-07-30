@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from torchsig.signals.signal_types import Signal
-from torchsig.utils.file_handlers.hdf5_batched import (
+from torchsig.utils.file_handlers.batched_hdf5 import (
     BatchedHDF5Reader,
     BatchedHDF5Writer,
 )
