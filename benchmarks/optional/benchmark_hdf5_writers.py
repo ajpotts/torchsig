@@ -1,4 +1,4 @@
-"""Optional end-to-end benchmark for the current and direct HDF5 writers.
+"""Optional end-to-end benchmark for the current HDF5 writer.
 
 Run with:
     pytest benchmarks/optional/benchmark_hdf5_writers.py --benchmark-only
@@ -13,7 +13,6 @@ import pytest
 from torchsig.signals.signal_types import Signal
 from torchsig.utils.abstractions import HierarchicalMetadataObject
 from torchsig.utils.file_handlers.hdf5 import HDF5Reader, HDF5Writer
-from torchsig.utils.file_handlers.hdf5_direct_writer import DirectHDF5Writer
 
 NUM_SIGNALS = 64
 NUM_SAMPLES = 2_048
@@ -21,7 +20,6 @@ BATCH_SIZE = 16
 
 WRITER_IMPLEMENTATIONS: dict[str, Callable] = {
     "current": HDF5Writer,
-    "direct": DirectHDF5Writer,
 }
 
 

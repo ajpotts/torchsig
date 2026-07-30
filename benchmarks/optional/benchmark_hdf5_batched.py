@@ -17,7 +17,6 @@ from torchsig.utils.file_handlers.hdf5_batched import (
     BatchedHDF5Reader,
     BatchedHDF5Writer,
 )
-from torchsig.utils.file_handlers.hdf5_cached_reader import CachedHDF5Reader
 
 NUM_SIGNALS = 256
 NUM_SAMPLES = 2_048
@@ -51,7 +50,6 @@ WRITERS: dict[str, Callable] = {
 
 READ_FORMATS: dict[str, tuple[Callable, Callable]] = {
     "current": (HDF5Writer, HDF5Reader),
-    "cached": (HDF5Writer, CachedHDF5Reader),
     "packed": (BatchedHDF5Writer, BatchedHDF5Reader),
 }
 
