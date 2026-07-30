@@ -3,8 +3,13 @@
 import numpy as np
 import pytest
 
+from torchsig.datasets.datasets import apply_transforms_and_labels_to_signal
 from torchsig.signals.signal_types import Signal
-from torchsig.transforms.metadata_transforms import MetadataTransform, YOLOLabel
+from torchsig.transforms.metadata_transforms import (
+    GroupingLabel,
+    MetadataTransform,
+    YOLOLabel,
+)
 
 
 class DummyMetadataTransform(MetadataTransform):
@@ -82,6 +87,17 @@ def test_metadata_transform_call_applies_to_each_component_signal(parent_signal)
     assert parent_signal.component_signals[0].was_applied is True
 
 
+def test_metadata_transform_call_applies_to_signal_without_components(
+    component_signal,
+):
+    transform = DummyMetadataTransform()
+
+    transformed_signal = transform(component_signal)
+
+    assert transformed_signal is component_signal
+    assert component_signal.was_applied is True
+
+
 def test_metadata_transform_base_apply_raises_not_implemented(component_signal):
     transform = MetadataTransform()
 
@@ -135,3 +151,132 @@ def test_yolo_label_apply_returns_component_signal(component_signal):
 
     assert transformed_component is component_signal
     assert transformed_component.yolo_label == pytest.approx((3, 0.5, 0.4, 0.5, 0.2))
+
+
+def test_grouping_label_uses_exact_value_rules(parent_signal):
+    parent_signal.component_signals[0]["class_name"] = "bpsk"
+    transform = GroupingLabel(
+        {
+            "source": "class_name",
+            "labels": {
+                "name": "modulation_group",
+                "index": "modulation_group_index",
+            },
+            "groups": [
+                {"name": "frequency", "values": ["2fsk"]},
+                {"name": "linear", "values": ["bpsk", "qpsk"]},
+            ],
+        }
+    )
+
+    transformed_signal = transform(parent_signal)
+    component = transformed_signal.component_signals[0]
+
+    assert component.modulation_group == "linear"
+    assert component.modulation_group_index == 1
+    assert transform.targets_metadata == [
+        "modulation_group",
+        "modulation_group_index",
+    ]
+
+
+def test_grouping_label_loads_yaml_and_supports_regex_and_formula(
+    tmp_path,
+):
+    config_path = tmp_path / "groups.yaml"
+    config_path.write_text(
+        """
+source: class_name
+groups:
+  - name: frequency_shift
+    regex: '^[248]g?fsk$'
+  - name: high_order_qam
+    formula: 'value.endswith("qam") and value != "16qam"'
+"""
+    )
+    transform = GroupingLabel(config_path)
+
+    fsk_signal = transform(Signal(class_name="4gfsk"))
+    qam_signal = transform(Signal(class_name="64qam"))
+
+    assert fsk_signal.group_name == "frequency_shift"
+    assert fsk_signal.group_index == 0
+    assert qam_signal.group_name == "high_order_qam"
+    assert qam_signal.group_index == 1
+
+
+def test_grouping_label_values_are_available_as_dataset_targets(parent_signal):
+    parent_signal["num_signals_max"] = 2
+    parent_signal.component_signals[0]["class_name"] = "bpsk"
+    transform = GroupingLabel(
+        {
+            "groups": [
+                {"name": "linear", "values": ["bpsk"]},
+            ],
+        }
+    )
+
+    _, targets = apply_transforms_and_labels_to_signal(
+        parent_signal,
+        transforms=[transform],
+        target_labels=["group_name", "group_index"],
+    )
+
+    assert targets == [["linear"], [0]]
+
+
+def test_grouping_label_rejects_unmatched_value():
+    transform = GroupingLabel(
+        {"groups": [{"name": "linear", "values": ["bpsk"]}]}
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"'tone'.*did not match any configured group",
+    ):
+        transform(Signal(class_name="tone"))
+
+
+@pytest.mark.parametrize(
+    ("config", "expected_message"),
+    [
+        (
+            {"groups": []},
+            "groups must be a non-empty list",
+        ),
+        (
+            {
+                "groups": [
+                    {
+                        "name": "linear",
+                        "values": ["bpsk"],
+                        "regex": "psk$",
+                    }
+                ]
+            },
+            "must define exactly one",
+        ),
+        (
+            {
+                "groups": [
+                    {"name": "linear", "formula": "__import__('os')"},
+                ]
+            },
+            "may only call safe string methods",
+        ),
+        (
+            {
+                "groups": [
+                    {"name": "linear", "formula": "value.__class__"},
+                ]
+            },
+            "method '__class__' is not allowed",
+        ),
+    ],
+)
+def test_grouping_label_rejects_invalid_config(
+    config,
+    expected_message,
+):
+    with pytest.raises(ValueError, match=expected_message):
+        GroupingLabel(config)
