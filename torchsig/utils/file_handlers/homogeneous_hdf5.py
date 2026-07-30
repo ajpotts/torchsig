@@ -23,9 +23,9 @@ import numpy as np
 from torchsig.signals.signal_types import Signal
 from torchsig.utils.abstractions import HierarchicalMetadataObject
 from torchsig.utils.file_handlers.base_handler import FileReader, FileWriter
-from torchsig.utils.file_handlers.packed_hdf5 import (
-    _decode_metadata,
-    _encode_metadata,
+from torchsig.utils.file_handlers.metadata_codec import (
+    decode_metadata,
+    encode_metadata,
 )
 
 __all__ = ["HomogeneousHDF5Reader", "HomogeneousHDF5Writer"]
@@ -77,7 +77,7 @@ def _encode_flat_metadata(signal: Signal) -> str:
     metadata = HierarchicalMetadataObject(
         metadata=values,
     )
-    return _encode_metadata(metadata)
+    return encode_metadata(metadata)
 
 
 class HomogeneousHDF5Writer(FileWriter):
@@ -616,7 +616,7 @@ class HomogeneousHDF5Reader(FileReader):
             components.append(
                 Signal(
                     data=data_by_dtype[dtype_id][local_start : local_start + data_length].reshape(shape),
-                    metadata=_decode_metadata(component_metadata),
+                    metadata=decode_metadata(component_metadata),
                 )
             )
         return components
@@ -630,7 +630,7 @@ class HomogeneousHDF5Reader(FileReader):
         return Signal(
             data=self._data[idx],
             component_signals=self._read_components(component_start, component_stop),
-            metadata=_decode_metadata(self._metadata[idx]),
+            metadata=decode_metadata(self._metadata[idx]),
         )
 
     def read_signals_batch(self, start: int, stop: int) -> list[Signal]:
@@ -662,7 +662,7 @@ class HomogeneousHDF5Reader(FileReader):
                 Signal(
                     data=signal_data,
                     component_signals=components[local_start:local_stop],
-                    metadata=_decode_metadata(signal_metadata),
+                    metadata=decode_metadata(signal_metadata),
                 )
             )
         return signals

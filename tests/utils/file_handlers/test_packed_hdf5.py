@@ -332,7 +332,7 @@ def test_packed_hdf5_invalid_batch_does_not_append_partial_data(
     }
     data_streams_before = set(writer._data_group)  # noqa: SLF001
 
-    with pytest.raises(TypeError, match="Unsupported packed HDF5 metadata"):
+    with pytest.raises(TypeError, match="Unsupported TorchSig metadata"):
         writer.write(1, [valid, invalid])
 
     lengths_after = {
