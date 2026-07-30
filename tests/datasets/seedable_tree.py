@@ -3,13 +3,11 @@
 Helps debugging for developers. Outputs tree to `seedable_tree.txt`.
 """
 
-from pathlib import Path
-
 from torchsig.datasets.dataset_metadata import DatasetMetadata
-
 from torchsig.datasets.datasets import TorchSigIterableDataset
 from torchsig.transforms.impairments import Impairments
 from torchsig.utils.random import Seedable
+from pathlib import Path
 
 num_iq_samples_dataset = 4096 # 64^2
 fft_size = 64
