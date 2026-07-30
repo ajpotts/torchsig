@@ -1,0 +1,47 @@
+Title: Clarify and correct the FM modulator bandwidth limit
+
+Description
+
+The fm_modulator docstring describes bandwidth as the desired 3 dB
+bandwidth, but it does not state whether this is a one-sided bandwidth or
+the full two-sided bandwidth of the complex baseband signal.
+
+The implementation applies Carson's rule using:
+
+    bandwidth = 2 * (frequency_deviation + message_bandwidth)
+
+Therefore, the bandwidth argument represents the full two-sided bandwidth,
+spanning approximately:
+
+    [-bandwidth / 2, bandwidth / 2]
+
+For a complex baseband signal with this definition, the no-aliasing limit is:
+
+    bandwidth <= sample_rate
+
+The existing validation instead requires:
+
+    bandwidth <= sample_rate / 2
+
+That check is consistent with treating bandwidth as a one-sided extent, but
+it conflicts with the Carson's-rule calculation in the implementation. It
+unnecessarily rejects valid FM configurations whose full bandwidth is
+between half the sample rate and the sample rate.
+
+Expected behavior
+
+- Document bandwidth as the full, two-sided 3 dB bandwidth of the complex
+  baseband signal.
+- Accept positive bandwidth values less than or equal to sample_rate.
+- Reject bandwidth values greater than sample_rate.
+- Preserve the existing Carson's-rule calculations and generated signal
+  dtype.
+
+Acceptance criteria
+
+- A call with bandwidth=7,500 Hz and sample_rate=10,000 Hz is accepted.
+- A call with bandwidth=10,001 Hz and sample_rate=10,000 Hz raises
+  ValueError.
+- Public FM builder documentation consistently describes bandwidth_min and
+  bandwidth_max as full, two-sided bandwidths.
+- Existing FM builder tests continue to pass.

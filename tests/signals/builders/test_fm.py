@@ -20,10 +20,10 @@ MODULE_PATH = "torchsig.signals.builders.fm"
         (1_000, 0, 128, "sample_rate must be positive"),
         (1_000, -1, 128, "sample_rate must be positive"),
         (
-            5_001,
+            10_001,
             10_000,
             128,
-            "bandwidth must be less than sample_rate/2",
+            "bandwidth must be less than or equal to sample_rate",
         ),
         (1_000, 10_000, 0, "num_samples must be positive"),
         (1_000, 10_000, -1, "num_samples must be positive"),
@@ -208,6 +208,36 @@ def test_fm_modulator_uses_carsons_rule(
         "transition_bandwidth"
     ] == pytest.approx(expected_fmax)
     assert filter_design.call_args.kwargs["sample_rate"] == 10_000
+
+
+def test_fm_modulator_accepts_bandwidth_above_half_sample_rate():
+    """A full two-sided bandwidth may exceed half the sample rate."""
+    rng = MagicMock(spec=np.random.Generator)
+    rng.uniform.return_value = 1.0
+    rng.normal.return_value = np.ones(8)
+
+    with (
+        patch(
+            f"{MODULE_PATH}.low_pass_iterative_design",
+            return_value=np.array([1.0]),
+        ) as filter_design,
+        patch(
+            f"{MODULE_PATH}.convolve",
+            return_value=np.ones(8),
+        ),
+    ):
+        result = fm_modulator(
+            bandwidth=7_500,
+            sample_rate=10_000,
+            num_samples=8,
+            rng=rng,
+        )
+
+    assert result.shape == (8,)
+    assert filter_design.call_args.kwargs["cutoff"] == pytest.approx(1_875)
+    assert filter_design.call_args.kwargs[
+        "transition_bandwidth"
+    ] == pytest.approx(1_875)
 
 
 def test_fm_modulator_passes_normalized_message_and_filter_to_convolve():

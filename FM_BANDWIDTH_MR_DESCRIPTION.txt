@@ -1,0 +1,44 @@
+Title: Fix FM full-bandwidth validation and documentation
+
+Summary
+
+This MR makes the FM modulator's validation consistent with its use of
+Carson's rule. The bandwidth argument is now explicitly documented as the
+full, two-sided 3 dB bandwidth of the complex baseband signal, spanning
+approximately [-bandwidth / 2, bandwidth / 2].
+
+Changes
+
+- Changed the maximum accepted bandwidth from sample_rate / 2 to
+  sample_rate.
+- Updated the validation error to state that bandwidth must be less than or
+  equal to sample_rate.
+- Clarified the fm_modulator bandwidth parameter and exception docstrings.
+- Clarified that FMSignalGenerator bandwidth_min and bandwidth_max describe
+  full, two-sided bandwidths.
+- Updated the invalid-input test to reject bandwidth values above the sample
+  rate.
+- Added a regression test for a valid bandwidth between sample_rate / 2 and
+  sample_rate.
+
+Why
+
+The implementation calculates the requested bandwidth using Carson's rule:
+
+    B = 2 * (frequency_deviation + message_bandwidth)
+
+This makes B the full occupied bandwidth rather than a one-sided frequency
+extent. For complex baseband sampling, a full bandwidth B occupies
+approximately [-B/2, B/2], so its Nyquist limit is B <= sample_rate. The old
+check was twice as restrictive and rejected otherwise valid inputs.
+
+Testing
+
+    pytest -q tests/signals/builders/test_fm.py
+    24 passed, 1 warning
+
+The warning is an environment-specific PyTorch warning that NVML could not
+be initialized and is unrelated to this change.
+
+    git diff --check
+    passed
