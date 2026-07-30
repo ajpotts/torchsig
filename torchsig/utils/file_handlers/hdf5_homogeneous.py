@@ -12,6 +12,7 @@ is intended for layout and performance evaluation.
 
 from __future__ import annotations
 
+import os
 from math import prod
 from typing import Any
 
@@ -350,11 +351,17 @@ class HomogeneousHDF5Reader(FileReader):
         super().__init__(root=root)
         self.datapath = self.root / "data.h5"
         self._file: h5py.File | None = None
+        self._pid: int | None = None
 
     def _ensure_open(self) -> None:
+        pid = os.getpid()
+        if self._file is not None and self._pid != pid:
+            self._file.close()
+            self._file = None
         if self._file is not None:
             return
         self._file = h5py.File(self.datapath, "r", locking=False)
+        self._pid = pid
         try:
             self._validate_file()
             self._data = self._file["data"]
@@ -367,7 +374,26 @@ class HomogeneousHDF5Reader(FileReader):
         except Exception:
             self._file.close()
             self._file = None
+            self._pid = None
             raise
+
+    def __getstate__(self) -> dict[str, Any]:
+        """Return pickle state without process-local HDF5 handles."""
+        state = self.__dict__.copy()
+        for name in (
+            "_file",
+            "_data",
+            "_metadata",
+            "_component_offsets",
+            "_components",
+            "_component_metadata",
+            "_component_shapes",
+            "_component_data",
+        ):
+            state.pop(name, None)
+        state["_file"] = None
+        state["_pid"] = None
+        return state
 
     def _validate_file(self) -> None:
         if self._file.attrs.get("format") != _FORMAT:
@@ -593,3 +619,4 @@ class HomogeneousHDF5Reader(FileReader):
         if self._file is not None:
             self._file.close()
             self._file = None
+            self._pid = None

@@ -11,6 +11,7 @@ Run one workload with, for example:
         --benchmark-only -k wideband
 """
 
+import multiprocessing
 import tracemalloc
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from torch.utils.data import DataLoader, Dataset
 
 import torchsig.utils.file_handlers.hdf5_homogeneous as homogeneous_module
 from torchsig.signals.signal_types import Signal
@@ -85,11 +87,36 @@ COMPRESSIONS = {
 CASES = tuple(
     (workload, compression_name, compression, format_name, *classes) for workload in WORKLOADS for compression_name, compression in COMPRESSIONS.items() for format_name, classes in FORMATS.items()
 )
+WORKER_CASES = tuple((workload, num_workers) for workload in WORKLOADS for num_workers in (0, 2, 4))
 
 
 def _case_id(case: tuple) -> str:
     workload, compression_name, _, format_name, *_ = case
     return f"{workload.name}-{compression_name}-{format_name}"
+
+
+def _worker_case_id(case: tuple[Workload, int]) -> str:
+    workload, num_workers = case
+    return f"{workload.name}-{num_workers}-workers"
+
+
+class _HomogeneousWorkerDataset(Dataset):
+    def __init__(self, root: Path, length: int) -> None:
+        self.reader = HomogeneousHDF5Reader(root)
+        self.length = length
+
+    def __len__(self) -> int:
+        return self.length
+
+    def __getitem__(self, idx: int) -> np.ndarray:
+        return self.reader.read(idx).data
+
+    def __del__(self) -> None:
+        self.reader.teardown()
+
+
+def _identity_worker_collate(batch: list[np.ndarray]) -> list[np.ndarray]:
+    return batch
 
 
 def _random_array(
@@ -209,6 +236,46 @@ def _cold_reader_open_peak(
     return peak
 
 
+def _worker_loader(
+    root: Path,
+    workload: Workload,
+    num_workers: int,
+) -> DataLoader:
+    context = "fork" if "fork" in multiprocessing.get_all_start_methods() else "spawn"
+    return DataLoader(
+        _HomogeneousWorkerDataset(root, workload.signal_count),
+        batch_size=workload.read_count,
+        num_workers=num_workers,
+        multiprocessing_context=context if num_workers else None,
+        collate_fn=_identity_worker_collate,
+    )
+
+
+def _first_worker_batch(
+    root: Path,
+    workload: Workload,
+    num_workers: int,
+) -> tuple[int, ...]:
+    iterator = iter(_worker_loader(root, workload, num_workers))
+    try:
+        batch = next(iterator)
+        return (len(batch), *batch[0].shape)
+    finally:
+        if num_workers:
+            iterator._shutdown_workers()  # noqa: SLF001
+
+
+def _worker_epoch(
+    root: Path,
+    workload: Workload,
+    num_workers: int,
+) -> int:
+    count = 0
+    for batch in _worker_loader(root, workload, num_workers):
+        count += len(batch)
+    return count
+
+
 def _set_extra_info(
     benchmark,
     workload: Workload,
@@ -252,6 +319,66 @@ def test_benchmark_homogeneous_reader_open(
     assert benchmark(_open_reader, reader_class, root) == len(signals)
     _set_extra_info(benchmark, workload, compression_name, file_size)
     benchmark.extra_info["cold_open_peak_mib"] = peak_bytes / (1024**2)
+
+
+@pytest.mark.benchmark
+@pytest.mark.parametrize("case", WORKER_CASES, ids=_worker_case_id)
+def test_benchmark_homogeneous_worker_startup(
+    benchmark,
+    tmp_path,
+    case,
+) -> None:
+    """Measure DataLoader construction and first-batch latency."""
+    workload, num_workers = case
+    signals = _make_signals(workload)
+    root = tmp_path / "dataset"
+    _write(
+        HomogeneousHDF5Writer,
+        root,
+        signals,
+        workload,
+        compression=None,
+    )
+    shape = benchmark(
+        _first_worker_batch,
+        root,
+        workload,
+        num_workers,
+    )
+    assert shape == (workload.read_count, *workload.shape)
+    benchmark.extra_info["workload"] = workload.name
+    benchmark.extra_info["workers"] = num_workers
+    benchmark.extra_info["batch_size"] = workload.read_count
+
+
+@pytest.mark.benchmark
+@pytest.mark.parametrize("case", WORKER_CASES, ids=_worker_case_id)
+def test_benchmark_homogeneous_worker_epoch(
+    benchmark,
+    tmp_path,
+    case,
+) -> None:
+    """Measure full-epoch DataLoader throughput."""
+    workload, num_workers = case
+    signals = _make_signals(workload)
+    root = tmp_path / "dataset"
+    _write(
+        HomogeneousHDF5Writer,
+        root,
+        signals,
+        workload,
+        compression=None,
+    )
+    count = benchmark(
+        _worker_epoch,
+        root,
+        workload,
+        num_workers,
+    )
+    assert count == workload.signal_count
+    benchmark.extra_info["workload"] = workload.name
+    benchmark.extra_info["workers"] = num_workers
+    benchmark.extra_info["signals"] = workload.signal_count
 
 
 @pytest.mark.benchmark
