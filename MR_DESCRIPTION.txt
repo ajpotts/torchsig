@@ -1,0 +1,61 @@
+## Summary
+
+Adds sample-level multi-hot labels for multilabel classification of composite
+signals. This is especially useful for wideband samples, where several signal
+classes may be present in one spectrogram.
+
+Closes #313.
+
+## Changes
+
+- Add `MultiHotLabel`, a metadata transform that:
+  - encodes every component `class_index` into one `float32` vector;
+  - treats repeated instances of a class as one positive label;
+  - supports leaf signals and all-zero labels for empty composite samples;
+  - accepts an explicit class count or infers it from `class_names`;
+  - supports a configurable output metadata key; and
+  - validates class counts, class-index types, and index bounds.
+- Update dataset target extraction to return aggregate metadata stored directly
+  on a sample as one target value, while preserving existing component-level
+  behavior for labels such as `class_index` and `yolo_label`.
+- Add transform and dataset integration coverage for normal, repeated-class,
+  leaf-signal, empty-sample, and invalid-input cases.
+- Add `examples/scripts/train_wideband_multilabel.py`, which demonstrates:
+  - generation of wideband samples containing multiple signal classes;
+  - spectrogram and multi-hot target creation through a TorchSIG DataLoader;
+  - training a small PyTorch convolutional classifier with
+    `BCEWithLogitsLoss`; and
+  - configurable prediction thresholding with per-class probabilities.
+
+## Usage
+
+```python
+dataset = TorchSigIterableDataset(
+    ...,
+    transforms=[Spectrogram(fft_size=64), MultiHotLabel()],
+    target_labels=["multi_hot_label"],
+)
+```
+
+Run the complete PyTorch example with:
+
+```bash
+python examples/scripts/train_wideband_multilabel.py --steps 100
+```
+
+The example defaults to a `0.45` prediction threshold because its intentionally
+small model and short training run often produce probabilities near `0.5`.
+Production applications should tune `--threshold` using validation data.
+
+## Testing
+
+- `pytest -q tests/transforms/test_metadata_transforms.py`
+  - 20 passed
+- `pytest -q tests/datasets/test_datasets.py -k 'apply_label_to_signal or apply_transforms_and_labels'`
+  - 12 passed, 93 deselected
+- `ruff check examples/scripts/train_wideband_multilabel.py`
+  - passed
+- `python examples/scripts/train_wideband_multilabel.py --steps 22 --eval-batches 1 --batch-size 8 --num-workers 0`
+  - completed training and evaluation successfully
+- `git diff --check`
+  - passed
