@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import pickle
 
 import pytest
@@ -10,6 +11,7 @@ import pytest
 from torchsig.utils.abstractions import (
     HierarchicalMetadataObject,
     MetadataAttributeError,
+    MetadataResolution,
 )
 
 
@@ -231,6 +233,218 @@ def test_get_full_metadata_returns_new_dictionary():
     full_metadata["field"] = "modified"
 
     assert obj["field"] == "original"
+
+
+def test_explain_metadata_reports_local_key():
+    obj = HierarchicalMetadataObject(metadata={"field": "value"})
+
+    resolution = obj.explain_metadata("field")
+
+    assert resolution == MetadataResolution(
+        key="field",
+        found=True,
+        source="local",
+        depth=0,
+        owner_type="HierarchicalMetadataObject",
+        overrides_parent=False,
+        cycle_detected=False,
+        path=("HierarchicalMetadataObject",),
+    )
+
+
+def test_explain_metadata_reports_inherited_key_and_depth():
+    grandparent = ExampleMetadataObject(metadata={"field": "value"})
+    parent = HierarchicalMetadataObject(parent=grandparent)
+    child = HierarchicalMetadataObject(parent=parent)
+
+    resolution = child.explain_metadata("field")
+
+    assert resolution.found is True
+    assert resolution.source == "inherited"
+    assert resolution.depth == 2
+    assert resolution.owner_type == "ExampleMetadataObject"
+    assert resolution.overrides_parent is False
+    assert resolution.cycle_detected is False
+    assert resolution.path == (
+        "HierarchicalMetadataObject",
+        "HierarchicalMetadataObject",
+        "ExampleMetadataObject",
+    )
+
+
+def test_explain_metadata_reports_parent_override():
+    grandparent = HierarchicalMetadataObject(metadata={"field": "grandparent"})
+    parent = HierarchicalMetadataObject(
+        parent=grandparent,
+        metadata={"field": "parent"},
+    )
+    child = HierarchicalMetadataObject(parent=parent)
+
+    resolution = child.explain_metadata("field")
+
+    assert resolution.source == "inherited"
+    assert resolution.depth == 1
+    assert resolution.overrides_parent is True
+
+
+def test_explain_metadata_reports_local_override():
+    parent = HierarchicalMetadataObject(metadata={"field": "parent"})
+    child = HierarchicalMetadataObject(
+        parent=parent,
+        metadata={"field": "child"},
+    )
+
+    resolution = child.explain_metadata("field")
+
+    assert resolution.source == "local"
+    assert resolution.depth == 0
+    assert resolution.overrides_parent is True
+
+
+def test_explain_metadata_reports_missing_key():
+    parent = ExampleMetadataObject(metadata={"other": "value"})
+    child = HierarchicalMetadataObject(parent=parent)
+
+    resolution = child.explain_metadata("missing")
+
+    assert resolution == MetadataResolution(
+        key="missing",
+        found=False,
+        source="missing",
+        depth=None,
+        owner_type=None,
+        overrides_parent=False,
+        cycle_detected=False,
+        path=("HierarchicalMetadataObject", "ExampleMetadataObject"),
+    )
+
+
+def test_explain_metadata_detects_parent_cycle():
+    parent = ExampleMetadataObject(metadata={"field": "value"})
+    child = HierarchicalMetadataObject(parent=parent)
+    parent.parent = child
+
+    resolution = child.explain_metadata("field")
+
+    assert resolution.found is True
+    assert resolution.source == "inherited"
+    assert resolution.depth == 1
+    assert resolution.cycle_detected is True
+    assert resolution.path == (
+        "HierarchicalMetadataObject",
+        "ExampleMetadataObject",
+    )
+
+
+def test_explain_metadata_rejects_non_string_key():
+    obj = HierarchicalMetadataObject()
+
+    with pytest.raises(TypeError, match="metadata key must be a string"):
+        obj.explain_metadata(123)
+
+
+def test_metadata_debug_is_disabled_by_default(caplog):
+    caplog.set_level(logging.DEBUG, logger="torchsig.metadata")
+    obj = HierarchicalMetadataObject(metadata={"field": "value"})
+
+    assert obj["field"] == "value"
+
+    assert obj.metadata_debug_enabled is False
+    assert caplog.records == []
+
+
+def test_metadata_debug_logs_structured_local_lookup(caplog):
+    caplog.set_level(logging.DEBUG, logger="torchsig.metadata")
+    obj = HierarchicalMetadataObject(metadata={"field": "secret-value"})
+    obj.enable_metadata_debug()
+
+    assert obj["field"] == "secret-value"
+
+    record = caplog.records[-1]
+    assert record.metadata_event == "lookup"
+    assert record.metadata_key == "field"
+    assert record.metadata_source == "local"
+    assert record.metadata_found is True
+    assert record.metadata_depth == 0
+    assert record.metadata_owner_type == "HierarchicalMetadataObject"
+    assert record.metadata_overrides_parent is False
+    assert record.metadata_cycle_detected is False
+    assert record.metadata_path == ("HierarchicalMetadataObject",)
+    assert "secret-value" not in record.getMessage()
+    assert "secret-value" not in vars(record).values()
+
+
+def test_metadata_debug_logs_inherited_and_missing_lookups(caplog):
+    caplog.set_level(logging.DEBUG, logger="torchsig.metadata")
+    parent = ExampleMetadataObject(metadata={"field": "value"})
+    child = HierarchicalMetadataObject(parent=parent)
+    child.enable_metadata_debug()
+
+    assert child["field"] == "value"
+    with pytest.raises(MetadataAttributeError):
+        _ = child["missing"]
+
+    inherited_record, missing_record = caplog.records[-2:]
+    assert inherited_record.metadata_source == "inherited"
+    assert inherited_record.metadata_depth == 1
+    assert inherited_record.metadata_owner_type == "ExampleMetadataObject"
+    assert missing_record.metadata_source == "missing"
+    assert missing_record.metadata_found is False
+    assert missing_record.metadata_depth is None
+    assert missing_record.metadata_owner_type is None
+
+
+def test_metadata_debug_logs_set_and_delete_events(caplog):
+    caplog.set_level(logging.DEBUG, logger="torchsig.metadata")
+    parent = HierarchicalMetadataObject(metadata={"field": "parent"})
+    child = HierarchicalMetadataObject(parent=parent)
+    child.enable_metadata_debug()
+
+    child["field"] = "child"
+    del child["field"]
+
+    set_record, delete_record = caplog.records[-2:]
+    assert set_record.metadata_event == "set"
+    assert set_record.metadata_source == "local"
+    assert set_record.metadata_overrides_parent is True
+    assert delete_record.metadata_event == "delete"
+    assert delete_record.metadata_source == "inherited"
+    assert delete_record.metadata_depth == 1
+
+
+def test_metadata_debug_context_restores_previous_state(caplog):
+    caplog.set_level(logging.DEBUG, logger="torchsig.metadata")
+    obj = HierarchicalMetadataObject(metadata={"field": "value"})
+
+    with obj.metadata_debug() as debug_obj:
+        assert debug_obj is obj
+        assert obj.metadata_debug_enabled is True
+        assert obj["field"] == "value"
+
+    assert obj.metadata_debug_enabled is False
+    assert obj["field"] == "value"
+    assert len(caplog.records) == 1
+
+
+def test_metadata_debug_context_restores_enabled_state_after_exception():
+    obj = HierarchicalMetadataObject()
+    obj.enable_metadata_debug()
+
+    with pytest.raises(RuntimeError, match="test error"):
+        with obj.metadata_debug():
+            raise RuntimeError("test error")
+
+    assert obj.metadata_debug_enabled is True
+
+
+def test_metadata_debug_state_survives_pickle_round_trip():
+    obj = HierarchicalMetadataObject(metadata={"field": "value"})
+    obj.enable_metadata_debug()
+
+    restored = pickle.loads(pickle.dumps(obj))
+
+    assert restored.metadata_debug_enabled is True
+    assert restored["field"] == "value"
 
 
 def test_keys_returns_only_local_metadata_keys():

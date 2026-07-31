@@ -3,10 +3,14 @@ This code is used behind the scenes in several places, and sensitive to errors; 
 """
 from __future__ import annotations
 
+import logging
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Iterator, Literal
 
 from torchsig.utils.random import Seedable
+
+log = logging.getLogger("torchsig.metadata")
 
 __all__ = [
     "HierarchicalMetadataObject",
@@ -93,6 +97,7 @@ class HierarchicalMetadataObject(Seedable):
         Note:
             This will override fields in the object passed in with arguments directly given to the generator; useful for making multiple similar but not identical objects.
         """
+        self._metadata_debug_enabled = False
         self._metadata = {}
         Seedable.__init__(self, seed=seed, parent=parent)
         if metadata is not None and len(metadata.keys()) > 0:
@@ -162,8 +167,9 @@ class HierarchicalMetadataObject(Seedable):
             visited.add(current_id)
             path.append(type(current).__name__)
 
+            current_metadata = object.__getattribute__(current, "_metadata")
             defines_key = key == "metadata" and depth == 0
-            defines_key = defines_key or key in current["metadata"]
+            defines_key = defines_key or key in current_metadata
             if defines_key:
                 if owner is None:
                     owner = current
@@ -198,6 +204,77 @@ class HierarchicalMetadataObject(Seedable):
             overrides_parent=overrides_parent,
             cycle_detected=cycle_detected,
             path=tuple(path),
+        )
+
+    @property
+    def metadata_debug_enabled(self) -> bool:
+        """Whether structured metadata debug logging is enabled.
+
+        Returns:
+            ``True`` when this object emits metadata debug records.
+        """
+        instance_attributes = object.__getattribute__(self, "__dict__")
+        return bool(instance_attributes.get("_metadata_debug_enabled", False))
+
+    def enable_metadata_debug(self) -> None:
+        """Enable structured debug logging for this object's metadata access.
+
+        Records are emitted at ``DEBUG`` level through the
+        ``torchsig.metadata`` logger. This method does not configure handlers or
+        logging levels and does not enable logging on parent or child objects.
+        """
+        self._metadata_debug_enabled = True
+
+    def disable_metadata_debug(self) -> None:
+        """Disable structured metadata debug logging for this object."""
+        self._metadata_debug_enabled = False
+
+    @contextmanager
+    def metadata_debug(self) -> Iterator[HierarchicalMetadataObject]:
+        """Temporarily enable structured metadata debug logging.
+
+        The object's previous debug state is restored when the context exits,
+        including when an exception is raised.
+
+        Yields:
+            This metadata object with debug logging enabled.
+        """
+        previous_state = self.metadata_debug_enabled
+        self.enable_metadata_debug()
+        try:
+            yield self
+        finally:
+            self._metadata_debug_enabled = previous_state
+
+    def _log_metadata_event(
+        self,
+        event: Literal["lookup", "set", "delete"],
+        key: str,
+    ) -> None:
+        """Emit a value-free structured metadata debug record."""
+        if not self.metadata_debug_enabled or not log.isEnabledFor(logging.DEBUG):
+            return
+
+        resolution = self.explain_metadata(key)
+        log.debug(
+            "metadata %s: key=%r source=%s depth=%s owner=%s",
+            event,
+            key,
+            resolution.source,
+            resolution.depth,
+            resolution.owner_type,
+            extra={
+                "metadata_event": event,
+                "metadata_key": key,
+                "metadata_source": resolution.source,
+                "metadata_found": resolution.found,
+                "metadata_depth": resolution.depth,
+                "metadata_owner_type": resolution.owner_type,
+                "metadata_overrides_parent": resolution.overrides_parent,
+                "metadata_cycle_detected": resolution.cycle_detected,
+                "metadata_path": resolution.path,
+                "metadata_object_type": type(self).__name__,
+            },
         )
 
     def keys(self) -> list[str]:
@@ -258,6 +335,13 @@ class HierarchicalMetadataObject(Seedable):
             >>> obj["key"]
             'value'
         """
+        debug_enabled = object.__getattribute__(self, "__dict__").get(
+            "_metadata_debug_enabled",
+            False,
+        )
+        if debug_enabled and isinstance(key, str):
+            self._log_metadata_event("lookup", key)
+
         if key == "_metadata":
             raise KeyError(
                 "unknown bug occured for:"
@@ -293,6 +377,12 @@ class HierarchicalMetadataObject(Seedable):
             'value'
         """
         self._metadata[key] = value
+        debug_enabled = object.__getattribute__(self, "__dict__").get(
+            "_metadata_debug_enabled",
+            False,
+        )
+        if debug_enabled and isinstance(key, str):
+            self._log_metadata_event("set", key)
 
     def __delitem__(self, key: str) -> None:
         """Delete a metadata value by key.
@@ -307,6 +397,12 @@ class HierarchicalMetadataObject(Seedable):
             False
         """
         del self._metadata[key]
+        debug_enabled = object.__getattribute__(self, "__dict__").get(
+            "_metadata_debug_enabled",
+            False,
+        )
+        if debug_enabled and isinstance(key, str):
+            self._log_metadata_event("delete", key)
 
     def key_lookup(self, key: str) -> Any:
         """Lookup a metadata key with enhanced error reporting.
