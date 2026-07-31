@@ -178,3 +178,48 @@ def test_benchmark_inherited_lookup_debug_emitted(
     result = benchmark(inherited.__getitem__, "field")
 
     assert result == 1
+
+
+@pytest.mark.benchmark(group="metadata-debug-suppressed")
+def test_benchmark_lookup_rejected_by_key_filter(
+    benchmark,
+    metadata_objects,
+    emitted_debug_logger,
+):
+    """Benchmark an enabled lookup rejected before record construction."""
+    local, _ = metadata_objects
+    local.enable_metadata_debug(keys={"different_field"})
+
+    result = benchmark(local.__getitem__, "field")
+
+    assert result == 1
+
+
+@pytest.mark.benchmark(group="metadata-debug-suppressed")
+def test_benchmark_lookup_rejected_by_rate_limit(
+    benchmark,
+    metadata_objects,
+    emitted_debug_logger,
+):
+    """Benchmark an enabled lookup after its event limit is exhausted."""
+    local, _ = metadata_objects
+    local.enable_metadata_debug(max_events=0)
+
+    result = benchmark(local.__getitem__, "field")
+
+    assert result == 1
+
+
+@pytest.mark.benchmark(group="metadata-debug-emitted")
+def test_benchmark_local_lookup_debug_with_value(
+    benchmark,
+    metadata_objects,
+    emitted_debug_logger,
+):
+    """Benchmark an emitted record with a bounded value representation."""
+    local, _ = metadata_objects
+    local.enable_metadata_debug(include_values=True)
+
+    result = benchmark(local.__getitem__, "field")
+
+    assert result == 1

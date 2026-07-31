@@ -11,6 +11,8 @@ import pytest
 from torchsig.utils.abstractions import (
     HierarchicalMetadataObject,
     MetadataAttributeError,
+    MetadataDebugConfig,
+    MetadataDebugStatistics,
     MetadataResolution,
 )
 
@@ -370,6 +372,7 @@ def test_metadata_debug_logs_structured_local_lookup(caplog):
     assert record.metadata_overrides_parent is False
     assert record.metadata_cycle_detected is False
     assert record.metadata_path == ("HierarchicalMetadataObject",)
+    assert not hasattr(record, "metadata_value")
     assert "secret-value" not in record.getMessage()
     assert "secret-value" not in vars(record).values()
 
@@ -423,28 +426,164 @@ def test_metadata_debug_context_restores_previous_state(caplog):
 
     assert obj.metadata_debug_enabled is False
     assert obj["field"] == "value"
-    assert len(caplog.records) == 1
+    assert [record.metadata_event for record in caplog.records] == [
+        "lookup",
+        "summary",
+    ]
 
 
 def test_metadata_debug_context_restores_enabled_state_after_exception():
     obj = HierarchicalMetadataObject()
     obj.enable_metadata_debug()
 
-    with pytest.raises(RuntimeError, match="test error"):
-        with obj.metadata_debug():
-            raise RuntimeError("test error")
+    with pytest.raises(RuntimeError, match="test error"), obj.metadata_debug():
+        raise RuntimeError("test error")
 
     assert obj.metadata_debug_enabled is True
 
 
 def test_metadata_debug_state_survives_pickle_round_trip():
     obj = HierarchicalMetadataObject(metadata={"field": "value"})
-    obj.enable_metadata_debug()
+    obj.enable_metadata_debug(
+        keys={"field"},
+        events={"lookup"},
+        max_events=5,
+        include_values=True,
+        value_repr_limit=50,
+    )
 
-    restored = pickle.loads(pickle.dumps(obj))
+    restored = pickle.loads(pickle.dumps(obj))  # noqa: S301
 
     assert restored.metadata_debug_enabled is True
+    assert restored.metadata_debug_config == MetadataDebugConfig(
+        keys=frozenset({"field"}),
+        events=frozenset({"lookup"}),
+        max_events=5,
+        include_values=True,
+        value_repr_limit=50,
+    )
     assert restored["field"] == "value"
+
+
+def test_metadata_debug_filters_keys_and_events(caplog):
+    caplog.set_level(logging.DEBUG, logger="torchsig.metadata")
+    obj = HierarchicalMetadataObject(
+        metadata={"field": "value", "other": "other-value"}
+    )
+    obj.enable_metadata_debug(keys={"field"}, events={"lookup"})
+
+    assert obj["field"] == "value"
+    assert obj["other"] == "other-value"
+    obj["field"] = "new-value"
+    del obj["field"]
+
+    assert obj.metadata_debug_statistics == MetadataDebugStatistics(
+        emitted_events=1,
+        suppressed_events=3,
+    )
+    obj.disable_metadata_debug()
+
+    assert [record.metadata_event for record in caplog.records] == [
+        "lookup",
+        "summary",
+    ]
+    summary = caplog.records[-1]
+    assert summary.metadata_emitted_events == 1
+    assert summary.metadata_suppressed_events == 3
+    assert summary.metadata_debug_keys == frozenset({"field"})
+    assert summary.metadata_debug_events == frozenset({"lookup"})
+
+
+def test_metadata_debug_rate_limit_counts_suppressed_events(caplog):
+    caplog.set_level(logging.DEBUG, logger="torchsig.metadata")
+    obj = HierarchicalMetadataObject(metadata={"field": "value"})
+    obj.enable_metadata_debug(max_events=2)
+
+    for _ in range(4):
+        assert obj["field"] == "value"
+
+    assert obj.metadata_debug_statistics == MetadataDebugStatistics(
+        emitted_events=2,
+        suppressed_events=2,
+    )
+    obj.disable_metadata_debug()
+
+    assert [record.metadata_event for record in caplog.records] == [
+        "lookup",
+        "lookup",
+        "summary",
+    ]
+
+
+def test_metadata_debug_can_include_bounded_value_representations(caplog):
+    caplog.set_level(logging.DEBUG, logger="torchsig.metadata")
+    obj = HierarchicalMetadataObject(metadata={"field": "sensitive-value"})
+    obj.enable_metadata_debug(include_values=True, value_repr_limit=10)
+
+    assert obj["field"] == "sensitive-value"
+
+    record = caplog.records[-1]
+    assert record.metadata_value == "'sensit..."
+    assert record.metadata_value_truncated is True
+    assert len(record.metadata_value) == 10
+
+
+def test_metadata_debug_value_logging_supports_inherited_and_missing(caplog):
+    caplog.set_level(logging.DEBUG, logger="torchsig.metadata")
+    parent = HierarchicalMetadataObject(metadata={"field": "parent-value"})
+    child = HierarchicalMetadataObject(parent=parent)
+    child.enable_metadata_debug(include_values=True)
+
+    assert child["field"] == "parent-value"
+    with pytest.raises(MetadataAttributeError):
+        _ = child["missing"]
+
+    inherited_record, missing_record = caplog.records[-2:]
+    assert inherited_record.metadata_value == "'parent-value'"
+    assert inherited_record.metadata_value_truncated is False
+    assert missing_record.metadata_value == "<missing>"
+    assert missing_record.metadata_value_truncated is False
+
+
+def test_metadata_debug_delete_logs_deleted_value(caplog):
+    caplog.set_level(logging.DEBUG, logger="torchsig.metadata")
+    parent = HierarchicalMetadataObject(metadata={"field": "parent-value"})
+    child = HierarchicalMetadataObject(
+        parent=parent,
+        metadata={"field": "child-value"},
+    )
+    child.enable_metadata_debug(events={"delete"}, include_values=True)
+
+    del child["field"]
+
+    record = caplog.records[-1]
+    assert record.metadata_source == "inherited"
+    assert record.metadata_value == "'child-value'"
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "exception_type", "match"),
+    [
+        ({"keys": ["field"]}, TypeError, "keys must be a set"),
+        ({"keys": {1}}, TypeError, "keys must be a set"),
+        ({"events": ["lookup"]}, TypeError, "events must be a set"),
+        ({"events": {"unknown"}}, ValueError, "unknown metadata debug events"),
+        ({"max_events": -1}, ValueError, "max_events must be"),
+        ({"max_events": True}, ValueError, "max_events must be"),
+        ({"include_values": 1}, TypeError, "include_values must be"),
+        ({"value_repr_limit": 0}, ValueError, "value_repr_limit must be"),
+        ({"value_repr_limit": True}, ValueError, "value_repr_limit must be"),
+    ],
+)
+def test_metadata_debug_rejects_invalid_configuration(
+    kwargs,
+    exception_type,
+    match,
+):
+    obj = HierarchicalMetadataObject()
+
+    with pytest.raises(exception_type, match=match):
+        obj.enable_metadata_debug(**kwargs)
 
 
 def test_keys_returns_only_local_metadata_keys():
