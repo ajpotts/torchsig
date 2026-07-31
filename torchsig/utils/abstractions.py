@@ -3,11 +3,47 @@ This code is used behind the scenes in several places, and sensitive to errors; 
 """
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Literal
 
 from torchsig.utils.random import Seedable
 
-__all__ = ["MetadataAttributeError", "HierarchicalMetadataObject"]
+__all__ = [
+    "HierarchicalMetadataObject",
+    "MetadataAttributeError",
+    "MetadataResolution",
+]
+
+
+@dataclass(frozen=True)
+class MetadataResolution:
+    """Describe how a metadata key resolves through an object hierarchy.
+
+    The result intentionally excludes the metadata value so diagnostic output
+    can be logged or displayed without exposing large or sensitive values.
+
+    Attributes:
+        key: Metadata key that was inspected.
+        found: Whether the key resolves to a value.
+        source: Whether the winning value is local, inherited, or missing.
+        depth: Number of parent links to the winning value, or ``None`` when
+            the key is missing.
+        owner_type: Class name of the object owning the winning value, or
+            ``None`` when the key is missing.
+        overrides_parent: Whether the winning value shadows another value for
+            the same key farther up the hierarchy.
+        cycle_detected: Whether parent traversal encountered a cycle.
+        path: Class names visited during parent traversal.
+    """
+
+    key: str
+    found: bool
+    source: Literal["local", "inherited", "missing"]
+    depth: int | None
+    owner_type: str | None
+    overrides_parent: bool
+    cycle_detected: bool
+    path: tuple[str, ...]
 
 class MetadataAttributeError(AttributeError):
     """Custom exception for metadata attribute errors.
@@ -86,6 +122,83 @@ class HierarchicalMetadataObject(Seedable):
         for key in self.keys():
             full_metadata[key] = self[key]
         return full_metadata
+
+    def explain_metadata(self, key: str) -> MetadataResolution:
+        """Explain where a metadata key resolves without returning its value.
+
+        This diagnostic method walks the object's metadata-parent hierarchy and
+        reports the first object defining ``key``. It also reports whether that
+        definition overrides another parent definition and safely terminates if
+        a malformed hierarchy contains a parent cycle. Ordinary item and
+        attribute lookup behavior is not modified.
+
+        Args:
+            key: Metadata key to inspect.
+
+        Returns:
+            Structured information describing the key's resolution.
+
+        Raises:
+            TypeError: If ``key`` is not a string.
+        """
+        if not isinstance(key, str):
+            raise TypeError("metadata key must be a string")
+
+        current: HierarchicalMetadataObject | None = self
+        visited: set[int] = set()
+        path: list[str] = []
+        owner: HierarchicalMetadataObject | None = None
+        owner_depth: int | None = None
+        overrides_parent = False
+        cycle_detected = False
+        depth = 0
+
+        while isinstance(current, HierarchicalMetadataObject):
+            current_id = id(current)
+            if current_id in visited:
+                cycle_detected = True
+                break
+
+            visited.add(current_id)
+            path.append(type(current).__name__)
+
+            defines_key = key == "metadata" and depth == 0
+            defines_key = defines_key or key in current["metadata"]
+            if defines_key:
+                if owner is None:
+                    owner = current
+                    owner_depth = depth
+                else:
+                    overrides_parent = True
+
+            parent = current.parent
+            if not isinstance(parent, HierarchicalMetadataObject):
+                break
+            current = parent
+            depth += 1
+
+        if owner is None:
+            return MetadataResolution(
+                key=key,
+                found=False,
+                source="missing",
+                depth=None,
+                owner_type=None,
+                overrides_parent=False,
+                cycle_detected=cycle_detected,
+                path=tuple(path),
+            )
+
+        return MetadataResolution(
+            key=key,
+            found=True,
+            source="local" if owner_depth == 0 else "inherited",
+            depth=owner_depth,
+            owner_type=type(owner).__name__,
+            overrides_parent=overrides_parent,
+            cycle_detected=cycle_detected,
+            path=tuple(path),
+        )
 
     def keys(self) -> list[str]:
         """Get all metadata keys.
