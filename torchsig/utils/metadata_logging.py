@@ -18,9 +18,9 @@ if TYPE_CHECKING:
     from torchsig.utils.abstractions import MetadataResolution
 
 MetadataContextValue: TypeAlias = str | int | float | bool | None
-MetadataDebugEvent: TypeAlias = Literal["lookup", "set", "delete"]
+MetadataDebugEvent: TypeAlias = Literal["lookup", "set", "delete", "snapshot"]
 _CONTEXT_VALUE_LIMIT = 200
-_METADATA_DEBUG_EVENTS = frozenset({"lookup", "set", "delete"})
+_METADATA_DEBUG_EVENTS = frozenset({"lookup", "set", "delete", "snapshot"})
 _MISSING_METADATA_VALUE = object()
 _log = logging.getLogger("torchsig.metadata")
 
@@ -50,12 +50,14 @@ class MetadataDebugStatistics:
 
     Attributes:
         emitted_events: Event records emitted through the metadata logger.
-        suppressed_events: Events rejected by configuration, rate limits, or
-            the logger's effective level.
+        suppressed_events: Selected events rejected by rate limits or the
+            logger's effective level.
+        filtered_events: Events intentionally excluded by key or event filters.
     """
 
     emitted_events: int
     suppressed_events: int
+    filtered_events: int = 0
 
 
 @dataclass
@@ -65,6 +67,7 @@ class _MetadataDebugSession:
     config: MetadataDebugConfig
     emitted_events: int = 0
     suppressed_events: int = 0
+    filtered_events: int = 0
 
     @property
     def statistics(self) -> MetadataDebugStatistics:
@@ -72,16 +75,22 @@ class _MetadataDebugSession:
         return MetadataDebugStatistics(
             emitted_events=self.emitted_events,
             suppressed_events=self.suppressed_events,
+            filtered_events=self.filtered_events,
         )
 
-    def should_emit(self, event: MetadataDebugEvent, key: str) -> bool:
+    def should_emit(self, event: MetadataDebugEvent, key: str | None = None) -> bool:
         """Apply filters and rate limits before constructing a log record."""
-        if (
-            event not in self.config.events
-            or (self.config.keys is not None and key not in self.config.keys)
-            or (self.config.max_events is not None and self.emitted_events >= self.config.max_events)
-            or not _log.isEnabledFor(logging.DEBUG)
+        if event not in self.config.events or (
+            key is not None
+            and self.config.keys is not None
+            and key not in self.config.keys
         ):
+            self.filtered_events += 1
+            return False
+        if (
+            self.config.max_events is not None
+            and self.emitted_events >= self.config.max_events
+        ) or not _log.isEnabledFor(logging.DEBUG):
             self.suppressed_events += 1
             return False
         return True
@@ -127,20 +136,82 @@ class _MetadataDebugSession:
         )
         self.emitted_events += 1
 
+    def emit_snapshot(
+        self,
+        metadata_object: Any,
+        *,
+        include_components: bool,
+    ) -> None:
+        """Emit one structured snapshot of a completed metadata object."""
+        full_metadata = _get_full_metadata_without_hooks(metadata_object)
+        selected_metadata = _select_snapshot_metadata(
+            full_metadata,
+            self.config.keys,
+        )
+        components = (
+            _get_attribute_without_metadata_hooks(
+                metadata_object,
+                "component_signals",
+                [],
+            )
+            if include_components
+            else []
+        )
+        component_metadata = [
+            _select_snapshot_metadata(
+                _get_full_metadata_without_hooks(component),
+                self.config.keys,
+            )
+            for component in components
+        ]
+        data = _get_attribute_without_metadata_hooks(metadata_object, "data", None)
+        extra = {
+            "metadata_event": "snapshot",
+            "metadata_object_type": type(metadata_object).__name__,
+            "metadata_snapshot_keys": tuple(selected_metadata),
+            "metadata_component_snapshot_keys": tuple(
+                tuple(metadata) for metadata in component_metadata
+            ),
+            "metadata_component_count": len(component_metadata),
+            "metadata_data_shape": getattr(data, "shape", None),
+            "metadata_data_dtype": str(getattr(data, "dtype", "")) or None,
+            **_metadata_logging_extra(),
+        }
+        if self.config.include_values:
+            extra["metadata_snapshot"] = _snapshot_value_reprs(
+                selected_metadata,
+                self.config.value_repr_limit,
+            )
+            extra["metadata_component_snapshots"] = tuple(
+                _snapshot_value_reprs(metadata, self.config.value_repr_limit)
+                for metadata in component_metadata
+            )
+
+        _log.debug(
+            "metadata snapshot: object=%s keys=%d components=%d",
+            type(metadata_object).__name__,
+            len(selected_metadata),
+            len(component_metadata),
+            extra=extra,
+        )
+        self.emitted_events += 1
+
     def emit_summary(self, object_type: str) -> None:
         """Emit one summary record for this debug session."""
         if not _log.isEnabledFor(logging.DEBUG):
             return
         _log.debug(
-            "metadata debug summary: emitted=%d suppressed=%d",
+            "metadata debug summary: emitted=%d suppressed=%d filtered=%d",
             self.emitted_events,
             self.suppressed_events,
+            self.filtered_events,
             extra={
                 "metadata_event": "summary",
                 "metadata_object_type": object_type,
                 **_metadata_logging_extra(),
                 "metadata_emitted_events": self.emitted_events,
                 "metadata_suppressed_events": self.suppressed_events,
+                "metadata_filtered_events": self.filtered_events,
                 "metadata_debug_keys": self.config.keys,
                 "metadata_debug_events": self.config.events,
                 "metadata_debug_max_events": self.config.max_events,
@@ -204,6 +275,62 @@ def _bounded_metadata_value_repr(value: Any, limit: int) -> tuple[str, bool]:
     if len(value_repr) <= limit:
         return value_repr, False
     return value_repr[: max(0, limit - 3)] + "...", True
+
+
+def _select_snapshot_metadata(
+    metadata: dict[str, Any],
+    keys: frozenset[str] | None,
+) -> dict[str, Any]:
+    """Select snapshot keys while preserving metadata insertion order."""
+    if keys is None:
+        return metadata
+    return {key: value for key, value in metadata.items() if key in keys}
+
+
+def _get_full_metadata_without_hooks(metadata_object: Any) -> dict[str, Any]:
+    """Resolve inherited metadata without generating metadata access events."""
+    hierarchy = []
+    visited: set[int] = set()
+    current = metadata_object
+    while current is not None and id(current) not in visited:
+        try:
+            local_metadata = object.__getattribute__(current, "_metadata")
+        except AttributeError:
+            break
+        visited.add(id(current))
+        hierarchy.append(local_metadata)
+        try:
+            current = object.__getattribute__(current, "parent")
+        except AttributeError:
+            break
+
+    full_metadata: dict[str, Any] = {}
+    for local_metadata in reversed(hierarchy):
+        full_metadata.update(local_metadata)
+    return full_metadata
+
+
+def _get_attribute_without_metadata_hooks(
+    metadata_object: Any,
+    name: str,
+    default: Any,
+) -> Any:
+    """Read an ordinary attribute without falling back to metadata lookup."""
+    try:
+        return object.__getattribute__(metadata_object, name)
+    except AttributeError:
+        return default
+
+
+def _snapshot_value_reprs(
+    metadata: dict[str, Any],
+    limit: int,
+) -> dict[str, str]:
+    """Return bounded representations for all values in a metadata snapshot."""
+    return {
+        key: _bounded_metadata_value_repr(value, limit)[0]
+        for key, value in metadata.items()
+    }
 
 
 @dataclass(frozen=True)

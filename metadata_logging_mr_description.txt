@@ -1,0 +1,116 @@
+Title: Add structured metadata debugging and completed pipeline snapshots
+
+Summary
+-------
+This MR adds opt-in diagnostics for hierarchical TorchSIG metadata. It can
+explain where values resolve, emit filtered structured records for metadata
+operations, correlate records with dataset samples and workers, and capture one
+completed metadata snapshot after the transform stage of generated samples.
+
+Normal metadata behavior remains unchanged when debugging is disabled. Value
+logging remains explicitly opt-in, and signal arrays are never included in
+snapshot records.
+
+Changes
+-------
+- Add ``MetadataResolution`` and ``explain_metadata()`` to describe local,
+  inherited, overridden, missing, and cyclic metadata resolution.
+- Add opt-in structured logging through the ``torchsig.metadata`` logger for
+  lookup, set, delete, and snapshot events.
+- Add exact-key and event filters, event limits, emitted/suppressed counters,
+  separately counted filtered events, summary records, and bounded value
+  representations.
+- Add ``MetadataDebugConfig`` and ``MetadataDebugStatistics`` while preserving
+  compatibility imports from ``torchsig.utils.abstractions``.
+- Extract logging configuration, filtering, formatting support, counters, and
+  correlation state into ``torchsig.utils.metadata_logging``.
+- Add ``metadata_logging_context()`` with session, dataset, sample, worker,
+  process, thread, and custom correlation fields.
+- Automatically establish per-sample and per-stage correlation contexts in
+  ``TorchSigIterableDataset`` and ``SafeTorchSigIterableDataset``.
+- Preserve sample/session context across safe-pipeline retries and fallbacks.
+- Add ``log_metadata_snapshot()`` and the ``snapshot`` event type.
+- Automatically emit a completed sample snapshot at the end of the transform
+  stage when snapshot logging is selected.
+- Keep wideband component metadata in separate snapshot mappings.
+- Include sample data shape and dtype without logging IQ or spectrogram arrays.
+- Read snapshot metadata without triggering additional lookup records.
+- Add an optional benchmark covering normal lookup, metadata resolution,
+  filtered/emitted logging, value previews, correlation context, and automatic
+  dataset-context overhead.
+- Add developer examples for event-oriented wideband debugging and
+  snapshot-only wideband debugging.
+- Add a user-facing metadata debugging documentation page.
+
+Example
+-------
+Event-oriented debugging:
+
+    dataset.enable_metadata_debug(
+        keys={"sample_rate", "bandwidth_min", "bandwidth_max"},
+        events={"lookup"},
+        max_events=100,
+        include_values=True,
+    )
+
+Completed snapshots only:
+
+    dataset.enable_metadata_debug(
+        events={"snapshot"},
+        include_values=True,
+        value_repr_limit=160,
+    )
+
+For iterable datasets, snapshot records are correlated with the dataset ID,
+sample index, worker ID, session ID, and ``transform`` stage automatically.
+
+Safety and compatibility
+------------------------
+- Debugging is disabled by default.
+- Existing metadata lookup and mutation APIs are preserved.
+- Values are omitted unless ``include_values=True`` is selected.
+- Value representations are bounded by ``value_repr_limit``.
+- Arrays are represented only by shape and dtype in completed snapshots.
+- Correlation context uses ``ContextVar`` and restores prior state on exit.
+- Parent cycles are detected during metadata-resolution diagnostics.
+- No new dependencies are introduced.
+
+Performance
+-----------
+The optional benchmark shows that the disabled path remains substantially
+cheaper than emitting structured records. Representative local measurements
+were approximately:
+
+- Local lookup with debugging disabled: 0.35 microseconds
+- Dataset ``next()`` with debug context disabled: 12.8 microseconds
+- Dataset ``next()`` with debug context enabled: 28.8 microseconds
+- Emitted structured metadata record: approximately 13-14 microseconds
+- Completed snapshot with one component: approximately 21.5 microseconds
+
+These values are environment-dependent and are intended for regression
+comparison rather than absolute performance guarantees.
+
+Validation
+----------
+- ``pytest -q tests/utils/test_abstractions.py tests/utils/test_metadata_logging.py``
+  - 96 passed
+- ``pytest -q tests/datasets/test_datasets.py -k 'metadata_snapshot or metadata_logging'``
+  - 1 passed, 108 deselected
+- ``pytest -q tests/datasets/test_safe_iterable_dataset.py -k 'logging_context or metadata'``
+  - 2 passed, 6 deselected
+- ``pytest -q benchmarks/optional/benchmark_metadata_debug.py``
+  - 16 passed
+- Ruff checks passed for the changed metadata modules, metadata tests, import
+  ordering, and both developer example scripts.
+- Python compilation and ``git diff --check`` passed.
+- The snapshot example generated a real default-wideband ``(512, 512)``
+  ``float32`` spectrogram and emitted separate metadata for its components.
+- The documentation source was added to the Sphinx toctree. A local HTML build
+  was not available because ``sphinx-build`` is not installed in the test
+  environment.
+
+Follow-up
+---------
+The wideband example exposed component bandwidth and cached frequency-edge
+inconsistencies. Those signal-generation and labeling concerns are documented
+separately and are intentionally out of scope for this MR.

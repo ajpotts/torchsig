@@ -443,10 +443,13 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
             )
             return self._run_with_metadata_logging_stage(
                 "transform",
-                lambda: apply_transforms_and_labels_to_signal(
+                lambda: self._transform_and_log_metadata_snapshot(
                     sample,
-                    self.transforms,
-                    self.target_labels,
+                    lambda: apply_transforms_and_labels_to_signal(
+                        sample,
+                        self.transforms,
+                        self.target_labels,
+                    ),
                 ),
             )
 
@@ -488,6 +491,24 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
             return operation()
         with metadata_logging_context(fields={"stage": stage}):
             return operation()
+
+    def _transform_and_log_metadata_snapshot(
+        self,
+        sample: Signal,
+        operation: Callable[[], Any],
+    ) -> Any:
+        """Run final transforms and optionally log the completed metadata."""
+        result = operation()
+        session = object.__getattribute__(self, "__dict__").get(
+            "_metadata_debug_session"
+        )
+        if (
+            self.metadata_debug_enabled
+            and session is not None
+            and "snapshot" in session.config.events
+        ):
+            self.log_metadata_snapshot(sample, include_components=True)
+        return result
 
     def __call__(self) -> Signal | np.ndarray | tuple:
         """Same as next(); returns the next item in the dataset.
@@ -892,13 +913,16 @@ class SafeTorchSigIterableDataset(
             # raw_signal exists, so original fallback is possible.
             return self._run_with_metadata_logging_stage(
                 "transform",
-                lambda: self._run_with_fallback(
-                    lambda: apply_transforms_and_labels_to_signal(
-                        raw_signal,
-                        self.transforms,
-                        self.target_labels,
+                lambda: self._transform_and_log_metadata_snapshot(
+                    raw_signal,
+                    lambda: self._run_with_fallback(
+                        lambda: apply_transforms_and_labels_to_signal(
+                            raw_signal,
+                            self.transforms,
+                            self.target_labels,
+                        ),
+                        fallback_raw_signal=raw_signal,
                     ),
-                    fallback_raw_signal=raw_signal,
                 ),
             )
 

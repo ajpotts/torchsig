@@ -259,8 +259,8 @@ class HierarchicalMetadataObject(Seedable):
 
         Args:
             keys: Exact metadata keys to log, or ``None`` for every key.
-            events: Operations to log from ``lookup``, ``set``, and ``delete``.
-                ``None`` enables all operations.
+            events: Operations to log from ``lookup``, ``set``, ``delete``, and
+                ``snapshot``. ``None`` enables all operations.
             max_events: Maximum event records to emit. ``None`` is unlimited.
             include_values: Include bounded value representations in records.
             value_repr_limit: Maximum length of an included value representation.
@@ -288,6 +288,43 @@ class HierarchicalMetadataObject(Seedable):
                 session.emit_summary(type(self).__name__)
         self._metadata_debug_enabled = False
 
+    def log_metadata_snapshot(
+        self,
+        metadata_object: HierarchicalMetadataObject | None = None,
+        *,
+        include_components: bool = False,
+    ) -> None:
+        """Log one structured snapshot through this object's debug session.
+
+        Snapshot values are included only when metadata debugging was enabled
+        with ``include_values=True``. The configured ``keys`` filter applies to
+        the root object and every component. Array data is never included;
+        records contain only its shape and dtype.
+
+        Args:
+            metadata_object: Completed object to snapshot. Defaults to this
+                object.
+            include_components: Include snapshots for objects in the target's
+                ``component_signals`` collection.
+
+        Raises:
+            TypeError: If the target is not a hierarchical metadata object or
+                ``include_components`` is not a boolean.
+        """
+        target = self if metadata_object is None else metadata_object
+        if not isinstance(target, HierarchicalMetadataObject):
+            raise TypeError("metadata_object must be a HierarchicalMetadataObject")
+        if not isinstance(include_components, bool):
+            raise TypeError("include_components must be a boolean")
+
+        instance_attributes = object.__getattribute__(self, "__dict__")
+        session = instance_attributes.get("_metadata_debug_session")
+        if not self.metadata_debug_enabled or session is None:
+            return
+        if not session.should_emit("snapshot"):
+            return
+        session.emit_snapshot(target, include_components=include_components)
+
     @contextmanager
     def metadata_debug(
         self,
@@ -305,8 +342,8 @@ class HierarchicalMetadataObject(Seedable):
 
         Args:
             keys: Exact metadata keys to log, or ``None`` for every key.
-            events: Operations to log from ``lookup``, ``set``, and ``delete``.
-                ``None`` enables all operations.
+            events: Operations to log from ``lookup``, ``set``, ``delete``, and
+                ``snapshot``. ``None`` enables all operations.
             max_events: Maximum event records to emit. ``None`` is unlimited.
             include_values: Include bounded value representations in records.
             value_repr_limit: Maximum length of an included value representation.

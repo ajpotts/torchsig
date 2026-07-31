@@ -9,8 +9,10 @@ import pickle
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
+import numpy as np
 import pytest
 
+from torchsig.signals.signal_types import Signal
 from torchsig.utils.abstractions import HierarchicalMetadataObject
 from torchsig.utils.metadata_logging import (
     MetadataLoggingContext,
@@ -185,3 +187,86 @@ def test_metadata_summary_uses_context_active_when_disabled(caplog):
     summary = caplog.records[-1]
     assert summary.metadata_event == "summary"
     assert summary.metadata_session_id == "summary-session"
+
+
+def test_metadata_snapshot_includes_complete_object_and_components(caplog):
+    caplog.set_level(logging.DEBUG, logger="torchsig.metadata")
+    dataset = HierarchicalMetadataObject(
+        metadata={"sample_rate": 10_000_000, "unused": "filtered"}
+    )
+    component = Signal(
+        data=np.ones(4, dtype=np.complex64),
+        parent=dataset,
+        class_name="qpsk",
+    )
+    sample = Signal(
+        data=np.ones((2, 2), dtype=np.float32),
+        component_signals=[component],
+        parent=dataset,
+        complete=True,
+    )
+    dataset.enable_metadata_debug(
+        keys={"sample_rate", "class_name", "complete"},
+        events={"snapshot"},
+        include_values=True,
+    )
+
+    dataset.log_metadata_snapshot(sample, include_components=True)
+
+    record = caplog.records[-1]
+    assert record.metadata_event == "snapshot"
+    assert record.metadata_snapshot == {
+        "sample_rate": "10000000",
+        "complete": "True",
+    }
+    assert record.metadata_component_snapshots == (
+        {"sample_rate": "10000000", "class_name": "'qpsk'"},
+    )
+    assert record.metadata_component_count == 1
+    assert record.metadata_data_shape == (2, 2)
+    assert record.metadata_data_dtype == "float32"
+    assert "unused" not in record.metadata_snapshot
+
+
+def test_metadata_snapshot_requires_value_logging_to_include_values(caplog):
+    caplog.set_level(logging.DEBUG, logger="torchsig.metadata")
+    obj = HierarchicalMetadataObject(metadata={"field": "value"})
+    obj.enable_metadata_debug(events={"snapshot"})
+
+    obj.log_metadata_snapshot()
+
+    record = caplog.records[-1]
+    assert record.metadata_snapshot_keys == ("field",)
+    assert not hasattr(record, "metadata_snapshot")
+
+
+def test_metadata_snapshot_does_not_generate_lookup_events(caplog):
+    caplog.set_level(logging.DEBUG, logger="torchsig.metadata")
+    parent = HierarchicalMetadataObject(metadata={"inherited": 1})
+    child = HierarchicalMetadataObject(parent=parent, metadata={"local": 2})
+    child.enable_metadata_debug(
+        events={"lookup", "snapshot"},
+        include_values=True,
+    )
+
+    child.log_metadata_snapshot()
+
+    assert [record.metadata_event for record in caplog.records] == ["snapshot"]
+    assert caplog.records[0].metadata_snapshot == {
+        "inherited": "1",
+        "local": "2",
+    }
+
+
+@pytest.mark.parametrize(
+    ("args", "kwargs", "match"),
+    [
+        ((object(),), {}, "metadata_object must be"),
+        ((), {"include_components": 1}, "include_components must be"),
+    ],
+)
+def test_metadata_snapshot_rejects_invalid_arguments(args, kwargs, match):
+    obj = HierarchicalMetadataObject()
+
+    with pytest.raises(TypeError, match=match):
+        obj.log_metadata_snapshot(*args, **kwargs)

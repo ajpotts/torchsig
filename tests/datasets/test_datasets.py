@@ -1,18 +1,19 @@
 """Unit Tests for datasets"""
 
 import itertools
+import logging
+import warnings
 from collections import Counter
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, List
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 import torch
 import yaml
-from unittest.mock import MagicMock
-import warnings
 
 from torchsig.datasets.datasets import (
     SafeTorchSigIterableDataset,
@@ -35,7 +36,6 @@ from torchsig.utils.metadata_logging import (
     metadata_logging_context,
 )
 from torchsig.utils.writer import DatasetCreator
-
 
 # =============================================================================
 # Helpers
@@ -884,6 +884,59 @@ def test_iterable_dataset_adds_sample_and_stage_logging_context(monkeypatch):
     assert contexts[2].session_id == contexts[3].session_id
     assert contexts[0].session_id != contexts[2].session_id
     assert get_metadata_logging_context() == MetadataLoggingContext()
+
+
+def test_iterable_dataset_logs_completed_metadata_snapshot(monkeypatch, caplog):
+    caplog.set_level(logging.DEBUG, logger="torchsig.metadata")
+    metadata = TorchSigDefaults().default_dataset_metadata.copy()
+    metadata["dataset_id"] = "snapshot-dataset"
+    component = Signal(
+        data=np.ones(4, dtype=np.complex64),
+        class_name="qpsk",
+    )
+
+    def generate_signal(self):
+        return Signal(
+            data=np.ones(8, dtype=np.complex64),
+            component_signals=[component],
+            parent=self,
+        )
+
+    def mark_complete(signal):
+        signal["complete"] = True
+        return signal
+
+    dataset = TorchSigIterableDataset(
+        metadata=metadata,
+        signal_generators=[],
+        transforms=[mark_complete],
+        target_labels=None,
+        validate_init=False,
+    )
+    dataset.enable_metadata_debug(
+        keys={"complete", "class_name"},
+        events={"snapshot"},
+        include_values=True,
+    )
+    monkeypatch.setattr(
+        TorchSigIterableDataset,
+        "__generate_new_signal__",
+        generate_signal,
+    )
+
+    next(dataset)
+
+    snapshots = [
+        record for record in caplog.records if record.metadata_event == "snapshot"
+    ]
+    assert len(snapshots) == 1
+    snapshot = snapshots[0]
+    assert snapshot.metadata_snapshot == {"complete": "True"}
+    assert snapshot.metadata_component_snapshots == ({"class_name": "'qpsk'"},)
+    assert snapshot.metadata_sample_index == 0
+    assert snapshot.metadata_dataset_id == "snapshot-dataset"
+    assert snapshot.metadata_worker_id == 0
+    assert snapshot.metadata_correlation_fields["stage"] == "transform"
 
 
 def test_iterable_dataset_inherits_outer_logging_session(monkeypatch):

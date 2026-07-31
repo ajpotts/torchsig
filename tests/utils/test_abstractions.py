@@ -479,7 +479,8 @@ def test_metadata_debug_filters_keys_and_events(caplog):
 
     assert obj.metadata_debug_statistics == MetadataDebugStatistics(
         emitted_events=1,
-        suppressed_events=3,
+        suppressed_events=0,
+        filtered_events=3,
     )
     obj.disable_metadata_debug()
 
@@ -489,7 +490,8 @@ def test_metadata_debug_filters_keys_and_events(caplog):
     ]
     summary = caplog.records[-1]
     assert summary.metadata_emitted_events == 1
-    assert summary.metadata_suppressed_events == 3
+    assert summary.metadata_suppressed_events == 0
+    assert summary.metadata_filtered_events == 3
     assert summary.metadata_debug_keys == frozenset({"field"})
     assert summary.metadata_debug_events == frozenset({"lookup"})
 

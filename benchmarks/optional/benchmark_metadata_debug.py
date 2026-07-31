@@ -258,6 +258,33 @@ def test_benchmark_local_lookup_with_correlation_context(
     assert result == 1
 
 
+@pytest.mark.benchmark(group="metadata-debug-snapshot")
+def test_benchmark_completed_metadata_snapshot(
+    benchmark,
+    emitted_debug_logger,
+):
+    """Benchmark a completed sample snapshot with component metadata."""
+    dataset = HierarchicalMetadataObject(metadata={"sample_rate": 10_000_000})
+    component = Signal(parent=dataset, class_name="bpsk", snr_db=20.0)
+    sample = Signal(
+        parent=dataset,
+        component_signals=[component],
+        center_freq=0.0,
+    )
+    dataset.enable_metadata_debug(
+        events={"snapshot"},
+        include_values=True,
+    )
+
+    benchmark(
+        dataset.log_metadata_snapshot,
+        sample,
+        include_components=True,
+    )
+
+    assert dataset.metadata_debug_statistics.emitted_events > 0
+
+
 @pytest.mark.benchmark(group="dataset-metadata-context")
 def test_benchmark_dataset_next_debug_disabled(benchmark):
     """Benchmark dataset iteration when correlation context is inactive."""
