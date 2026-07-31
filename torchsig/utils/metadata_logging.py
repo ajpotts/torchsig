@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import uuid
@@ -9,13 +10,200 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import TYPE_CHECKING, TypeAlias
+from typing import TYPE_CHECKING, Any, Literal, TypeAlias
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
 
+    from torchsig.utils.abstractions import MetadataResolution
+
 MetadataContextValue: TypeAlias = str | int | float | bool | None
+MetadataDebugEvent: TypeAlias = Literal["lookup", "set", "delete"]
 _CONTEXT_VALUE_LIMIT = 200
+_METADATA_DEBUG_EVENTS = frozenset({"lookup", "set", "delete"})
+_MISSING_METADATA_VALUE = object()
+_log = logging.getLogger("torchsig.metadata")
+
+
+@dataclass(frozen=True)
+class MetadataDebugConfig:
+    """Configuration for structured metadata debug logging.
+
+    Attributes:
+        keys: Exact metadata keys to log, or ``None`` to log every key.
+        events: Metadata operations to log.
+        max_events: Maximum event records to emit, or ``None`` for no limit.
+        include_values: Whether records include bounded value representations.
+        value_repr_limit: Maximum characters in a logged value representation.
+    """
+
+    keys: frozenset[str] | None
+    events: frozenset[MetadataDebugEvent]
+    max_events: int | None
+    include_values: bool
+    value_repr_limit: int
+
+
+@dataclass(frozen=True)
+class MetadataDebugStatistics:
+    """Counts of metadata events handled during a debug session.
+
+    Attributes:
+        emitted_events: Event records emitted through the metadata logger.
+        suppressed_events: Events rejected by configuration, rate limits, or
+            the logger's effective level.
+    """
+
+    emitted_events: int
+    suppressed_events: int
+
+
+@dataclass
+class _MetadataDebugSession:
+    """Mutable logging state owned by one hierarchical metadata object."""
+
+    config: MetadataDebugConfig
+    emitted_events: int = 0
+    suppressed_events: int = 0
+
+    @property
+    def statistics(self) -> MetadataDebugStatistics:
+        """Return an immutable snapshot of the session counters."""
+        return MetadataDebugStatistics(
+            emitted_events=self.emitted_events,
+            suppressed_events=self.suppressed_events,
+        )
+
+    def should_emit(self, event: MetadataDebugEvent, key: str) -> bool:
+        """Apply filters and rate limits before constructing a log record."""
+        if (
+            event not in self.config.events
+            or (self.config.keys is not None and key not in self.config.keys)
+            or (self.config.max_events is not None and self.emitted_events >= self.config.max_events)
+            or not _log.isEnabledFor(logging.DEBUG)
+        ):
+            self.suppressed_events += 1
+            return False
+        return True
+
+    def emit_event(
+        self,
+        event: MetadataDebugEvent,
+        key: str,
+        resolution: MetadataResolution,
+        object_type: str,
+        value: Any = _MISSING_METADATA_VALUE,
+    ) -> None:
+        """Emit one structured metadata event after filtering succeeds."""
+        extra = {
+            "metadata_event": event,
+            "metadata_key": key,
+            "metadata_source": resolution.source,
+            "metadata_found": resolution.found,
+            "metadata_depth": resolution.depth,
+            "metadata_owner_type": resolution.owner_type,
+            "metadata_overrides_parent": resolution.overrides_parent,
+            "metadata_cycle_detected": resolution.cycle_detected,
+            "metadata_path": resolution.path,
+            "metadata_object_type": object_type,
+            **_metadata_logging_extra(),
+        }
+        if self.config.include_values:
+            value_repr, truncated = _bounded_metadata_value_repr(
+                value,
+                self.config.value_repr_limit,
+            )
+            extra["metadata_value"] = value_repr
+            extra["metadata_value_truncated"] = truncated
+
+        _log.debug(
+            "metadata %s: key=%r source=%s depth=%s owner=%s",
+            event,
+            key,
+            resolution.source,
+            resolution.depth,
+            resolution.owner_type,
+            extra=extra,
+        )
+        self.emitted_events += 1
+
+    def emit_summary(self, object_type: str) -> None:
+        """Emit one summary record for this debug session."""
+        if not _log.isEnabledFor(logging.DEBUG):
+            return
+        _log.debug(
+            "metadata debug summary: emitted=%d suppressed=%d",
+            self.emitted_events,
+            self.suppressed_events,
+            extra={
+                "metadata_event": "summary",
+                "metadata_object_type": object_type,
+                **_metadata_logging_extra(),
+                "metadata_emitted_events": self.emitted_events,
+                "metadata_suppressed_events": self.suppressed_events,
+                "metadata_debug_keys": self.config.keys,
+                "metadata_debug_events": self.config.events,
+                "metadata_debug_max_events": self.config.max_events,
+                "metadata_debug_include_values": self.config.include_values,
+            },
+        )
+
+
+def _create_metadata_debug_session(
+    *,
+    keys: set[str] | frozenset[str] | None,
+    events: set[str] | frozenset[str] | None,
+    max_events: int | None,
+    include_values: bool,
+    value_repr_limit: int,
+) -> _MetadataDebugSession:
+    """Validate configuration and create a fresh metadata debug session."""
+    if keys is not None:
+        if not isinstance(keys, (set, frozenset)) or not all(isinstance(key, str) for key in keys):
+            raise TypeError("keys must be a set of strings or None")
+        normalized_keys = frozenset(keys)
+    else:
+        normalized_keys = None
+
+    if events is None:
+        normalized_events = _METADATA_DEBUG_EVENTS
+    elif not isinstance(events, (set, frozenset)) or not all(isinstance(event, str) for event in events):
+        raise TypeError("events must be a set of strings or None")
+    else:
+        unknown_events = events - _METADATA_DEBUG_EVENTS
+        if unknown_events:
+            raise ValueError(f"unknown metadata debug events: {sorted(unknown_events)}")
+        normalized_events = frozenset(events)
+
+    if max_events is not None and (not isinstance(max_events, int) or isinstance(max_events, bool) or max_events < 0):
+        raise ValueError("max_events must be a non-negative integer or None")
+    if not isinstance(include_values, bool):
+        raise TypeError("include_values must be a boolean")
+    if not isinstance(value_repr_limit, int) or isinstance(value_repr_limit, bool) or value_repr_limit < 1:
+        raise ValueError("value_repr_limit must be a positive integer")
+
+    return _MetadataDebugSession(
+        MetadataDebugConfig(
+            keys=normalized_keys,
+            events=normalized_events,
+            max_events=max_events,
+            include_values=include_values,
+            value_repr_limit=value_repr_limit,
+        )
+    )
+
+
+def _bounded_metadata_value_repr(value: Any, limit: int) -> tuple[str, bool]:
+    """Return a safe, bounded representation of a metadata value."""
+    if value is _MISSING_METADATA_VALUE:
+        return "<missing>", False
+    try:
+        value_repr = repr(value)
+    except Exception as exc:  # noqa: BLE001  # pragma: no cover
+        value_repr = f"<repr failed: {type(exc).__name__}>"
+    if len(value_repr) <= limit:
+        return value_repr, False
+    return value_repr[: max(0, limit - 3)] + "...", True
 
 
 @dataclass(frozen=True)
@@ -142,6 +330,8 @@ def _metadata_logging_extra() -> dict[str, object]:
 
 __all__ = [
     "MetadataContextValue",
+    "MetadataDebugConfig",
+    "MetadataDebugStatistics",
     "MetadataLoggingContext",
     "get_metadata_logging_context",
     "metadata_logging_context",

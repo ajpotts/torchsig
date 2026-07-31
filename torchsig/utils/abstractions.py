@@ -3,20 +3,21 @@ This code is used behind the scenes in several places, and sensitive to errors; 
 """
 from __future__ import annotations
 
-import logging
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
-from torchsig.utils.metadata_logging import _metadata_logging_extra
+from torchsig.utils.metadata_logging import (
+    _MISSING_METADATA_VALUE,
+    MetadataDebugConfig,
+    MetadataDebugStatistics,
+    _create_metadata_debug_session,
+    _MetadataDebugSession,
+)
 from torchsig.utils.random import Seedable
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-
-log = logging.getLogger("torchsig.metadata")
-_MISSING_METADATA_VALUE = object()
-_METADATA_DEBUG_EVENTS = frozenset({"lookup", "set", "delete"})
 
 __all__ = [
     "HierarchicalMetadataObject",
@@ -25,43 +26,6 @@ __all__ = [
     "MetadataDebugStatistics",
     "MetadataResolution",
 ]
-
-
-@dataclass(frozen=True)
-class MetadataDebugConfig:
-    """Configuration for structured metadata debug logging.
-
-    Attributes:
-        keys: Exact metadata keys to log, or ``None`` to log every key.
-        events: Metadata operations to log.
-        max_events: Maximum number of event records to emit, or ``None`` for
-            no limit. Summary records do not count toward this limit.
-        include_values: Whether records include bounded string representations
-            of metadata values. Disabled by default because values may be
-            sensitive or expensive to represent.
-        value_repr_limit: Maximum number of characters in a logged value
-            representation.
-    """
-
-    keys: frozenset[str] | None
-    events: frozenset[Literal["lookup", "set", "delete"]]
-    max_events: int | None
-    include_values: bool
-    value_repr_limit: int
-
-
-@dataclass(frozen=True)
-class MetadataDebugStatistics:
-    """Counts of metadata events handled during the current debug session.
-
-    Attributes:
-        emitted_events: Event records emitted through the metadata logger.
-        suppressed_events: Events rejected by configuration, rate limits, or
-            the logger's effective level.
-    """
-
-    emitted_events: int
-    suppressed_events: int
 
 
 @dataclass(frozen=True)
@@ -143,9 +107,7 @@ class HierarchicalMetadataObject(Seedable):
             This will override fields in the object passed in with arguments directly given to the generator; useful for making multiple similar but not identical objects.
         """
         self._metadata_debug_enabled = False
-        self._metadata_debug_config: MetadataDebugConfig | None = None
-        self._metadata_debug_emitted_events = 0
-        self._metadata_debug_suppressed_events = 0
+        self._metadata_debug_session: _MetadataDebugSession | None = None
         self._metadata = {}
         Seedable.__init__(self, seed=seed, parent=parent)
         if metadata is not None and len(metadata.keys()) > 0:
@@ -268,22 +230,17 @@ class HierarchicalMetadataObject(Seedable):
     def metadata_debug_config(self) -> MetadataDebugConfig | None:
         """Return the current or most recent debug configuration."""
         instance_attributes = object.__getattribute__(self, "__dict__")
-        return instance_attributes.get("_metadata_debug_config")
+        session = instance_attributes.get("_metadata_debug_session")
+        return None if session is None else session.config
 
     @property
     def metadata_debug_statistics(self) -> MetadataDebugStatistics:
         """Return event counts for the current metadata debug session."""
         instance_attributes = object.__getattribute__(self, "__dict__")
-        return MetadataDebugStatistics(
-            emitted_events=instance_attributes.get(
-                "_metadata_debug_emitted_events",
-                0,
-            ),
-            suppressed_events=instance_attributes.get(
-                "_metadata_debug_suppressed_events",
-                0,
-            ),
-        )
+        session = instance_attributes.get("_metadata_debug_session")
+        if session is None:
+            return MetadataDebugStatistics(0, 0)
+        return session.statistics
 
     def enable_metadata_debug(
         self,
@@ -312,59 +269,23 @@ class HierarchicalMetadataObject(Seedable):
             TypeError: If a configuration value has the wrong type.
             ValueError: If an event is unknown or a numeric limit is invalid.
         """
-        if keys is not None:
-            if not isinstance(keys, (set, frozenset)) or not all(
-                isinstance(key, str) for key in keys
-            ):
-                raise TypeError("keys must be a set of strings or None")
-            normalized_keys = frozenset(keys)
-        else:
-            normalized_keys = None
-
-        if events is None:
-            normalized_events = _METADATA_DEBUG_EVENTS
-        elif not isinstance(events, (set, frozenset)) or not all(
-            isinstance(event, str) for event in events
-        ):
-            raise TypeError("events must be a set of strings or None")
-        else:
-            unknown_events = events - _METADATA_DEBUG_EVENTS
-            if unknown_events:
-                raise ValueError(
-                    f"unknown metadata debug events: {sorted(unknown_events)}"
-                )
-            normalized_events = frozenset(events)
-
-        if max_events is not None and (
-            not isinstance(max_events, int)
-            or isinstance(max_events, bool)
-            or max_events < 0
-        ):
-            raise ValueError("max_events must be a non-negative integer or None")
-        if not isinstance(include_values, bool):
-            raise TypeError("include_values must be a boolean")
-        if (
-            not isinstance(value_repr_limit, int)
-            or isinstance(value_repr_limit, bool)
-            or value_repr_limit < 1
-        ):
-            raise ValueError("value_repr_limit must be a positive integer")
-
-        self._metadata_debug_config = MetadataDebugConfig(
-            keys=normalized_keys,
-            events=normalized_events,
+        self._metadata_debug_session = _create_metadata_debug_session(
+            keys=keys,
+            events=events,
             max_events=max_events,
             include_values=include_values,
             value_repr_limit=value_repr_limit,
         )
-        self._metadata_debug_emitted_events = 0
-        self._metadata_debug_suppressed_events = 0
         self._metadata_debug_enabled = True
 
     def disable_metadata_debug(self) -> None:
         """Emit a summary and disable metadata debug logging for this object."""
         if self.metadata_debug_enabled:
-            self._log_metadata_debug_summary()
+            session = object.__getattribute__(self, "__dict__").get(
+                "_metadata_debug_session"
+            )
+            if session is not None:
+                session.emit_summary(type(self).__name__)
         self._metadata_debug_enabled = False
 
     @contextmanager
@@ -395,15 +316,7 @@ class HierarchicalMetadataObject(Seedable):
         """
         instance_attributes = object.__getattribute__(self, "__dict__")
         previous_state = self.metadata_debug_enabled
-        previous_config = instance_attributes.get("_metadata_debug_config")
-        previous_emitted = instance_attributes.get(
-            "_metadata_debug_emitted_events",
-            0,
-        )
-        previous_suppressed = instance_attributes.get(
-            "_metadata_debug_suppressed_events",
-            0,
-        )
+        previous_session = instance_attributes.get("_metadata_debug_session")
         self.enable_metadata_debug(
             keys=keys,
             events=events,
@@ -414,11 +327,13 @@ class HierarchicalMetadataObject(Seedable):
         try:
             yield self
         finally:
-            self._log_metadata_debug_summary()
+            session = object.__getattribute__(self, "__dict__").get(
+                "_metadata_debug_session"
+            )
+            if session is not None:
+                session.emit_summary(type(self).__name__)
             self._metadata_debug_enabled = previous_state
-            self._metadata_debug_config = previous_config
-            self._metadata_debug_emitted_events = previous_emitted
-            self._metadata_debug_suppressed_events = previous_suppressed
+            self._metadata_debug_session = previous_session
 
     def _log_metadata_event(
         self,
@@ -427,56 +342,26 @@ class HierarchicalMetadataObject(Seedable):
         value: Any = _MISSING_METADATA_VALUE,
     ) -> None:
         """Emit a filtered, structured metadata debug record."""
-        config = self.metadata_debug_config
-        if not self.metadata_debug_enabled or config is None:
+        instance_attributes = object.__getattribute__(self, "__dict__")
+        session = instance_attributes.get("_metadata_debug_session")
+        if not self.metadata_debug_enabled or session is None:
             return
-
-        if (
-            event not in config.events
-            or (config.keys is not None and key not in config.keys)
-            or (
-                config.max_events is not None
-                and self._metadata_debug_emitted_events >= config.max_events
-            )
-            or not log.isEnabledFor(logging.DEBUG)
-        ):
-            self._metadata_debug_suppressed_events += 1
+        if not session.should_emit(event, key):
             return
 
         resolution = self.explain_metadata(key)
-        extra = {
-            "metadata_event": event,
-            "metadata_key": key,
-            "metadata_source": resolution.source,
-            "metadata_found": resolution.found,
-            "metadata_depth": resolution.depth,
-            "metadata_owner_type": resolution.owner_type,
-            "metadata_overrides_parent": resolution.overrides_parent,
-            "metadata_cycle_detected": resolution.cycle_detected,
-            "metadata_path": resolution.path,
-            "metadata_object_type": type(self).__name__,
-            **_metadata_logging_extra(),
-        }
-        if config.include_values:
-            if value is _MISSING_METADATA_VALUE:
-                value = self._get_metadata_value_for_debug(key)
-            value_repr, truncated = self._bounded_metadata_value_repr(
-                value,
-                config.value_repr_limit,
-            )
-            extra["metadata_value"] = value_repr
-            extra["metadata_value_truncated"] = truncated
-
-        log.debug(
-            "metadata %s: key=%r source=%s depth=%s owner=%s",
+        if (
+            session.config.include_values
+            and value is _MISSING_METADATA_VALUE
+        ):
+            value = self._get_metadata_value_for_debug(key)
+        session.emit_event(
             event,
             key,
-            resolution.source,
-            resolution.depth,
-            resolution.owner_type,
-            extra=extra,
+            resolution,
+            type(self).__name__,
+            value,
         )
-        self._metadata_debug_emitted_events += 1
 
     def _get_metadata_value_for_debug(self, key: str) -> Any:
         """Resolve a value for logging without invoking normal lookup hooks."""
@@ -498,42 +383,6 @@ class HierarchicalMetadataObject(Seedable):
                 break
             current = parent
         return _MISSING_METADATA_VALUE
-
-    @staticmethod
-    def _bounded_metadata_value_repr(value: Any, limit: int) -> tuple[str, bool]:
-        """Return a safe, bounded representation of a metadata value."""
-        if value is _MISSING_METADATA_VALUE:
-            return "<missing>", False
-        try:
-            value_repr = repr(value)
-        except Exception as exc:  # noqa: BLE001  # pragma: no cover
-            value_repr = f"<repr failed: {type(exc).__name__}>"
-        if len(value_repr) <= limit:
-            return value_repr, False
-        return value_repr[: max(0, limit - 3)] + "...", True
-
-    def _log_metadata_debug_summary(self) -> None:
-        """Emit one summary record for the current debug session."""
-        config = self.metadata_debug_config
-        if config is None or not log.isEnabledFor(logging.DEBUG):
-            return
-        statistics = self.metadata_debug_statistics
-        log.debug(
-            "metadata debug summary: emitted=%d suppressed=%d",
-            statistics.emitted_events,
-            statistics.suppressed_events,
-            extra={
-                "metadata_event": "summary",
-                "metadata_object_type": type(self).__name__,
-                **_metadata_logging_extra(),
-                "metadata_emitted_events": statistics.emitted_events,
-                "metadata_suppressed_events": statistics.suppressed_events,
-                "metadata_debug_keys": config.keys,
-                "metadata_debug_events": config.events,
-                "metadata_debug_max_events": config.max_events,
-                "metadata_debug_include_values": config.include_values,
-            },
-        )
 
     def keys(self) -> list[str]:
         """Get all metadata keys.
