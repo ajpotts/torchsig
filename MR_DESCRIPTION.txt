@@ -1,0 +1,90 @@
+Title: Benchmark default narrowband and wideband training-data generation
+
+Summary
+
+This MR adds end-to-end performance benchmarks for TorchSIG's default
+training-data generation pipelines. The benchmarks provide stable baselines
+for detecting the overall performance impact of future features and internal
+changes.
+
+The benchmark suite covers clean and impaired variants of both narrowband and
+wideband generation.
+
+Configurations
+
+- narrowband_clean_train_all.yaml
+- narrowband_impaired_train_all.yaml
+- wideband_clean_train_all.yaml
+- wideband_impaired_train_all.yaml
+
+Benchmark scope
+
+Each case loads the corresponding default YAML configuration and constructs
+the normal in-memory generation pipeline:
+
+    SafeTorchSigIterableDataset
+    -> configured signal and dataset impairments
+    -> ComplexTo2D or Spectrogram output transform
+    -> YOLO metadata labeling for wideband output
+    -> WorkerSeedingDataLoader
+
+The timed operation generates and loads one complete training sample. Pipeline
+construction and YAML loading occur outside the timed section.
+
+Each benchmark uses:
+
+- The sample dimensions, signal counts, representation, and impairment level
+  from the default configuration.
+- A deterministic configuration seed.
+- num_workers=0 to avoid worker startup and scheduling noise.
+- batch_size=1 so results are directly reported as time per generated sample.
+- One warmup round and ten measured rounds.
+
+Makefile integration
+
+benchmarks/benchmark_dataset_generation.py has been added to BENCHMARK_FILES,
+so the new cases run as part of:
+
+    make benchmarks
+
+Existing benchmark output, JSON, histogram, comparison, and cleanup behavior
+is unchanged.
+
+Baseline results
+
+The following means were observed on the development machine and are included
+for initial context only; benchmark comparisons should use results collected
+on equivalent hardware and software environments.
+
+    narrowband clean:       5.9 ms/sample
+    narrowband impaired:   12.8 ms/sample
+    wideband clean:        49.9 ms/sample
+    wideband impaired:    419.8 ms/sample
+
+Testing
+
+    pytest -q benchmarks/benchmark_dataset_generation.py \
+        --benchmark-only \
+        --benchmark-disable-gc \
+        --no-cov
+    4 passed
+
+    ruff check benchmarks/benchmark_dataset_generation.py
+    passed
+
+    ruff format --check benchmarks/benchmark_dataset_generation.py
+    passed
+
+    make -n benchmarks
+    confirmed both benchmark modules are included
+
+    git diff --check
+    passed
+
+Notes
+
+- This benchmark measures in-memory training-data generation. It intentionally
+  excludes HDF5 persistence and model computation.
+- Benchmark result artifacts are not included in this MR.
+- Environment-specific Matplotlib cache and NVML warnings do not affect the
+  benchmark implementation.
