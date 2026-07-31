@@ -1,0 +1,116 @@
+Title: Keep derived frequency edges consistent with center frequency and bandwidth
+
+Summary
+-------
+This MR fixes stale signal frequency-edge metadata after ``center_freq`` or
+``bandwidth`` changes and clarifies TorchSIG's frequency coordinate semantics.
+
+``center_freq`` and the full two-sided ``bandwidth`` are now treated as the
+canonical frequency fields. ``lower_freq`` and ``upper_freq`` are derived from
+the current canonical values, preventing legacy or previously calculated edge
+values from overriding updated placement metadata.
+
+The public ``center_freq`` name and its mathematical meaning remain unchanged.
+
+Problem
+-------
+``SignalMetadataObject`` previously stored calculated edges in
+``_lower_frequency`` and ``_upper_frequency``. Production paths update
+canonical fields directly through assignments such as:
+
+    signal["center_freq"] = new_center_freq
+    signal["bandwidth"] = new_bandwidth
+
+Those assignments did not invalidate the stored edges. Subsequent
+``lower_freq`` or ``upper_freq`` reads could therefore return values calculated
+from an earlier center frequency or bandwidth.
+
+The wideband anti-aliasing path reproduced the issue reliably:
+
+1. Assign a proposed placement center.
+2. Read both edges to detect boundary overlap.
+3. Filter the component and replace its center and bandwidth.
+4. Read the old edge values from the metadata cache.
+
+This could produce contradictory component metadata and stale localization
+targets.
+
+Changes
+-------
+- Treat ``center_freq`` and ``bandwidth`` as canonical frequency metadata.
+- Define ``bandwidth`` consistently as the full two-sided occupied interval.
+- Derive ``lower_freq`` and ``upper_freq`` from the current canonical pair.
+- Remove pending local edge values whenever either canonical field changes.
+- Prefer an available canonical pair over stale edge fields loaded from legacy
+  metadata.
+- Preserve explicit edge assignment: setting one edge updates the canonical
+  center and bandwidth while preserving the opposite edge when available.
+- Add a deterministic anti-aliasing placement regression using a real
+  ``Signal`` object.
+- Add unit coverage for center changes, bandwidth changes, legacy edge fields,
+  and edge-setter behavior.
+- Expand signal documentation and public docstrings to explain the frequency
+  coordinate system.
+- Add separate ticket descriptions for the confirmed stale-edge defect and the
+  question of whether ``center_freq`` is the clearest long-term field name.
+
+Frequency semantics
+-------------------
+``center_freq`` remains a signed offset in Hz relative to the containing
+dataset's frequency origin. It is not normally an absolute RF receiver tuning
+frequency.
+
+``bandwidth`` is the full two-sided bandwidth in Hz:
+
+    lower_freq = center_freq - bandwidth / 2
+    upper_freq = center_freq + bandwidth / 2
+
+For an unplaced baseband component, ``center_freq`` normally begins at 0 Hz.
+Wideband placement assigns a signed offset. A generated wideband container's
+``center_freq=0`` identifies the dataset reference frame; it does not claim
+that the aggregate spectral energy is centered at DC.
+
+Normalized image coordinates remain separate. For example, ``YOLOLabel``
+derives a vertically reversed normalized ``y_center`` from the physical-Hz
+metadata without replacing ``center_freq``.
+
+Compatibility
+-------------
+- No public metadata field is renamed.
+- Existing item and property access remain supported.
+- Existing center-frequency and bandwidth values retain their meaning.
+- Legacy metadata containing edge fields remains readable; canonical values
+  take precedence when available.
+- No on-disk schema or file-handler format is changed.
+- No dependency is added.
+
+Validation
+----------
+- ``pytest -q tests/signals/test_signal_types.py tests/datasets/test_dataset_utils.py``
+  - 35 passed
+- ``pytest -q tests/transforms/test_transforms.py -k 'ChannelSwap or Doppler or SpectralInversion or TimeReversal'``
+  - 11 passed, 42 deselected
+- Focused frequency, placement, and YOLO selection
+  - 14 passed
+- Static property-backed target-label regression
+  - 1 passed
+- Ruff checks passed for the changed source and focused tests, with only
+  pre-existing file-specific rules excluded.
+- Python compilation and ``git diff --check`` passed.
+
+The default wideband reproduction now verifies for every component that:
+
+- ``lower_freq == center_freq - bandwidth / 2``
+- ``upper_freq == center_freq + bandwidth / 2``
+- Both edges remain within the configured dataset bounds.
+- No derived-edge cache fields remain after placement.
+
+Out of scope
+------------
+- Renaming ``center_freq``. A separate investigation ticket asks whether a more
+  explicit offset-based name would improve clarity and considers compatibility
+  costs and possible outcomes.
+- Components whose measured bandwidth exceeds the configured
+  ``bandwidth_max``. That remains a separate generation/bandwidth-estimation
+  issue.
+- Removing or changing the historical ``center_freq_set`` placement marker.
