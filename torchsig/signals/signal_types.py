@@ -30,7 +30,19 @@ class SignalMetadataObject(HierarchicalMetadataObject):
     """Represents metadata associated with a signal.
 
     This class extends HierarchicalMetadataObject to provide signal-specific
-    metadata properties and calculations.
+    metadata properties and calculations. ``center_freq`` is expressed in Hz
+    relative to the containing dataset's frequency origin; an unplaced
+    baseband component normally has a center frequency of zero. ``bandwidth``
+    is the full two-sided bandwidth in Hz. These are the canonical frequency
+    fields, and ``lower_freq`` and ``upper_freq`` are derived as
+    ``center_freq - bandwidth / 2`` and ``center_freq + bandwidth / 2``.
+
+    This metadata object does not independently enforce dataset frequency
+    limits. Wideband placement is responsible for choosing or filtering a
+    center frequency that satisfies the dataset's configured bounds. The field
+    is a signed offset, not an absolute RF tuning frequency. Applications with
+    an external RF center can calculate an absolute component frequency by
+    adding that external center to ``center_freq``.
     """
 
     def __init__(self, **kwargs: Any) -> None:
@@ -40,6 +52,23 @@ class SignalMetadataObject(HierarchicalMetadataObject):
             **kwargs: Metadata key-value pairs to initialize the object.
         """
         super().__init__(**kwargs)
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        """Set metadata and invalidate frequency edges when canonical fields change.
+
+        ``center_freq`` and ``bandwidth`` are the canonical frequency metadata.
+        Lower and upper frequency edges are derived from them, so any local
+        legacy or pending edge values must not survive an update to either
+        canonical field.
+
+        Args:
+            key: Metadata key to set.
+            value: Metadata value to store.
+        """
+        if key in {"center_freq", "bandwidth"}:
+            self._metadata.pop("_lower_frequency", None)
+            self._metadata.pop("_upper_frequency", None)
+        super().__setitem__(key, value)
 
     @property
     def start(self) -> float:
@@ -117,7 +146,13 @@ class SignalMetadataObject(HierarchicalMetadataObject):
 
     @property
     def upper_freq(self) -> float:
-        """Calculates the upper frequency of a signal.
+        """Calculate the upper edge of the full two-sided signal bandwidth.
+
+        ``center_freq`` and ``bandwidth`` are canonical when both are present.
+        A stored ``_upper_frequency`` is used only as a pending or legacy value
+        when the canonical pair is unavailable. The returned value uses the
+        same signed-Hz coordinate system and reference origin as
+        ``center_freq``; it is not an absolute RF frequency.
 
         Returns:
             float: Upper frequency in Hz.
@@ -125,47 +160,54 @@ class SignalMetadataObject(HierarchicalMetadataObject):
         Raises:
             ValueError: If center_freq or bandwidth are not available.
         """
-        if hasattr(self, "_upper_frequency") and self._upper_frequency is not None:
-            return self._upper_frequency
-
         try:
-            self["_upper_frequency"] = upper_freq_from_center_freq_bandwidth(
+            return upper_freq_from_center_freq_bandwidth(
                 self.center_freq,
                 self.bandwidth,
             )
         except (AttributeError, KeyError) as e:
+            if "_upper_frequency" in self._metadata:
+                return self._metadata["_upper_frequency"]
             raise ValueError(
                 "Cannot calculate upper frequency: missing center_freq or bandwidth"
             ) from e
 
-        return self._upper_frequency
-
 
     @upper_freq.setter
     def upper_freq(self, new_upper_freq: float) -> None:
-        """Sets the upper frequency of the signal.
+        """Set the upper edge in the ``center_freq`` reference coordinate.
+
+        When the lower edge is available, setting this edge recalculates the
+        canonical full bandwidth and center frequency.
 
         Args:
             new_upper_freq: Upper frequency in Hz.
         """
-        self["_upper_frequency"] = new_upper_freq
+        try:
+            lower_freq = self.lower_freq
+        except ValueError:
+            self["_upper_frequency"] = new_upper_freq
+            return
 
-        if hasattr(self, "_lower_frequency") and self._lower_frequency is not None:
-            lower_freq = self._lower_frequency
-
-            self["bandwidth"] = bandwidth_from_lower_upper_freq(
-                lower_freq,
-                new_upper_freq,
-            )
-            self["center_freq"] = center_freq_from_lower_upper_freq(
-                lower_freq,
-                new_upper_freq,
-            )
+        self["bandwidth"] = bandwidth_from_lower_upper_freq(
+            lower_freq,
+            new_upper_freq,
+        )
+        self["center_freq"] = center_freq_from_lower_upper_freq(
+            lower_freq,
+            new_upper_freq,
+        )
 
 
     @property
     def lower_freq(self) -> float:
-        """Calculates the lower frequency of a signal.
+        """Calculate the lower edge of the full two-sided signal bandwidth.
+
+        ``center_freq`` and ``bandwidth`` are canonical when both are present.
+        A stored ``_lower_frequency`` is used only as a pending or legacy value
+        when the canonical pair is unavailable. The returned value uses the
+        same signed-Hz coordinate system and reference origin as
+        ``center_freq``; it is not an absolute RF frequency.
 
         Returns:
             float: Lower frequency in Hz.
@@ -173,42 +215,43 @@ class SignalMetadataObject(HierarchicalMetadataObject):
         Raises:
             ValueError: If center_freq or bandwidth are not available.
         """
-        if hasattr(self, "_lower_frequency") and self._lower_frequency is not None:
-            return self._lower_frequency
-
         try:
-            self["_lower_frequency"] = lower_freq_from_center_freq_bandwidth(
+            return lower_freq_from_center_freq_bandwidth(
                 self.center_freq,
                 self.bandwidth,
             )
         except (AttributeError, KeyError) as e:
+            if "_lower_frequency" in self._metadata:
+                return self._metadata["_lower_frequency"]
             raise ValueError(
                 "Cannot calculate lower frequency: missing center_freq or bandwidth"
             ) from e
 
-        return self._lower_frequency
-
 
     @lower_freq.setter
     def lower_freq(self, new_lower_freq: float) -> None:
-        """Sets the lower frequency of the signal.
+        """Set the lower edge in the ``center_freq`` reference coordinate.
+
+        When the upper edge is available, setting this edge recalculates the
+        canonical full bandwidth and center frequency.
 
         Args:
             new_lower_freq: Lower frequency in Hz.
         """
-        self["_lower_frequency"] = new_lower_freq
+        try:
+            upper_freq = self.upper_freq
+        except ValueError:
+            self["_lower_frequency"] = new_lower_freq
+            return
 
-        if hasattr(self, "_upper_frequency") and self._upper_frequency is not None:
-            upper_freq = self._upper_frequency
-
-            self["bandwidth"] = bandwidth_from_lower_upper_freq(
-                new_lower_freq,
-                upper_freq,
-            )
-            self["center_freq"] = center_freq_from_lower_upper_freq(
-                new_lower_freq,
-                upper_freq,
-            )
+        self["bandwidth"] = bandwidth_from_lower_upper_freq(
+            new_lower_freq,
+            upper_freq,
+        )
+        self["center_freq"] = center_freq_from_lower_upper_freq(
+            new_lower_freq,
+            upper_freq,
+        )
 
 
     @property
@@ -247,7 +290,10 @@ class Signal(SignalMetadataObject):
     """Represents a signal with data and metadata.
 
     This class extends SignalMetadataObject to include actual signal data
-    and component signals.
+    and component signals. For a generated wideband container,
+    ``center_freq=0`` identifies the dataset frequency origin; it does not
+    assert that the composite signal's spectral energy is centered at DC.
+    Component signals store their own signed offsets from that origin.
 
     Args:
         data: Signal IQ data. Defaults to empty numpy array.

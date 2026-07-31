@@ -20,11 +20,6 @@ from torchsig.datasets.datasets import (
 )
 from torchsig.signals.signal_types import Signal
 from torchsig.utils.defaults import TorchSigDefaults
-from torchsig.utils.metadata_logging import (
-    MetadataLoggingContext,
-    get_metadata_logging_context,
-    metadata_logging_context,
-)
 
 
 # ----------------------------------------------------------------------
@@ -69,7 +64,6 @@ class DummySignalGenerator(dict):
         sig["bandwidth"] = 500.0
         sig["duration_in_samples"] = sig.data.size
         return sig
-
 
 # ----------------------------------------------------------------------
 # Minimal metadata
@@ -285,64 +279,3 @@ def test_safe_dataset_generation_failure_reraises_without_raw_signal(
 
     assert _count_retry_warnings(default_logging.records) == 2
     assert _has_exact_fallback_warning(default_logging.records)
-
-
-def test_safe_dataset_retries_keep_same_sample_logging_context(default_logging):
-    attempts = []
-
-    def retrying_transform(signal):
-        attempts.append(get_metadata_logging_context())
-        if len(attempts) < 3:
-            raise RuntimeError("retry transform")
-        return signal
-
-    dataset = _make_safe_dataset(
-        transforms=[retrying_transform],
-        target_labels=[],
-    )
-    dataset["dataset_id"] = "safe-debug-dataset"
-    dataset.pipeline_fallback = "retry"
-    dataset.pipeline_max_retries = 3
-
-    with metadata_logging_context(session_id="safe-session"):
-        next(dataset)
-
-    assert len(attempts) == 3
-    assert all(context.session_id == "safe-session" for context in attempts)
-    assert all(context.dataset_id == "safe-debug-dataset" for context in attempts)
-    assert all(context.sample_index == 0 for context in attempts)
-    assert all(context.worker_id == 0 for context in attempts)
-    assert all(dict(context.fields)["stage"] == "transform" for context in attempts)
-    assert get_metadata_logging_context() == MetadataLoggingContext()
-
-
-def test_safe_dataset_logs_completed_metadata_snapshot(caplog):
-    caplog.set_level(logging.DEBUG, logger="torchsig.metadata")
-
-    def mark_complete(signal):
-        signal["complete"] = True
-        return signal
-
-    dataset = _make_safe_dataset(
-        transforms=[mark_complete],
-        target_labels=None,
-    )
-    dataset["dataset_id"] = "safe-snapshot-dataset"
-    dataset.enable_metadata_debug(
-        keys={"complete", "class_index"},
-        events={"snapshot"},
-        include_values=True,
-    )
-
-    next(dataset)
-
-    snapshots = [
-        record for record in caplog.records if record.metadata_event == "snapshot"
-    ]
-    assert len(snapshots) == 1
-    snapshot = snapshots[0]
-    assert snapshot.metadata_snapshot == {"complete": "True"}
-    assert snapshot.metadata_component_snapshots == ({"class_index": "0"},)
-    assert snapshot.metadata_dataset_id == "safe-snapshot-dataset"
-    assert snapshot.metadata_sample_index == 0
-    assert snapshot.metadata_correlation_fields["stage"] == "transform"

@@ -3,60 +3,11 @@ This code is used behind the scenes in several places, and sensitive to errors; 
 """
 from __future__ import annotations
 
-from contextlib import contextmanager
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any
 
-from torchsig.utils.metadata_logging import (
-    _MISSING_METADATA_VALUE,
-    MetadataDebugConfig,
-    MetadataDebugStatistics,
-    _create_metadata_debug_session,
-    _MetadataDebugSession,
-)
 from torchsig.utils.random import Seedable
 
-if TYPE_CHECKING:
-    from collections.abc import Iterator
-
-__all__ = [
-    "HierarchicalMetadataObject",
-    "MetadataAttributeError",
-    "MetadataDebugConfig",
-    "MetadataDebugStatistics",
-    "MetadataResolution",
-]
-
-
-@dataclass(frozen=True)
-class MetadataResolution:
-    """Describe how a metadata key resolves through an object hierarchy.
-
-    The result intentionally excludes the metadata value so diagnostic output
-    can be logged or displayed without exposing large or sensitive values.
-
-    Attributes:
-        key: Metadata key that was inspected.
-        found: Whether the key resolves to a value.
-        source: Whether the winning value is local, inherited, or missing.
-        depth: Number of parent links to the winning value, or ``None`` when
-            the key is missing.
-        owner_type: Class name of the object owning the winning value, or
-            ``None`` when the key is missing.
-        overrides_parent: Whether the winning value shadows another value for
-            the same key farther up the hierarchy.
-        cycle_detected: Whether parent traversal encountered a cycle.
-        path: Class names visited during parent traversal.
-    """
-
-    key: str
-    found: bool
-    source: Literal["local", "inherited", "missing"]
-    depth: int | None
-    owner_type: str | None
-    overrides_parent: bool
-    cycle_detected: bool
-    path: tuple[str, ...]
+__all__ = ["MetadataAttributeError", "HierarchicalMetadataObject"]
 
 class MetadataAttributeError(AttributeError):
     """Custom exception for metadata attribute errors.
@@ -106,8 +57,6 @@ class HierarchicalMetadataObject(Seedable):
         Note:
             This will override fields in the object passed in with arguments directly given to the generator; useful for making multiple similar but not identical objects.
         """
-        self._metadata_debug_enabled = False
-        self._metadata_debug_session: _MetadataDebugSession | None = None
         self._metadata = {}
         Seedable.__init__(self, seed=seed, parent=parent)
         if metadata is not None and len(metadata.keys()) > 0:
@@ -137,289 +86,6 @@ class HierarchicalMetadataObject(Seedable):
         for key in self.keys():
             full_metadata[key] = self[key]
         return full_metadata
-
-    def explain_metadata(self, key: str) -> MetadataResolution:
-        """Explain where a metadata key resolves without returning its value.
-
-        This diagnostic method walks the object's metadata-parent hierarchy and
-        reports the first object defining ``key``. It also reports whether that
-        definition overrides another parent definition and safely terminates if
-        a malformed hierarchy contains a parent cycle. Ordinary item and
-        attribute lookup behavior is not modified.
-
-        Args:
-            key: Metadata key to inspect.
-
-        Returns:
-            Structured information describing the key's resolution.
-
-        Raises:
-            TypeError: If ``key`` is not a string.
-        """
-        if not isinstance(key, str):
-            raise TypeError("metadata key must be a string")
-
-        current: HierarchicalMetadataObject | None = self
-        visited: set[int] = set()
-        path: list[str] = []
-        owner: HierarchicalMetadataObject | None = None
-        owner_depth: int | None = None
-        overrides_parent = False
-        cycle_detected = False
-        depth = 0
-
-        while isinstance(current, HierarchicalMetadataObject):
-            current_id = id(current)
-            if current_id in visited:
-                cycle_detected = True
-                break
-
-            visited.add(current_id)
-            path.append(type(current).__name__)
-
-            current_metadata = object.__getattribute__(current, "_metadata")
-            defines_key = key == "metadata" and depth == 0
-            defines_key = defines_key or key in current_metadata
-            if defines_key:
-                if owner is None:
-                    owner = current
-                    owner_depth = depth
-                else:
-                    overrides_parent = True
-
-            parent = current.parent
-            if not isinstance(parent, HierarchicalMetadataObject):
-                break
-            current = parent
-            depth += 1
-
-        if owner is None:
-            return MetadataResolution(
-                key=key,
-                found=False,
-                source="missing",
-                depth=None,
-                owner_type=None,
-                overrides_parent=False,
-                cycle_detected=cycle_detected,
-                path=tuple(path),
-            )
-
-        return MetadataResolution(
-            key=key,
-            found=True,
-            source="local" if owner_depth == 0 else "inherited",
-            depth=owner_depth,
-            owner_type=type(owner).__name__,
-            overrides_parent=overrides_parent,
-            cycle_detected=cycle_detected,
-            path=tuple(path),
-        )
-
-    @property
-    def metadata_debug_enabled(self) -> bool:
-        """Whether structured metadata debug logging is enabled.
-
-        Returns:
-            ``True`` when this object emits metadata debug records.
-        """
-        instance_attributes = object.__getattribute__(self, "__dict__")
-        return bool(instance_attributes.get("_metadata_debug_enabled", False))
-
-    @property
-    def metadata_debug_config(self) -> MetadataDebugConfig | None:
-        """Return the current or most recent debug configuration."""
-        instance_attributes = object.__getattribute__(self, "__dict__")
-        session = instance_attributes.get("_metadata_debug_session")
-        return None if session is None else session.config
-
-    @property
-    def metadata_debug_statistics(self) -> MetadataDebugStatistics:
-        """Return event counts for the current metadata debug session."""
-        instance_attributes = object.__getattribute__(self, "__dict__")
-        session = instance_attributes.get("_metadata_debug_session")
-        if session is None:
-            return MetadataDebugStatistics(0, 0)
-        return session.statistics
-
-    def enable_metadata_debug(
-        self,
-        *,
-        keys: set[str] | frozenset[str] | None = None,
-        events: set[str] | frozenset[str] | None = None,
-        max_events: int | None = None,
-        include_values: bool = False,
-        value_repr_limit: int = 200,
-    ) -> None:
-        """Enable structured debug logging for this object's metadata access.
-
-        Records are emitted at ``DEBUG`` level through the
-        ``torchsig.metadata`` logger. This method does not configure handlers or
-        logging levels and does not enable logging on parent or child objects.
-
-        Args:
-            keys: Exact metadata keys to log, or ``None`` for every key.
-            events: Operations to log from ``lookup``, ``set``, ``delete``, and
-                ``snapshot``. ``None`` enables all operations.
-            max_events: Maximum event records to emit. ``None`` is unlimited.
-            include_values: Include bounded value representations in records.
-            value_repr_limit: Maximum length of an included value representation.
-
-        Raises:
-            TypeError: If a configuration value has the wrong type.
-            ValueError: If an event is unknown or a numeric limit is invalid.
-        """
-        self._metadata_debug_session = _create_metadata_debug_session(
-            keys=keys,
-            events=events,
-            max_events=max_events,
-            include_values=include_values,
-            value_repr_limit=value_repr_limit,
-        )
-        self._metadata_debug_enabled = True
-
-    def disable_metadata_debug(self) -> None:
-        """Emit a summary and disable metadata debug logging for this object."""
-        if self.metadata_debug_enabled:
-            session = object.__getattribute__(self, "__dict__").get(
-                "_metadata_debug_session"
-            )
-            if session is not None:
-                session.emit_summary(type(self).__name__)
-        self._metadata_debug_enabled = False
-
-    def log_metadata_snapshot(
-        self,
-        metadata_object: HierarchicalMetadataObject | None = None,
-        *,
-        include_components: bool = False,
-    ) -> None:
-        """Log one structured snapshot through this object's debug session.
-
-        Snapshot values are included only when metadata debugging was enabled
-        with ``include_values=True``. The configured ``keys`` filter applies to
-        the root object and every component. Array data is never included;
-        records contain only its shape and dtype.
-
-        Args:
-            metadata_object: Completed object to snapshot. Defaults to this
-                object.
-            include_components: Include snapshots for objects in the target's
-                ``component_signals`` collection.
-
-        Raises:
-            TypeError: If the target is not a hierarchical metadata object or
-                ``include_components`` is not a boolean.
-        """
-        target = self if metadata_object is None else metadata_object
-        if not isinstance(target, HierarchicalMetadataObject):
-            raise TypeError("metadata_object must be a HierarchicalMetadataObject")
-        if not isinstance(include_components, bool):
-            raise TypeError("include_components must be a boolean")
-
-        instance_attributes = object.__getattribute__(self, "__dict__")
-        session = instance_attributes.get("_metadata_debug_session")
-        if not self.metadata_debug_enabled or session is None:
-            return
-        if not session.should_emit("snapshot"):
-            return
-        session.emit_snapshot(target, include_components=include_components)
-
-    @contextmanager
-    def metadata_debug(
-        self,
-        *,
-        keys: set[str] | frozenset[str] | None = None,
-        events: set[str] | frozenset[str] | None = None,
-        max_events: int | None = None,
-        include_values: bool = False,
-        value_repr_limit: int = 200,
-    ) -> Iterator[HierarchicalMetadataObject]:
-        """Temporarily enable structured metadata debug logging.
-
-        The object's previous debug state is restored when the context exits,
-        including when an exception is raised.
-
-        Args:
-            keys: Exact metadata keys to log, or ``None`` for every key.
-            events: Operations to log from ``lookup``, ``set``, ``delete``, and
-                ``snapshot``. ``None`` enables all operations.
-            max_events: Maximum event records to emit. ``None`` is unlimited.
-            include_values: Include bounded value representations in records.
-            value_repr_limit: Maximum length of an included value representation.
-
-        Yields:
-            This metadata object with debug logging enabled.
-        """
-        instance_attributes = object.__getattribute__(self, "__dict__")
-        previous_state = self.metadata_debug_enabled
-        previous_session = instance_attributes.get("_metadata_debug_session")
-        self.enable_metadata_debug(
-            keys=keys,
-            events=events,
-            max_events=max_events,
-            include_values=include_values,
-            value_repr_limit=value_repr_limit,
-        )
-        try:
-            yield self
-        finally:
-            session = object.__getattribute__(self, "__dict__").get(
-                "_metadata_debug_session"
-            )
-            if session is not None:
-                session.emit_summary(type(self).__name__)
-            self._metadata_debug_enabled = previous_state
-            self._metadata_debug_session = previous_session
-
-    def _log_metadata_event(
-        self,
-        event: Literal["lookup", "set", "delete"],
-        key: str,
-        value: Any = _MISSING_METADATA_VALUE,
-    ) -> None:
-        """Emit a filtered, structured metadata debug record."""
-        instance_attributes = object.__getattribute__(self, "__dict__")
-        session = instance_attributes.get("_metadata_debug_session")
-        if not self.metadata_debug_enabled or session is None:
-            return
-        if not session.should_emit(event, key):
-            return
-
-        resolution = self.explain_metadata(key)
-        if (
-            session.config.include_values
-            and value is _MISSING_METADATA_VALUE
-        ):
-            value = self._get_metadata_value_for_debug(key)
-        session.emit_event(
-            event,
-            key,
-            resolution,
-            type(self).__name__,
-            value,
-        )
-
-    def _get_metadata_value_for_debug(self, key: str) -> Any:
-        """Resolve a value for logging without invoking normal lookup hooks."""
-        if key == "metadata":
-            return object.__getattribute__(self, "_metadata").copy()
-
-        current: HierarchicalMetadataObject | None = self
-        visited: set[int] = set()
-        while isinstance(current, HierarchicalMetadataObject):
-            current_id = id(current)
-            if current_id in visited:
-                break
-            visited.add(current_id)
-            current_metadata = object.__getattribute__(current, "_metadata")
-            if key in current_metadata:
-                return current_metadata[key]
-            parent = current.parent
-            if not isinstance(parent, HierarchicalMetadataObject):
-                break
-            current = parent
-        return _MISSING_METADATA_VALUE
 
     def keys(self) -> list[str]:
         """Get all metadata keys.
@@ -479,13 +145,6 @@ class HierarchicalMetadataObject(Seedable):
             >>> obj["key"]
             'value'
         """
-        debug_enabled = object.__getattribute__(self, "__dict__").get(
-            "_metadata_debug_enabled",
-            False,
-        )
-        if debug_enabled and isinstance(key, str):
-            self._log_metadata_event("lookup", key)
-
         if key == "_metadata":
             raise KeyError(
                 "unknown bug occured for:"
@@ -521,12 +180,6 @@ class HierarchicalMetadataObject(Seedable):
             'value'
         """
         self._metadata[key] = value
-        debug_enabled = object.__getattribute__(self, "__dict__").get(
-            "_metadata_debug_enabled",
-            False,
-        )
-        if debug_enabled and isinstance(key, str):
-            self._log_metadata_event("set", key, value)
 
     def __delitem__(self, key: str) -> None:
         """Delete a metadata value by key.
@@ -540,14 +193,7 @@ class HierarchicalMetadataObject(Seedable):
             >>> "key" in obj.keys()
             False
         """
-        deleted_value = self._metadata[key]
         del self._metadata[key]
-        debug_enabled = object.__getattribute__(self, "__dict__").get(
-            "_metadata_debug_enabled",
-            False,
-        )
-        if debug_enabled and isinstance(key, str):
-            self._log_metadata_event("delete", key, deleted_value)
 
     def key_lookup(self, key: str) -> Any:
         """Lookup a metadata key with enhanced error reporting.

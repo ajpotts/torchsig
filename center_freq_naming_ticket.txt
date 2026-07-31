@@ -1,0 +1,79 @@
+Title: Is center_freq the clearest name for a dataset-relative frequency offset?
+
+Question
+--------
+TorchSIG's ``center_freq`` metadata field stores a signed frequency offset in
+Hz relative to the containing dataset's frequency origin. Is ``center_freq``
+sufficiently clear, or would a name such as ``center_freq_offset`` or
+``center_frequency_offset_hz`` better communicate its meaning?
+
+Background
+----------
+The current field does not normally represent an absolute RF tuning frequency:
+
+- Units are Hz.
+- Values are signed offsets from the dataset frequency origin.
+- An unplaced complex-baseband component normally starts at 0 Hz.
+- Wideband placement assigns positive or negative component offsets.
+- A generated wideband container uses 0 Hz as its reference origin; this does
+  not imply that its aggregate spectral centroid is at DC.
+- An external RF receiver tuning frequency is not included in this value.
+- Normalized spectrogram coordinates such as YOLO ``y_center`` are derived
+  labels and use a separate coordinate system.
+
+The existing name is compact and familiar in signal-processing code, but users
+working with real recordings may reasonably interpret it as an absolute RF
+center frequency. The name also does not state the reference coordinate or
+units by itself.
+
+Questions to investigate
+------------------------
+1. Do users currently interpret ``center_freq`` as an absolute RF frequency,
+   a dataset-relative offset, or both in different contexts?
+2. Is the current meaning consistent across builders, narrowband datasets,
+   wideband placement, transforms, labels, file handlers, and user examples?
+3. Would improved documentation be sufficient, or would a more explicit field
+   name materially prevent mistakes?
+4. If a rename is desirable, which name best balances clarity with existing
+   TorchSIG naming conventions?
+5. Should absolute RF tuning frequency be represented by a separate optional
+   metadata field rather than changing the meaning of this field?
+6. How much downstream code and serialized data relies on the existing name?
+7. Can an alias be introduced without allowing the old and new fields to
+   silently diverge on one metadata object?
+
+Compatibility considerations
+----------------------------
+A rename would affect public APIs, transforms, builders, target labels,
+configuration, serialized metadata, readers/writers, examples, and downstream
+user code. It may also interact with frozen HDF5 schemas. Any decision should
+therefore consider:
+
+- Whether a compatibility alias and deprecation period are practical.
+- Precedence and validation when both names are supplied.
+- Reading existing datasets without manual migration.
+- Whether a schema-version migration would be necessary for newly written
+  metadata.
+- How long the existing name would need to remain supported.
+
+Possible outcomes
+-----------------
+- Keep ``center_freq`` and rely on clearer documentation and examples.
+- Keep ``center_freq`` while adding explicit frequency-reference metadata.
+- Introduce a clearer alias while retaining ``center_freq`` indefinitely.
+- Deprecate ``center_freq`` in favor of an explicitly offset-based name through
+  a versioned compatibility plan.
+
+Evidence that would support a decision
+--------------------------------------
+- An inventory of the field's current meanings and uses across TorchSIG.
+- Examples from users or integrations where the name caused ambiguity.
+- A compatibility assessment for supported file formats and downstream code.
+- A small API proposal showing relative and absolute RF frequency use cases.
+- Tests or a prototype demonstrating that aliases cannot diverge.
+
+Out of scope
+------------
+This investigation concerns naming and metadata semantics. It should not change
+frequency placement, bandwidth estimation, alias filtering, or the
+mathematical value currently stored in ``center_freq``.
