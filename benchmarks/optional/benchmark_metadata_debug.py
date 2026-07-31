@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from torchsig.datasets.datasets import TorchSigIterableDataset
+from torchsig.signals.signal_types import Signal
 from torchsig.utils.abstractions import (
     HierarchicalMetadataObject,
     MetadataAttributeError,
@@ -17,6 +19,14 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 LOGGER_NAME = "torchsig.metadata"
+
+
+class MetadataContextBenchmarkDataset(TorchSigIterableDataset):
+    """Minimal dataset isolating automatic sample-context overhead."""
+
+    def __generate_new_signal__(self) -> Signal:
+        """Return an empty signal without running RF generation."""
+        return Signal(num_signals_max=1)
 
 
 @pytest.fixture
@@ -246,3 +256,32 @@ def test_benchmark_local_lookup_with_correlation_context(
         result = benchmark(local.__getitem__, "field")
 
     assert result == 1
+
+
+@pytest.mark.benchmark(group="dataset-metadata-context")
+def test_benchmark_dataset_next_debug_disabled(benchmark):
+    """Benchmark dataset iteration when correlation context is inactive."""
+    dataset = MetadataContextBenchmarkDataset(
+        signal_generators=[],
+        target_labels=None,
+        validate_init=False,
+    )
+
+    result = benchmark(next, dataset)
+
+    assert isinstance(result, Signal)
+
+
+@pytest.mark.benchmark(group="dataset-metadata-context")
+def test_benchmark_dataset_next_debug_enabled(benchmark):
+    """Benchmark dataset iteration with automatic correlation enabled."""
+    dataset = MetadataContextBenchmarkDataset(
+        signal_generators=[],
+        target_labels=None,
+        validate_init=False,
+    )
+    dataset.enable_metadata_debug(max_events=0)
+
+    result = benchmark(next, dataset)
+
+    assert isinstance(result, Signal)

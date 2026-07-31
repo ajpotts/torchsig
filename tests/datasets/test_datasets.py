@@ -4,6 +4,7 @@ import itertools
 from collections import Counter
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, List
 
 import numpy as np
@@ -28,6 +29,11 @@ from torchsig.transforms.transforms import ComplexTo2D, Spectrogram
 from torchsig.utils.data_loading import WorkerSeedingDataLoader
 from torchsig.utils.defaults import TorchSigDefaults
 from torchsig.utils.dsp import TorchSigRealDataType
+from torchsig.utils.metadata_logging import (
+    MetadataLoggingContext,
+    get_metadata_logging_context,
+    metadata_logging_context,
+)
 from torchsig.utils.writer import DatasetCreator
 
 
@@ -826,6 +832,161 @@ def test_iterable_dataset_repr_includes_core_fields():
     assert "transforms=" in result
     assert "signal_generators=" in result
     assert result.endswith(")")
+
+
+def test_iterable_dataset_adds_sample_and_stage_logging_context(monkeypatch):
+    metadata = TorchSigDefaults().default_dataset_metadata.copy()
+    metadata["dataset_id"] = "debug-dataset"
+    observed_contexts = []
+
+    def generate_signal(self):
+        observed_contexts.append(("generate", get_metadata_logging_context()))
+        return Signal(data=np.ones(8, dtype=np.complex64))
+
+    def transform_signal(signal):
+        observed_contexts.append(("transform", get_metadata_logging_context()))
+        return signal
+
+    dataset = TorchSigIterableDataset(
+        metadata=metadata,
+        signal_generators=[],
+        transforms=[transform_signal],
+        target_labels=None,
+        validate_init=False,
+    )
+    dataset.enable_metadata_debug(keys={"unused"})
+    monkeypatch.setattr(
+        TorchSigIterableDataset,
+        "__generate_new_signal__",
+        generate_signal,
+    )
+
+    next(dataset)
+    next(dataset)
+
+    assert [stage for stage, _ in observed_contexts] == [
+        "generate",
+        "transform",
+        "generate",
+        "transform",
+    ]
+    contexts = [context for _, context in observed_contexts]
+    assert [context.sample_index for context in contexts] == [0, 0, 1, 1]
+    assert all(context.dataset_id == "debug-dataset" for context in contexts)
+    assert all(context.worker_id == 0 for context in contexts)
+    assert [dict(context.fields)["stage"] for context in contexts] == [
+        "generate",
+        "transform",
+        "generate",
+        "transform",
+    ]
+    assert contexts[0].session_id == contexts[1].session_id
+    assert contexts[2].session_id == contexts[3].session_id
+    assert contexts[0].session_id != contexts[2].session_id
+    assert get_metadata_logging_context() == MetadataLoggingContext()
+
+
+def test_iterable_dataset_inherits_outer_logging_session(monkeypatch):
+    dataset = _dataset_with_empty_generators()
+    observed_contexts = []
+
+    def generate_signal(self):
+        observed_contexts.append(get_metadata_logging_context())
+        return Signal(data=np.ones(8, dtype=np.complex64))
+
+    monkeypatch.setattr(
+        TorchSigIterableDataset,
+        "__generate_new_signal__",
+        generate_signal,
+    )
+
+    with metadata_logging_context(
+        session_id="outer-session",
+        dataset_id="outer-dataset",
+        worker_id=9,
+    ):
+        next(dataset)
+
+    context = observed_contexts[0]
+    assert context.session_id == "outer-session"
+    assert context.dataset_id == "outer-dataset"
+    assert context.sample_index == 0
+    assert context.worker_id == 0
+
+
+def test_iterable_dataset_skips_context_when_debugging_is_inactive(monkeypatch):
+    dataset = _dataset_with_empty_generators()
+    observed_contexts = []
+
+    def generate_signal(self):
+        observed_contexts.append(get_metadata_logging_context())
+        return Signal(data=np.ones(8, dtype=np.complex64))
+
+    monkeypatch.setattr(
+        TorchSigIterableDataset,
+        "__generate_new_signal__",
+        generate_signal,
+    )
+
+    next(dataset)
+
+    assert observed_contexts == [MetadataLoggingContext()]
+    assert dataset._metadata_logging_sample_index == 1
+
+
+def test_iterable_dataset_logging_indices_are_independent_per_worker_copy(
+    monkeypatch,
+):
+    datasets = [_dataset_with_empty_generators(), _dataset_with_empty_generators()]
+    for dataset in datasets:
+        dataset.enable_metadata_debug(keys={"unused"})
+    current_worker = [0]
+    observed_contexts = []
+
+    def generate_signal(self):
+        observed_contexts.append(get_metadata_logging_context())
+        return Signal(data=np.ones(8, dtype=np.complex64))
+
+    monkeypatch.setattr(
+        "torchsig.datasets.datasets.get_worker_info",
+        lambda: SimpleNamespace(id=current_worker[0]),
+    )
+    monkeypatch.setattr(
+        TorchSigIterableDataset,
+        "__generate_new_signal__",
+        generate_signal,
+    )
+
+    for _ in range(3):
+        for worker_id, dataset in enumerate(datasets):
+            current_worker[0] = worker_id
+            next(dataset)
+
+    worker_indices = {0: [], 1: []}
+    for context in observed_contexts:
+        worker_indices[context.worker_id].append(context.sample_index)
+    assert worker_indices == {0: [0, 1, 2], 1: [0, 1, 2]}
+
+
+def test_iterable_dataset_logging_context_is_restored_after_failure(monkeypatch):
+    dataset = _dataset_with_empty_generators()
+    dataset.enable_metadata_debug(keys={"unused"})
+
+    def generate_signal(self):
+        assert get_metadata_logging_context().sample_index == 0
+        raise RuntimeError("generation failed")
+
+    monkeypatch.setattr(
+        TorchSigIterableDataset,
+        "__generate_new_signal__",
+        generate_signal,
+    )
+
+    with pytest.raises(RuntimeError, match="generation failed"):
+        next(dataset)
+
+    assert get_metadata_logging_context() == MetadataLoggingContext()
+    assert dataset._metadata_logging_sample_index == 1
 
 
 # =============================================================================

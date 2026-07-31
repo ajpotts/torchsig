@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import logging
 import warnings
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
-from torch.utils.data import Dataset, IterableDataset
+from torch.utils.data import Dataset, IterableDataset, get_worker_info
 
 from torchsig.datasets.dataset_utils import frequency_shift_signal
 from torchsig.signals.builder import BaseSignalGenerator, ConcatSignalGenerator
@@ -18,6 +19,10 @@ from torchsig.utils.abstractions import HierarchicalMetadataObject
 from torchsig.utils.coordinate_system import Coordinate, Rectangle, is_rectangle_overlap
 from torchsig.utils.dsp import compute_spectrogram, update_signal_snr_bandwidth
 from torchsig.utils.file_handlers.hdf5 import HDF5Reader
+from torchsig.utils.metadata_logging import (
+    get_metadata_logging_context,
+    metadata_logging_context,
+)
 from torchsig.utils.random import Seedable
 from torchsig.utils.signal_building import lookup_signal_generator_by_string
 
@@ -28,6 +33,8 @@ log = logging.getLogger(__name__)
 
 # Type checking imports
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
+
     from torchsig.transforms.base_transforms import Transform
 
 __all__ = ["StaticTorchSigDataset", "TorchSigDatasetConfig", "TorchSigIterableDataset", "apply_label_to_signal", "apply_transforms_and_labels_to_signal"]
@@ -184,6 +191,7 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         self.target_labels = target_labels
         self.transforms = [] if transforms is None else transforms
         self.component_transforms = [] if component_transforms is None else component_transforms
+        self._metadata_logging_sample_index = 0
         if not hasattr(self, "class_names"):
             self["class_names"] = []
         if "num_signals_min" not in self.keys():
@@ -418,12 +426,68 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         Raises:
             IndexError: If the index is out of bounds of the generated samples.
         """
-        # user requesting another sample at index +1 larger than current list of generates samples
-        # generate new sample
-        sample = self.__generate_new_signal__()
-        return apply_transforms_and_labels_to_signal(
-            sample, self.transforms, self.target_labels
+        sample_index = self._metadata_logging_sample_index
+        self._metadata_logging_sample_index += 1
+        if not self._metadata_logging_is_active():
+            sample = self.__generate_new_signal__()
+            return apply_transforms_and_labels_to_signal(
+                sample,
+                self.transforms,
+                self.target_labels,
+            )
+
+        with self._metadata_logging_sample_context(sample_index):
+            sample = self._run_with_metadata_logging_stage(
+                "generate",
+                self.__generate_new_signal__,
+            )
+            return self._run_with_metadata_logging_stage(
+                "transform",
+                lambda: apply_transforms_and_labels_to_signal(
+                    sample,
+                    self.transforms,
+                    self.target_labels,
+                ),
+            )
+
+    @contextmanager
+    def _metadata_logging_sample_context(
+        self,
+        sample_index: int,
+    ) -> Iterator[None]:
+        """Establish correlation fields for one generated dataset sample."""
+        outer_context = get_metadata_logging_context()
+        worker = get_worker_info()
+        worker_id = worker.id if worker is not None else 0
+        local_metadata = object.__getattribute__(self, "_metadata")
+        dataset_id = local_metadata.get(
+            "dataset_id",
+            outer_context.dataset_id or type(self).__name__,
         )
+        with metadata_logging_context(
+            dataset_id=str(dataset_id),
+            sample_index=sample_index,
+            worker_id=worker_id,
+        ):
+            yield
+
+    def _metadata_logging_is_active(self) -> bool:
+        """Return whether sample correlation should be established."""
+        instance_attributes = object.__getattribute__(self, "__dict__")
+        if instance_attributes.get("_metadata_debug_enabled", False):
+            return True
+        return get_metadata_logging_context().session_id is not None
+
+    @staticmethod
+    def _run_with_metadata_logging_stage(
+        stage: str,
+        operation: Callable[[], Any],
+    ) -> Any:
+        """Run one generation stage with an optional correlation field."""
+        if get_metadata_logging_context().session_id is None:
+            return operation()
+        with metadata_logging_context(fields={"stage": stage}):
+            return operation()
 
     def __call__(self) -> Signal | np.ndarray | tuple:
         """Same as next(); returns the next item in the dataset.
@@ -797,29 +861,46 @@ class SafeTorchSigIterableDataset(
         Note:
             All pipeline failures are logged to aid debugging and monitoring.
         """
-        # Stage 1: generation + component_transforms
-        # If this fails, no raw/original sample exists yet.
-        def generate_raw_signal():
-            return self.__generate_new_signal__()
-
-        raw_signal = self._run_with_fallback(
-            generate_raw_signal,
-            fallback_raw_signal=None,
-        )
-
-        # Stage 2: whole-signal transforms + labels
-        # If this fails, raw_signal exists, so original fallback is possible.
-        def transform_raw_signal():
-            return apply_transforms_and_labels_to_signal(
-                raw_signal,
-                self.transforms,
-                self.target_labels,
+        sample_index = self._metadata_logging_sample_index
+        self._metadata_logging_sample_index += 1
+        if not self._metadata_logging_is_active():
+            raw_signal = self._run_with_fallback(
+                self.__generate_new_signal__,
+                fallback_raw_signal=None,
+            )
+            return self._run_with_fallback(
+                lambda: apply_transforms_and_labels_to_signal(
+                    raw_signal,
+                    self.transforms,
+                    self.target_labels,
+                ),
+                fallback_raw_signal=raw_signal,
             )
 
-        return self._run_with_fallback(
-            transform_raw_signal,
-            fallback_raw_signal=raw_signal,
-        )
+        with self._metadata_logging_sample_context(sample_index):
+            # Stage 1: generation + component_transforms. If this fails, no
+            # raw/original sample exists yet.
+            raw_signal = self._run_with_metadata_logging_stage(
+                "generate",
+                lambda: self._run_with_fallback(
+                    self.__generate_new_signal__,
+                    fallback_raw_signal=None,
+                ),
+            )
+
+            # Stage 2: whole-signal transforms + labels. If this fails,
+            # raw_signal exists, so original fallback is possible.
+            return self._run_with_metadata_logging_stage(
+                "transform",
+                lambda: self._run_with_fallback(
+                    lambda: apply_transforms_and_labels_to_signal(
+                        raw_signal,
+                        self.transforms,
+                        self.target_labels,
+                    ),
+                    fallback_raw_signal=raw_signal,
+                ),
+            )
 
 
     def set_fallback_policy(
