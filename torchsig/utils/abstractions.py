@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
+from torchsig.utils.metadata_logging import _metadata_logging_extra
 from torchsig.utils.random import Seedable
 
 if TYPE_CHECKING:
@@ -454,6 +455,7 @@ class HierarchicalMetadataObject(Seedable):
             "metadata_cycle_detected": resolution.cycle_detected,
             "metadata_path": resolution.path,
             "metadata_object_type": type(self).__name__,
+            **_metadata_logging_extra(),
         }
         if config.include_values:
             if value is _MISSING_METADATA_VALUE:
@@ -523,6 +525,7 @@ class HierarchicalMetadataObject(Seedable):
             extra={
                 "metadata_event": "summary",
                 "metadata_object_type": type(self).__name__,
+                **_metadata_logging_extra(),
                 "metadata_emitted_events": statistics.emitted_events,
                 "metadata_suppressed_events": statistics.suppressed_events,
                 "metadata_debug_keys": config.keys,

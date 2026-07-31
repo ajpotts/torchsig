@@ -11,6 +11,7 @@ from torchsig.utils.abstractions import (
     HierarchicalMetadataObject,
     MetadataAttributeError,
 )
+from torchsig.utils.metadata_logging import metadata_logging_context
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -221,5 +222,27 @@ def test_benchmark_local_lookup_debug_with_value(
     local.enable_metadata_debug(include_values=True)
 
     result = benchmark(local.__getitem__, "field")
+
+    assert result == 1
+
+
+@pytest.mark.benchmark(group="metadata-debug-emitted")
+def test_benchmark_local_lookup_with_correlation_context(
+    benchmark,
+    metadata_objects,
+    emitted_debug_logger,
+):
+    """Benchmark an emitted record with active correlation fields."""
+    local, _ = metadata_objects
+    local.enable_metadata_debug()
+
+    with metadata_logging_context(
+        session_id="benchmark-session",
+        dataset_id="benchmark-dataset",
+        sample_index=42,
+        worker_id=1,
+        fields={"split": "train"},
+    ):
+        result = benchmark(local.__getitem__, "field")
 
     assert result == 1
