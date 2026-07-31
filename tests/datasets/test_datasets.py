@@ -23,7 +23,7 @@ from torchsig.datasets.datasets import (
 from torchsig.signals.builder import BaseSignalGenerator
 from torchsig.signals.signal_types import Signal
 from torchsig.transforms.impairments import Impairments
-from torchsig.transforms.metadata_transforms import YOLOLabel
+from torchsig.transforms.metadata_transforms import MultiHotLabel, YOLOLabel
 from torchsig.transforms.transforms import ComplexTo2D, Spectrogram
 from torchsig.utils.data_loading import WorkerSeedingDataLoader
 from torchsig.utils.defaults import TorchSigDefaults
@@ -408,6 +408,16 @@ def test_apply_label_to_signal_does_not_duplicate_parent_class_index():
     assert apply_label_to_signal(sample, "class_index") == [3, 4]
 
 
+def test_apply_label_to_signal_prefers_direct_sample_level_label():
+    sample = _parent_with_components()
+    sample["multi_hot_label"] = np.array([0, 1, 0, 1], dtype=np.float32)
+
+    values = apply_label_to_signal(sample, "multi_hot_label")
+
+    assert len(values) == 1
+    np.testing.assert_array_equal(values[0], sample.multi_hot_label)
+
+
 def test_apply_label_to_signal_leaf_signal_fallback():
     sample = Signal(
         data=np.zeros(50, dtype=np.complex64),
@@ -453,6 +463,22 @@ def test_apply_transforms_and_labels_single_target_multi_signal_returns_list():
 
     assert data is sample.data
     assert targets == [3, 4]
+
+
+def test_apply_transforms_and_labels_returns_wideband_multi_hot_vector():
+    sample = _parent_with_components(num_signals_max=2)
+
+    data, target = apply_transforms_and_labels_to_signal(
+        sample,
+        [MultiHotLabel(num_classes=6)],
+        ["multi_hot_label"],
+    )
+
+    assert data is sample.data
+    np.testing.assert_array_equal(
+        target,
+        np.array([0, 0, 0, 1, 1, 0], dtype=np.float32),
+    )
 
 
 def test_apply_transforms_and_labels_single_signal_squeezes_single_target():

@@ -68,10 +68,12 @@ def apply_label_to_signal(sample: Signal, target_label: str) -> list:
     (e.g. ``start``, ``stop``, ``lower_freq``, and ``upper_freq``) to be
     requested uniformly.
 
-    If the signal contains component signals, labels are extracted only from
-    the components. Otherwise, the label is extracted from the signal itself.
-    This avoids returning duplicate labels for both a composite signal and its
-    children.
+    A label stored directly on the sample, but not on any component, is
+    returned as one sample-level value. Otherwise, if the signal contains
+    component signals, labels are extracted only from the components. If it
+    has no components, the label is extracted from the signal itself. This
+    avoids returning duplicate labels for both a composite signal and its
+    children while supporting aggregate labels such as multi-hot vectors.
 
     Args:
         sample: Signal from which to extract target labels.
@@ -79,9 +81,19 @@ def apply_label_to_signal(sample: Signal, target_label: str) -> list:
             extract.
 
     Returns:
-        A list containing one value for each component signal, or a single
-        value for the signal itself if it has no components.
+        A list containing a sample-level value, one value for each component
+        signal, or a single value for a signal without components.
     """
+    is_sample_level_label = (
+        target_label in sample.metadata
+        and not any(
+            target_label in component.metadata
+            for component in sample.component_signals
+        )
+    )
+    if is_sample_level_label:
+        return [sample[target_label]]
+
     values = []
 
     signals = sample.component_signals if sample.component_signals else [sample]
@@ -131,7 +143,16 @@ def apply_transforms_and_labels_to_signal(
     targets = {}
     for key in target_labels:
         values = apply_label_to_signal(sample, key)
-        if sample["num_signals_max"] == 1 and len(values) == 1:
+        is_sample_level_label = (
+            key in sample.metadata
+            and not any(
+                key in component.metadata
+                for component in sample.component_signals
+            )
+        )
+        if len(values) == 1 and (
+            is_sample_level_label or sample["num_signals_max"] == 1
+        ):
             values = values[0]
         targets[key] = values
     if len(target_labels) == 1:
