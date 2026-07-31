@@ -183,7 +183,8 @@ open-docs: docs
 
 # Benchmarks
 BENCHMARK_FILES = \
-	benchmarks/benchmark_transforms_functional.py
+	benchmarks/benchmark_transforms_functional.py \
+	benchmarks/benchmark_dataset_generation.py
 BENCHMARK_DIR ?= .benchmarks
 BENCHMARK_OUTPUT ?= $(BENCHMARK_DIR)/benchmark_output.txt
 BENCHMARK_JSON ?= $(BENCHMARK_DIR)/benchmark.json
