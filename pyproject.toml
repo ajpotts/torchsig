@@ -36,6 +36,7 @@ dependencies = [
     "opencv-python>=4.10",
     "numba>=0.60",
     "soundfile",
+    "sigmf",
 ]
 
 # === OPTIONAL DEVELOPMENT DEPENDENCIES (What developers need) ===

@@ -6,6 +6,7 @@ from .hdf5 import HDF5Reader
 from .metadata_reader import MetadataIndexError, MetadataReader
 from .npy import NPYReader
 from .ogg import OGGReader
+from .sigmf import SigMFReader
 from .wav import WAVReader
 
 __all__ = [
@@ -19,6 +20,7 @@ __all__ = [
     "MetadataReader",
     "NPYReader",
     "OGGReader",
+    "SigMFReader"
     "WAVReader",
     "base_handler",
     "hdf5",
