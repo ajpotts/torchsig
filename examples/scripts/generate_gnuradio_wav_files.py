@@ -45,8 +45,17 @@ from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
-from gnuradio import blocks, channels, digital, filter, gr
 from scipy.io import wavfile
+
+try:
+    from gnuradio import blocks, channels, digital, filter, gr
+except ImportError as exc:
+    msg = (
+        "GNU Radio >=3.10.11 is required for this example. See "
+        "examples/README.md for Conda, micromamba, and system-package "
+        "installation instructions."
+    )
+    raise ImportError(msg) from exc
 
 
 # ----------------------------------------------------------------------

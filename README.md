@@ -35,7 +35,7 @@ pip install -e .[dev]
 # To run the notebooks
 pip install -e .[notebooks]
 
-# To run the notebooks, including examples
+# To run the examples that do not require external system packages
 pip install -e .[examples]
 ```
 
@@ -50,8 +50,9 @@ pip install -e .[examples]
 * `pip install -e .[notebooks]` — adds the extra **notebook** group, jupyter notebook tools.
   Choose this when you plan to develop or run notebooks for the project.
 
-* `pip install -e .[examples]` — adds the extra **examples** group, including optional dependencies to run all examples in the notebooks and scripts.
-  Choose this when you plan to run the examples from the project.
+* `pip install -e .[examples]` — adds the extra **examples** group and its Python dependencies.
+  Choose this when you plan to run examples from the project. The GNU Radio
+  WAV example uses the Conda environment documented in `examples/README.md`.
 
 # Examples and Tutorials
 
