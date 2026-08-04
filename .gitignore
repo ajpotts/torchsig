@@ -52,6 +52,8 @@ examples/datasets/
 !examples/*.ipynb
 !examples/transforms/
 !examples/transforms/*.ipynb
+!examples/file_handlers/
+!examples/file_handlers/*.ipynb
 !examples/*.py
 !examples/*.yaml
 
