@@ -1,12 +1,21 @@
 """Metadata Transforms"""
 
+import ast
+import re
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any, ClassVar
+
+import yaml
+
 from torchsig.signals.signal_types import Signal
 from torchsig.transforms.base_transforms import Transform
 from torchsig.utils.printing import generate_repr_str
 
 __all__ = [
+    "GroupingLabel",
     "MetadataTransform",
-    "YOLOLabel"
+    "YOLOLabel",
 ]
 
 ## Base/Helper Classes
@@ -68,8 +77,9 @@ class MetadataTransform(Transform):
         Returns:
             The transformed signal.
         """
-        for component_signal in signal.component_signals:
-            self.__apply__(component_signal)
+        signals = signal.component_signals or [signal]
+        for target_signal in signals:
+            self.__apply__(target_signal)
         return signal
 
     def __apply__(self, signal):
@@ -144,4 +154,367 @@ class YOLOLabel(MetadataTransform):
         signal["yolo_label"] = yolo_label
         return signal
 
-__all__ = ["MetadataTransform", "YOLOLabel"]
+
+class GroupingLabel(MetadataTransform):
+    """Add generic group labels using ordered rules from YAML or a dictionary.
+
+    Each group must define a ``name`` and exactly one matching rule:
+
+    - ``values``: A list of exact source values.
+    - ``regex``: A regular expression searched against the string source value.
+    - ``formula``: A restricted boolean expression using ``value``.
+    - ``default: true``: Match any value not handled by an earlier group.
+
+    Groups are evaluated in order and the first match wins. Their order also
+    determines the numeric group index.
+
+    The formula language supports arithmetic, boolean operators, comparisons,
+    membership, literals, and the safe string methods ``startswith``,
+    ``endswith``, ``lower``, ``upper``, ``isdigit``, and ``isalpha``. It
+    cannot import modules, access arbitrary attributes, or call arbitrary
+    functions.
+
+    Example YAML:
+        .. code-block:: yaml
+
+            source: class_name
+            labels:
+              name: modulation_group
+              index: modulation_group_index
+            groups:
+              - name: linear
+                values: [bpsk, qpsk]
+              - name: frequency_shift
+                regex: '^[248]g?fsk$'
+              - name: high_order_qam
+                formula: 'value.endswith("qam") and value != "16qam"'
+              - name: all
+                default: true
+
+    Args:
+        config: YAML file path or a mapping with the same schema.
+        **kwargs: Additional keyword arguments passed to the parent class.
+    """
+
+    _SAFE_STRING_METHODS: ClassVar[set[str]] = {
+        "endswith",
+        "isalpha",
+        "isdigit",
+        "lower",
+        "startswith",
+        "upper",
+    }
+    _SAFE_AST_NODES = (
+        ast.Expression,
+        ast.BoolOp,
+        ast.And,
+        ast.Or,
+        ast.UnaryOp,
+        ast.Not,
+        ast.UAdd,
+        ast.USub,
+        ast.BinOp,
+        ast.Add,
+        ast.Sub,
+        ast.Mult,
+        ast.Div,
+        ast.FloorDiv,
+        ast.Mod,
+        ast.Compare,
+        ast.Eq,
+        ast.NotEq,
+        ast.In,
+        ast.NotIn,
+        ast.Lt,
+        ast.LtE,
+        ast.Gt,
+        ast.GtE,
+        ast.Name,
+        ast.Load,
+        ast.Constant,
+        ast.List,
+        ast.Tuple,
+        ast.Set,
+        ast.Call,
+        ast.Attribute,
+    )
+
+    def __init__(
+        self,
+        config: str | Path | Mapping[str, Any],
+        **kwargs,
+    ) -> None:
+        """Initialize a grouping transform from YAML or a mapping."""
+        grouping_config = self._load_config(config)
+        self.source = grouping_config.get("source", "class_name")
+        labels = grouping_config.get("labels", {})
+        self.name_label = labels.get("name", "group_name")
+        self.index_label = labels.get("index", "group_index")
+        self.groups = grouping_config.get("groups")
+
+        self._validate_config()
+        self._compiled_rules = [
+            self._compile_rule(group) for group in self.groups
+        ]
+
+        super().__init__(required_metadata=[self.source], **kwargs)
+        self.targets_metadata = [self.name_label, self.index_label]
+
+    @staticmethod
+    def _load_config(
+        config: str | Path | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Load and copy grouping configuration."""
+        if isinstance(config, Mapping):
+            return dict(config)
+        if isinstance(config, (str, Path)):
+            path = Path(config)
+            loaded = yaml.safe_load(path.read_text())
+            if not isinstance(loaded, dict):
+                raise TypeError("grouping YAML root must be a mapping")
+            return loaded
+        raise TypeError("config must be a YAML path or mapping")
+
+    def _validate_config(self) -> None:
+        """Validate grouping configuration structure and label names."""
+        for field_name, value in (
+            ("source", self.source),
+            ("labels.name", self.name_label),
+            ("labels.index", self.index_label),
+        ):
+            if not isinstance(value, str) or not value:
+                raise ValueError(f"{field_name} must be a non-empty string")
+
+        if self.name_label == self.index_label:
+            raise ValueError("group name and index labels must be different")
+        if not isinstance(self.groups, list) or not self.groups:
+            raise ValueError("groups must be a non-empty list")
+
+        names = []
+        for group_index, group in enumerate(self.groups):
+            if not isinstance(group, dict):
+                raise TypeError("each group must be a mapping")
+            name = group.get("name")
+            if not isinstance(name, str) or not name:
+                raise ValueError("each group name must be a non-empty string")
+            names.append(name)
+
+            rule_names = {
+                "values",
+                "regex",
+                "formula",
+                "default",
+            } & group.keys()
+            if len(rule_names) != 1:
+                raise ValueError(
+                    f"group {name!r} must define exactly one of values, "
+                    "regex, formula, or default"
+                )
+            if "default" in group:
+                if group["default"] is not True:
+                    raise ValueError(
+                        f"group {name!r} default rule must be true"
+                    )
+                if group_index != len(self.groups) - 1:
+                    raise ValueError("the default group must be last")
+
+        if len(names) != len(set(names)):
+            raise ValueError("group names must be unique")
+
+    def _compile_rule(self, group: dict[str, Any]) -> tuple[str, Any]:
+        """Validate and compile one configured matching rule."""
+        if "default" in group:
+            return "default", None
+
+        if "values" in group:
+            values = group["values"]
+            if not isinstance(values, list) or not values:
+                raise ValueError(
+                    f"group {group['name']!r} values must be a non-empty list"
+                )
+            return "values", values
+
+        if "regex" in group:
+            pattern = group["regex"]
+            if not isinstance(pattern, str) or not pattern:
+                raise ValueError(
+                    f"group {group['name']!r} regex must be a non-empty string"
+                )
+            try:
+                return "regex", re.compile(pattern)
+            except re.error as error:
+                raise ValueError(
+                    f"group {group['name']!r} has invalid regex: {error}"
+                ) from error
+
+        formula = group["formula"]
+        if not isinstance(formula, str) or not formula:
+            raise ValueError(
+                f"group {group['name']!r} formula must be a non-empty string"
+            )
+        return "formula", self._compile_formula(formula)
+
+    def _compile_formula(self, formula: str) -> Any:
+        """Compile a formula after enforcing the restricted expression grammar."""
+        try:
+            expression = ast.parse(formula, mode="eval")
+        except SyntaxError as error:
+            raise ValueError(f"invalid grouping formula: {error.msg}") from error
+
+        for node in ast.walk(expression):
+            if not isinstance(node, self._SAFE_AST_NODES):
+                raise ValueError(  # noqa: TRY004 - invalid formula syntax
+                    f"grouping formula uses unsupported syntax: "
+                    f"{type(node).__name__}"
+                )
+            if isinstance(node, ast.Name) and node.id != "value":
+                raise ValueError(
+                    "grouping formula may only reference the name 'value'"
+                )
+            if (
+                isinstance(node, ast.Attribute)
+                and node.attr not in self._SAFE_STRING_METHODS
+            ):
+                raise ValueError(
+                    f"grouping formula method {node.attr!r} is not allowed"
+                )
+            if isinstance(node, ast.Call):
+                if not isinstance(node.func, ast.Attribute):
+                    raise ValueError(  # noqa: TRY004 - invalid formula call
+                        "grouping formula may only call safe string methods"
+                    )
+                if node.keywords:
+                    raise ValueError(
+                        "grouping formula method calls do not accept keywords"
+                    )
+
+        return expression.body
+
+    def _evaluate_formula(  # noqa: PLR0911 - one branch per allowed AST node
+        self,
+        node: ast.AST,
+        value: Any,
+    ) -> Any:
+        """Evaluate a previously validated formula syntax tree."""
+        if isinstance(node, ast.Constant):
+            return node.value
+        if isinstance(node, ast.Name):
+            return value
+        if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            items = [self._evaluate_formula(item, value) for item in node.elts]
+            if isinstance(node, ast.List):
+                return items
+            if isinstance(node, ast.Tuple):
+                return tuple(items)
+            return set(items)
+        if isinstance(node, ast.BoolOp):
+            if isinstance(node.op, ast.And):
+                return all(
+                    bool(self._evaluate_formula(item, value))
+                    for item in node.values
+                )
+            return any(
+                bool(self._evaluate_formula(item, value))
+                for item in node.values
+            )
+        if isinstance(node, ast.UnaryOp):
+            operand = self._evaluate_formula(node.operand, value)
+            if isinstance(node.op, ast.Not):
+                return not bool(operand)
+            if isinstance(node.op, ast.UAdd):
+                return +operand
+            return -operand
+        if isinstance(node, ast.BinOp):
+            left = self._evaluate_formula(node.left, value)
+            right = self._evaluate_formula(node.right, value)
+            if isinstance(node.op, ast.Add):
+                return left + right
+            if isinstance(node.op, ast.Sub):
+                return left - right
+            if isinstance(node.op, ast.Mult):
+                return left * right
+            if isinstance(node.op, ast.Div):
+                return left / right
+            if isinstance(node.op, ast.FloorDiv):
+                return left // right
+            return left % right
+        if isinstance(node, ast.Compare):
+            left = self._evaluate_formula(node.left, value)
+            for operator, comparator in zip(
+                node.ops,
+                node.comparators,
+                strict=True,
+            ):
+                right = self._evaluate_formula(comparator, value)
+                if isinstance(operator, ast.Eq):
+                    matches = left == right
+                elif isinstance(operator, ast.NotEq):
+                    matches = left != right
+                elif isinstance(operator, ast.In):
+                    matches = left in right
+                elif isinstance(operator, ast.NotIn):
+                    matches = left not in right
+                elif isinstance(operator, ast.Lt):
+                    matches = left < right
+                elif isinstance(operator, ast.LtE):
+                    matches = left <= right
+                elif isinstance(operator, ast.Gt):
+                    matches = left > right
+                else:
+                    matches = left >= right
+                if not matches:
+                    return False
+                left = right
+            return True
+        if isinstance(node, ast.Call):
+            target = self._evaluate_formula(node.func.value, value)
+            method = getattr(target, node.func.attr)
+            args = [
+                self._evaluate_formula(argument, value)
+                for argument in node.args
+            ]
+            return method(*args)
+        raise TypeError(
+            f"unsupported validated formula node: {type(node).__name__}"
+        )
+
+    def _rule_matches(
+        self,
+        rule_type: str,
+        rule: Any,
+        value: Any,
+    ) -> bool:
+        """Return whether one compiled rule matches a source value."""
+        if rule_type == "values":
+            return value in rule
+        if rule_type == "regex":
+            return rule.search(str(value)) is not None
+        if rule_type == "default":
+            return True
+        return bool(self._evaluate_formula(rule, value))
+
+    def __apply__(self, signal: Signal) -> Signal:
+        """Assign the first matching group to a signal.
+
+        Raises:
+            ValueError: If the source field is missing or no group matches.
+        """
+        if not hasattr(signal, self.source):
+            raise ValueError(
+                f"GroupingLabel requires signal metadata field {self.source!r}"
+            )
+        value = getattr(signal, self.source)
+
+        for group_index, (group, compiled_rule) in enumerate(
+            zip(self.groups, self._compiled_rules, strict=True)
+        ):
+            rule_type, rule = compiled_rule
+            if self._rule_matches(rule_type, rule, value):
+                signal[self.name_label] = group["name"]
+                signal[self.index_label] = group_index
+                return signal
+
+        raise ValueError(
+            f"value {value!r} from metadata field {self.source!r} did not "
+            "match any configured group"
+        )

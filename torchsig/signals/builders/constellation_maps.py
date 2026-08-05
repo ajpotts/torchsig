@@ -23,6 +23,33 @@ def remove_corners(const):
     ]
 
 
+def apsk_rings(
+    ring_counts: list[int],
+    ring_radii: list[float],
+    ring_offsets: list[float],
+) -> np.ndarray:
+    """Builds an Amplitude-Phase-Shift-Keying (APSK) constellation from rings.
+
+    Used to form the DVB-S2 16-APSK (4+12) and 32-APSK (4+12+16) constellations.
+    Each ring contributes equally spaced points at a fixed radius and angular
+    offset. The result is normalized to unit average power.
+
+    Args:
+        ring_counts: Number of points on each concentric ring.
+        ring_radii: Radius of each ring.
+        ring_offsets: Angular offset (radians) of the first point on each ring.
+
+    Returns:
+        np.ndarray: Complex symbol map normalized to unit average power.
+    """
+    points = []
+    for count, radius, offset in zip(ring_counts, ring_radii, ring_offsets):
+        angles = offset + 2.0 * np.pi * np.arange(count) / count
+        points.append(radius * np.exp(1j * angles))
+    const = np.concatenate(points)
+    return const / np.sqrt(np.mean(np.abs(const) ** 2))
+
+
 # retains all of the symbol maps for QAM/PSK/ASK/OOK modulations
 all_symbol_maps = {
     "ook": np.add(*map(np.ravel, np.meshgrid(np.linspace(0, 1, 2), 0j))),
@@ -84,4 +111,9 @@ all_symbol_maps = {
             )
         )
     ),
+    # DVB-S2 APSK constellations (representative ~rate-3/4 ring radius ratios).
+    "16apsk": apsk_rings([4, 12], [1.0, 2.85], [np.pi / 4, np.pi / 12]),
+    "32apsk": apsk_rings(
+        [4, 12, 16], [1.0, 2.84, 5.27], [np.pi / 4, np.pi / 12, np.pi / 16]
+    ),    
 }

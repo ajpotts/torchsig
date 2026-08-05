@@ -418,14 +418,15 @@ def coarse_gain_change(
 
     Args:
         data: IQ data.
-        gain_change_db: Gain value to change in dB.
+        gain_change_db: Gain value to change in dB (power) units.
         start_idx: Start index for IQ data.
 
     Returns:
         IQ data with instantaneous gain change applied.
     """
     # convert db to linear units
-    gain_change_linear = 10 ** (gain_change_db / 10)
+    # input is complex I/Q (amplitude), so apply /20 for dB of power 
+    gain_change_linear = 10 ** (gain_change_db / 20)
 
     # create copy of signal
     output_data = copy(data)
@@ -729,11 +730,11 @@ def fading(
     rayleigh_taps = real_tap_function(new_time) + 1j * imag_tap_function(new_time)
     rayleigh_taps *= power_taps
 
-    # Ensure that we maintain the same amount of power before and after the transform
+    # Ensure we maintain same amount of power before and after the transform
     input_power = np.linalg.norm(data)
     data = sp.upfirdn(rayleigh_taps, data, up=100, down=100)[-data.shape[0] :]
     output_power = np.linalg.norm(data)
-    data = np.multiply(input_power / output_power, data).astype(np.complex64)
+    data = np.multiply(_power_renorm_scale(input_power, output_power), data)
 
     return data.astype(TorchSigComplexDataType)
 
@@ -776,7 +777,7 @@ def intermodulation_products(
     win = sp.windows.blackmanharris(len(data))
     input_power = np.max(np.abs(np.fft.fft(data * win)))
     output_power = np.max(np.abs(np.fft.fft(distorted_data * win)))
-    distorted_data *= input_power / output_power
+    distorted_data *= _power_renorm_scale(input_power, output_power)
 
     return distorted_data.astype(TorchSigComplexDataType)
 
@@ -825,8 +826,12 @@ def iq_imbalance(
             avg_len += 1
         avg = np.ones(avg_len) / avg_len
         data_fft_linear = sp.convolve(data_fft_linear, avg)[avg_len:-avg_len]
-        # estimate noise floor
-        noise_floor_db = 20 * np.log10(np.min(data_fft_linear))
+         # guard against non-finite values
+        finite = data_fft_linear[np.isfinite(data_fft_linear)]
+        # basic blind noise floor estimate, assuming signal occupies <50% band
+        # target |FFT| 25th percentile (avoid any near-zero edge bins)
+        floor_lin = float(np.percentile(finite, 25)) if finite.size else 0.0
+        noise_floor_db = 20 * np.log10(max(floor_lin, np.finfo(np.float64).tiny))
 
     # create the DC offset
     dc_offset_tone = np.ones(len(data)) * np.exp(1j * dc_offset_phase_rads)
@@ -961,6 +966,10 @@ def nonlinear_amplifier(
     in_power = magnitude**2
     mean_power_est = np.mean(in_power)
 
+    # zero mean power input, return unchanged
+    if mean_power_est == 0:
+        return data.astype(TorchSigComplexDataType)
+
     # amplitude-to-amplitude modulation (AM/AM)
     # hyperbolic tangent power response passes
     # through (0,0) and asymptotically approaches psat
@@ -994,7 +1003,7 @@ def nonlinear_amplifier(
         win = sp.windows.blackmanharris(n)
         input_power = np.max(np.abs(np.fft.fft(data * win)))
         output_power = np.max(np.abs(np.fft.fft(amp_data * win)))
-        amp_data *= input_power / output_power
+        amp_data *= _power_renorm_scale(input_power, output_power)
 
     return amp_data.astype(TorchSigComplexDataType)
 
@@ -1055,7 +1064,7 @@ def nonlinear_amplifier_table(
         win = sp.windows.blackmanharris(len(data))
         input_power = np.max(np.abs(np.fft.fft(data * win)))
         output_power = np.max(np.abs(np.fft.fft(amp_data * win)))
-        amp_data *= input_power / output_power
+        amp_data *= _power_renorm_scale(input_power, output_power)
 
     return amp_data.astype(TorchSigComplexDataType)
 
@@ -1257,13 +1266,19 @@ def passband_ripple(
     This function simulates an imperfect filter response by designing a
     frequency profile with a cosine ripple in the passband and a linear ramp
     in the stopband. The profile is converted to real FIR taps and convolved
-    with the input data.
+    with the input data. 
+    
+    Note that this implementation enforces symmetry (odd number of
+    taps, +1 if even) and a minimum number of 65 taps to meet ripple profile 
+    requirements reliably. If design fails (could not be satisfied after N 
+    attempts), the input data is returned unchanged.
 
     Args:
         data (np.ndarray): The input signal to be filtered.
         num_taps (int): The number of coefficients for the FIR filter.
             If an even number is provided, it is incremented by 1 to maintain
-            symmetry. Defaults to 65.
+            symmetry. Defaults to 65. Note, also imposes a minimum number of
+            taps (65) and symmetry (odd-valued number - +1 if needed)
         max_ripple_db (float): The maximum peak-to-peak ripple in the
             passband expressed in decibels. Defaults to 2.0.
         ripple_freq (float): The ripple frequency. Defaults to 5.0.
@@ -1331,10 +1346,20 @@ def passband_ripple(
         ratio = 10**(max_ripple_db / 20.0)
         linear_amp = (ratio - 1.0) / 2.0
 
+        # Enforce a minimum number of taps found to reliably achieve [0.1, 3.0] dB ripple designs 
+        min_num_taps = 65
+        if num_taps < min_num_taps:            
+            warnings.warn(
+                f"The num_taps '{num_taps}' is below the enforced minimum '{min_num_taps}', and will be increased.",
+                UserWarning,
+                stacklevel=2
+            )
+            num_taps = min_num_taps
+
         # Ensure num_taps is ODD for symmetry
         if num_taps % 2 == 0:
             num_taps += 1
-
+            
         # Generate the frequency profile [DC, pos..., neg...]
         profile = _build_full_profile(
             num_taps=num_taps,
@@ -1875,5 +1900,19 @@ def time_varying_noise(
         data
         + (10.0 ** (noise_power / 20.0)) * (real_noise + 1j * imag_noise) / np.sqrt(2)
     ).astype(TorchSigComplexDataType)
+
+
+def _power_renorm_scale(
+    input_power: float, output_power: float, rel_floor: float = 1e-9
+) -> float:
+    """Scale factor ``input_power / output_power`` that is safe when the signal
+    is (near-)silent. Floor the  denominator *relative to the numerator* (the 
+    two are on the same scale): a silent buffer then yields ``0`` and a 
+    near-annihilated one is capped at ``1/rel_floor`` instead of overflowing, 
+    while valid signals (``output_power >> rel_floor * input_power``) are unaffected
+    """
+    denom = max(output_power, rel_floor * input_power) + np.finfo(np.float64).tiny
+    return input_power / denom
+
 
 __all__ = ["add_slope", "additive_noise", "adjacent_channel_interference", "awgn", "carrier_frequency_drift", "carrier_phase_noise", "channel_swap", "clock_drift", "clock_jitter", "coarse_gain_change", "cochannel_interference", "complex_to_2d", "cut_out", "digital_agc", "doppler", "drop_samples", "fading", "interleave_complex", "intermodulation_products", "iq_imbalance", "nonlinear_amplifier", "nonlinear_amplifier_table", "normalize", "passband_ripple", "patch_shuffle", "phase_offset", "quantize", "shadowing", "spectral_inversion", "spectrogram", "spectrogram_drop_samples", "spectrogram_image", "spurs", "time_reversal", "time_varying_noise"]

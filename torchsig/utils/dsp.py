@@ -21,6 +21,9 @@ if TYPE_CHECKING:
 
 __all__ = ["TorchSigComplexDataType", "TorchSigRealDataType", "bandwidth_from_lower_upper_freq", "center_freq_from_lower_upper_freq", "compute_spectrogram", "convolve", "design_half_band_filter", "estimate_filter_length", "estimate_tone_bandwidth", "frequency_shift", "gaussian_taps", "interpolate_power_of_2_resampler", "is_even", "is_multiple_of_4", "is_odd", "low_pass", "low_pass_iterative_design", "lower_freq_from_center_freq_bandwidth", "multistage_polyphase_decimator", "multistage_polyphase_interpolator", "multistage_polyphase_resampler", "noise_generator", "pad_head_tail_to_length", "partition_polyphase", "polyphase_decimator", "polyphase_fractional_resampler", "polyphase_integer_interpolator", "prototype_polyphase_filter", "prototype_polyphase_filter_decimation", "prototype_polyphase_filter_interpolation", "sampling_clock_impairments", "slice_head_tail_to_length", "slice_tail_to_length", "srrc_taps", "upconversion_anti_aliasing_filter", "update_signal_snr_bandwidth", "upper_freq_from_center_freq_bandwidth", "upsample"]
 
+# floor applied to linear power spectrogram (1e-10 in power is -100 dB relative to strongest bin)
+_POWER_FLOOR_RATIO = 1e-10
+
 
 @lru_cache(maxsize=1)
 def torchsig_cache_version() -> str:
@@ -995,70 +998,106 @@ def frequency_shift(
 def compute_spectrogram(
     iq_samples: np.ndarray, fft_size: int, fft_stride: int
 ) -> np.ndarray:
-    """Computes two-dimensional spectrogram values in dB.
+    """Computes two-dimensional spectrogram values in dB, in image row order.
+
+    Output shape is ``(fft_size, num_frames)`` with ``num_frames =
+    1 + (num_samples - fft_size) // fft_stride``, where ``num_samples`` is the
+    input length after any zero padding. Trailing samples that do not fill a
+    complete frame are discarded.
+
+    Axis 0 is frequency, ordered from highest to lowest so that row 0 is the top
+    of the rendered image, matching waterfall-display convention and raster
+    image convention (``imshow`` with ``origin='upper'``, PNG encoding, and
+    top-left-origin bounding box formats). For a sample rate ``fs``::
+ 
+        f[row] = (fft_size // 2 - 1 - row) * fs / fft_size
+ 
+    so row 0 holds ``+fs/2 - fs/fft_size`` and row ``fft_size - 1`` holds
+    ``-fs/2``. This is the raw FFT ordering after ``fftshift`` followed by a
+    reversal.
+ 
+    Axis 1 is time. Column ``j`` covers input samples
+    ``[j * fft_stride, j * fft_stride + fft_size)``; ``center=False``: no
+    edge padding is inserted, so column index maps linearly to sample index with
+    no offset.
+ 
+    Values are power in dB, floored 100 dB below the peak bin. No window or
+    length normalization is applied, so absolute levels are not comparable
+    across different values of ``fft_size``; only relative levels within one
+    spectrogram are meaningful.
 
     Args:
-        iq_samples (np.ndarray): Input signal.
+        iq_samples (np.ndarray): One-dimensional complex input signal. Zero
+            padded at the end if shorter than ``fft_size``.
         fft_size (int): The size of the FFT in number of bins.
         fft_stride (int): The stride is the amount by which the input sample
             pointer increases for each FFT. When fft_stride=fft_size, then there is
-            no overlap of input samples in successive FFTs. When fft_stride=fft_size/2,
-            there is 50% overlap of input samples between successive FFTs.
+            no overlap of input samples in successive FFTs. Note: permits strides 
+            larger than fft_size for data subset sampling.
 
     Raises:
-        ValueError: Throws an error if fft_stride is less than 0 or greater than `fft_size`.
+        ValueError: If ``fft_size`` is not positive. If ``fft_stride`` is not 
+            positive. If ``iq_samples`` is not one dimensional.
 
     Returns:
-        np.ndarray: Two-dimensional array of spectrogram values in dB.
+        np.ndarray: Array of shape ``(fft_size, num_frames)`` of spectrogram
+        values in dB, with descending frequency along axis 0.
     """
-    # error handling
+    # argument error handling
+    if fft_size <= 0:
+        raise ValueError(f"fft_size must be positive, got fft_size={fft_size}.")
+
     if fft_stride <= 0:
-        raise ValueError(f"0 < {fft_stride} <= {fft_size}")
+        raise ValueError(f"fft_stride must be positive, got fft_stride={fft_stride}.")
+
+    # input complex IQ values
+    samples = np.asarray(iq_samples, dtype=TorchSigComplexDataType)
+ 
+    if samples.ndim != 1:
+        raise ValueError(
+            f"iq_samples must be one dimensional, got shape {samples.shape}."
+        )
 
     # input signal is too short and needs to be zero-padded
-    if len(iq_samples) < fft_size:
-        # number of zeros to be padded
-        num_zeros = fft_size - len(iq_samples)
-        # form the zero array
-        zero_padding = np.zeros(num_zeros, dtype=TorchSigComplexDataType)
-        # put zeros at the end
-        iq_samples_formatted = np.concatenate((iq_samples, zero_padding))
-    else:
-        # do not modify input samples
-        iq_samples_formatted = copy(iq_samples)
+    if samples.size < fft_size:
+        zero_padding = np.zeros(
+            fft_size - samples.size, dtype=TorchSigComplexDataType
+        )
+        samples = np.concatenate((samples, zero_padding))
 
     # get reference to spectrogram function
     spectrogram_function = torchaudio.transforms.Spectrogram(
         n_fft=fft_size,
-        window_fn=torch.blackman_window,
+        window_fn=torch.blackman_window, # preference dynamic range over resolution
         win_length=fft_size,
         hop_length=fft_stride,
         center=False,
-        onesided=False,
-        power=2,
+        onesided=False, # complex
+        power=2, # power
     )
 
-    # compute the spectrogram in linear units
-    spectrogram_linear = spectrogram_function(torch.from_numpy(iq_samples_formatted))
+    # compute the spectrogram (STFT) in linear units
+    # linear power, shape (fft_size, num_frames), raw FFT bin order:
+    # DC first, ascending positive bins, then negative bins wrapped to the end
+    spectrogram_linear = spectrogram_function(torch.from_numpy(samples))
 
-    # apply FFT shift
-    spectrogram_linear_fftshift = torch.fft.fftshift(spectrogram_linear, dim=0)
+    # unwrap frequency to ascending order, -fs/2 ... +fs/2 - fs/fft_size
+    spectrogram_linear = torch.fft.fftshift(spectrogram_linear, dim=0)
+
+    # flip to descending order so row 0 is the top of the image
+    spectrogram_linear = torch.flip(spectrogram_linear, dims=(0,))
 
     # convert to numpy types
-    spectrogram_linear_numpy = spectrogram_linear_fftshift.numpy()
+    spectrogram_numpy = spectrogram_linear.numpy()
 
-    # calculate a small epsilon value to replace all zero values
-    epsilon = np.max(np.max(np.abs(spectrogram_linear_numpy))) * np.sqrt(1e-20)
-
-    # find the zero locations, and replace them with tiny values
-    zero_ind_rows, zero_ind_cols = np.where(np.equal(spectrogram_linear_numpy, 0))
-    spectrogram_linear_numpy[zero_ind_rows, zero_ind_cols] = epsilon
-
-    # convert to dB
-    spectrogram_db = 10 * np.log10(spectrogram_linear_numpy)
-
-    # reverse bins order of FFT bins
-    return spectrogram_db[::-1, :]
+    # dB scaling with -100 dB floor
+    peak = spectrogram_numpy.max()
+    floor = (
+        peak * _POWER_FLOOR_RATIO
+        if peak > 0
+        else np.finfo(spectrogram_numpy.dtype).tiny
+    )
+    return 10.0 * np.log10(np.maximum(spectrogram_numpy, floor))
 
 
 def estimate_tone_bandwidth(num_samples: int, sample_rate: float):
