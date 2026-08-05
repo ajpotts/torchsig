@@ -1,0 +1,44 @@
+`HDF5Reader.read()` returns a `torchsig.signals.signal_types.Signal` regardless
+of whether its `data` contains I/Q samples or a spectrogram. `Spectrogram` is a
+transform, not a type retained in the HDF5 file, so there is no built-in
+`isSpectrogram(signal)` check.
+
+If you know the dataset was created with `Spectrogram(fft_size=...)`, validate
+the representation stored in `signal.data` instead:
+
+```python
+from pathlib import Path
+
+import numpy as np
+
+from torchsig.utils.file_handlers.hdf5 import HDF5Reader
+
+
+dataset_root = Path("<parent folder of data.h5>")
+expected_fft_size = 256  # Use the fft_size used to create the dataset.
+
+reader = HDF5Reader(dataset_root)
+try:
+    print(len(reader))
+    signal = reader.read(0)
+finally:
+    reader.teardown()
+
+data = signal.data
+is_spectrogram = (
+    isinstance(data, np.ndarray)
+    and data.ndim == 2
+    and data.shape[0] == expected_fft_size
+    and np.issubdtype(data.dtype, np.floating)
+    and np.all(np.isfinite(data))
+)
+
+print("Test Passed" if is_spectrogram else "Test Failed")
+```
+
+TorchSIG spectrograms are two-dimensional, real-valued arrays in dB, with the
+first dimension equal to `fft_size`. Checking only `data.ndim == 2` is not a
+definitive test because another transform could also produce a two-dimensional
+array. For an authoritative check, record the dataset's transform configuration
+(including `fft_size`) when creating it and validate against that configuration
+when reading it.

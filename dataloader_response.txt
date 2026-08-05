@@ -1,0 +1,157 @@
+Using TorchSIG's dataset creation/loading workflow provides more information
+than opening `data.h5` directly. The important distinction is that a PyTorch
+DataLoader by itself does not write files. `DatasetCreator`, usually supplied
+with a `WorkerSeedingDataLoader`, writes all of the following:
+
+- `data.h5`: samples and per-signal metadata
+- `dataset_info.yaml`: dataset length, seed, target labels, and dataset metadata
+- `writer_info.yaml`: writer status and settings, including whether creation
+  completed and how many items were written
+
+That metadata lets a validation failure explain what is wrong instead of only
+printing "Test Failed".
+
+For example, a spectrogram dataset could be created like this:
+
+```python
+from pathlib import Path
+
+from torchsig.transforms.transforms import Spectrogram
+from torchsig.utils.data_loading import WorkerSeedingDataLoader
+from torchsig.utils.defaults import default_dataset
+from torchsig.utils.writer import DatasetCreator, identity_collate_fn
+
+
+dataset_root = Path("./my_spectrogram_dataset")
+fft_size = 256
+dataset_length = 100
+seed = 42
+
+source_dataset = default_dataset(
+    transforms=[Spectrogram(fft_size=fft_size)],
+    target_labels=[],
+    fft_size=fft_size,
+    seed=seed,
+)
+creation_loader = WorkerSeedingDataLoader(
+    source_dataset,
+    batch_size=8,
+    num_workers=0,
+    seed=seed,
+    collate_fn=identity_collate_fn,
+)
+
+DatasetCreator(
+    dataloader=creation_loader,
+    dataset_length=dataset_length,
+    root=dataset_root,
+    overwrite=True,
+).create()
+```
+
+For a new application, `TorchSigDataModule.from_config(...)` is another good
+option. It configures the spectrogram transform from a
+`TorchSigDatasetConfig`, calls the same creation machinery in `prepare_data()`,
+and exposes train, validation, and test DataLoaders after `setup()`.
+
+Once the dataset has been created, load samples through
+`StaticTorchSigDataset` rather than using `HDF5Reader` directly. The following
+test checks the metadata files and the stored sample, and reports all detected
+problems:
+
+```python
+from pathlib import Path
+
+import numpy as np
+import yaml
+
+from torchsig.datasets.datasets import StaticTorchSigDataset
+from torchsig.utils.data_loading import WorkerSeedingDataLoader
+
+
+dataset_root = Path("./my_spectrogram_dataset")
+expected_fft_size = 256
+expected_dataset_length = 100
+
+dataset_info_path = dataset_root / "dataset_info.yaml"
+writer_info_path = dataset_root / "writer_info.yaml"
+problems = []
+
+if not dataset_info_path.is_file():
+    problems.append(f"Missing metadata file: {dataset_info_path}")
+if not writer_info_path.is_file():
+    problems.append(f"Missing writer status file: {writer_info_path}")
+
+dataset_info = (
+    yaml.safe_load(dataset_info_path.read_text()) or {}
+    if dataset_info_path.is_file()
+    else {}
+)
+writer_info = (
+    yaml.safe_load(writer_info_path.read_text()) or {}
+    if writer_info_path.is_file()
+    else {}
+)
+
+if dataset_info.get("dataset_length") != expected_dataset_length:
+    problems.append(
+        "Unexpected dataset length: "
+        f"metadata says {dataset_info.get('dataset_length')!r}, "
+        f"expected {expected_dataset_length}"
+    )
+
+metadata = dataset_info.get("dataset_metadata", {})
+if metadata.get("fft_size") != expected_fft_size:
+    problems.append(
+        "Unexpected FFT size: "
+        f"metadata says {metadata.get('fft_size')!r}, "
+        f"expected {expected_fft_size}"
+    )
+
+if writer_info.get("complete") is not True:
+    problems.append("Dataset creation did not complete successfully")
+if writer_info.get("items_written") != expected_dataset_length:
+    problems.append(
+        f"Writer produced {writer_info.get('items_written')!r} items; "
+        f"expected {expected_dataset_length}"
+    )
+
+dataset = StaticTorchSigDataset(root=dataset_root, target_labels=[])
+loader = WorkerSeedingDataLoader(dataset, batch_size=1, num_workers=0)
+batch = next(iter(loader))
+data = np.asarray(batch)
+
+# Remove the batch dimension before validating the stored representation.
+sample = data[0]
+if sample.ndim != 2:
+    problems.append(
+        f"Expected a two-dimensional spectrogram, got shape {sample.shape}"
+    )
+elif sample.shape[0] != expected_fft_size:
+    problems.append(
+        f"Expected {expected_fft_size} frequency bins, got {sample.shape[0]}"
+    )
+
+if not np.issubdtype(sample.dtype, np.floating):
+    problems.append(f"Expected real floating-point data, got {sample.dtype}")
+if not np.all(np.isfinite(sample)):
+    problems.append("Spectrogram contains NaN or infinite values")
+
+if problems:
+    print("Test Failed:")
+    for problem in problems:
+        print(f"- {problem}")
+else:
+    print(
+        "Test Passed: "
+        f"loaded {len(dataset)} spectrograms with "
+        f"fft_size={expected_fft_size}; writer metadata is complete"
+    )
+```
+
+If the dataset was created from a `TorchSigDatasetConfig`, retain that config
+file as well. Its `output_representation == "spectrogram"` and
+`output_spectrogram_fft` fields provide the authoritative declaration of the
+intended representation. `dataset_info.yaml` describes the generated dataset,
+but it does not currently record the transform class itself, so the array shape
+and dtype checks are still useful.

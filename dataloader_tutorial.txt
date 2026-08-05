@@ -1,0 +1,408 @@
+TorchSIG DataLoader Tutorial for Beginners
+==========================================
+
+1. What is a DataLoader?
+------------------------
+
+A dataset describes how to obtain one example. A DataLoader repeatedly asks
+the dataset for examples and groups them into batches.
+
+In TorchSIG, these objects have different jobs:
+
+- `TorchSigIterableDataset` generates new synthetic signals.
+- `StaticTorchSigDataset` reads signals that were previously saved to disk.
+- `WorkerSeedingDataLoader` creates batches and handles reproducible random
+  seeds, including when worker processes are used.
+- `DatasetCreator` consumes a DataLoader and writes a dataset to disk.
+
+A DataLoader does not save a dataset by itself. Use `DatasetCreator` when you
+want `data.h5`, `dataset_info.yaml`, and `writer_info.yaml`.
+
+
+2. Generate a few I/Q examples in memory
+-----------------------------------------
+
+This is the smallest example. Nothing is written to disk.
+
+```python
+from torchsig.utils.data_loading import WorkerSeedingDataLoader
+from torchsig.utils.defaults import default_dataset
+
+
+dataset = default_dataset(
+    num_iq_samples_dataset=4096,
+    num_signals_min=1,
+    num_signals_max=1,
+    target_labels=[],
+    seed=42,
+)
+
+loader = WorkerSeedingDataLoader(
+    dataset,
+    batch_size=4,
+    num_workers=0,
+    seed=42,
+)
+
+batch = next(iter(loader))
+print(type(batch))
+print(batch.shape)
+```
+
+`batch_size=4` asks for four examples at a time. Starting with
+`num_workers=0` is helpful while learning because all generation happens in the
+main Python process and error messages are easier to read.
+
+For raw complex I/Q data, the expected batch shape is generally:
+
+```text
+(batch size, number of I/Q samples)
+```
+
+
+3. Generate spectrogram batches
+-------------------------------
+
+A transform can change each generated I/Q array into a spectrogram before the
+DataLoader creates the batch.
+
+```python
+from torchsig.transforms.transforms import Spectrogram
+from torchsig.utils.data_loading import WorkerSeedingDataLoader
+from torchsig.utils.defaults import default_dataset
+
+
+fft_size = 256
+
+dataset = default_dataset(
+    num_iq_samples_dataset=4096,
+    fft_size=fft_size,
+    transforms=[Spectrogram(fft_size=fft_size)],
+    target_labels=[],
+    seed=42,
+)
+
+loader = WorkerSeedingDataLoader(
+    dataset,
+    batch_size=4,
+    num_workers=0,
+    seed=42,
+)
+
+batch = next(iter(loader))
+print(batch.shape)
+print(batch.dtype)
+```
+
+A spectrogram batch should have three dimensions:
+
+```text
+(batch size, frequency bins, time bins)
+```
+
+The frequency-bin dimension should equal `fft_size`. Spectrogram values are
+real floating-point values in dB, whereas untransformed I/Q samples are complex.
+
+
+4. Generate labels with the data
+--------------------------------
+
+Set `target_labels` when a training loop needs both input data and a target.
+
+```python
+from torchsig.utils.data_loading import WorkerSeedingDataLoader
+from torchsig.utils.defaults import default_dataset
+
+
+dataset = default_dataset(
+    num_iq_samples_dataset=4096,
+    num_signals_min=1,
+    num_signals_max=1,
+    target_labels=["class_index"],
+    seed=42,
+)
+
+loader = WorkerSeedingDataLoader(
+    dataset,
+    batch_size=4,
+    num_workers=0,
+    seed=42,
+)
+
+data, class_indices = next(iter(loader))
+print("Data shape:", data.shape)
+print("Class indices:", class_indices)
+```
+
+Use `target_labels=[]` when you want only the data. Use a non-empty list when
+you want labeled examples.
+
+
+5. Save a generated dataset to disk
+-----------------------------------
+
+The following example creates ten spectrograms. Use a new or empty output
+folder because `overwrite=True` permits the writer to replace an existing
+TorchSIG dataset there.
+
+```python
+from pathlib import Path
+
+from torchsig.transforms.transforms import Spectrogram
+from torchsig.utils.data_loading import WorkerSeedingDataLoader
+from torchsig.utils.defaults import default_dataset
+from torchsig.utils.writer import DatasetCreator, identity_collate_fn
+
+
+dataset_root = Path("./example_spectrogram_dataset")
+dataset_length = 10
+fft_size = 256
+seed = 42
+
+source_dataset = default_dataset(
+    num_iq_samples_dataset=4096,
+    fft_size=fft_size,
+    transforms=[Spectrogram(fft_size=fft_size)],
+    target_labels=[],
+    seed=seed,
+)
+
+creation_loader = WorkerSeedingDataLoader(
+    source_dataset,
+    batch_size=4,
+    num_workers=0,
+    seed=seed,
+    collate_fn=identity_collate_fn,
+)
+
+creator = DatasetCreator(
+    dataloader=creation_loader,
+    dataset_length=dataset_length,
+    root=dataset_root,
+    overwrite=True,
+)
+creator.create()
+```
+
+After creation, the folder should contain:
+
+```text
+example_spectrogram_dataset/
+├── data.h5
+├── dataset_info.yaml
+└── writer_info.yaml
+```
+
+`dataset_info.yaml` describes the dataset. `writer_info.yaml` records how the
+writer ran and whether it completed successfully.
+
+
+6. Load the saved dataset
+-------------------------
+
+Use `StaticTorchSigDataset` to read a saved dataset and a DataLoader to create
+batches from it.
+
+```python
+from pathlib import Path
+
+from torchsig.datasets.datasets import StaticTorchSigDataset
+from torchsig.utils.data_loading import WorkerSeedingDataLoader
+
+
+dataset_root = Path("./example_spectrogram_dataset")
+
+dataset = StaticTorchSigDataset(
+    root=dataset_root,
+    target_labels=[],
+)
+loader = WorkerSeedingDataLoader(
+    dataset,
+    batch_size=2,
+    num_workers=0,
+)
+
+print("Saved examples:", len(dataset))
+
+for batch_number, batch in enumerate(loader):
+    print(f"Batch {batch_number}: shape={batch.shape}, dtype={batch.dtype}")
+
+# Close the lazily opened HDF5 file when this dataset is no longer needed.
+dataset.reader.teardown()
+```
+
+The final batch can be smaller than `batch_size` when the dataset length is not
+evenly divisible by the batch size.
+
+
+7. Inspect the metadata files
+-----------------------------
+
+TorchSIG writes YAML, which can be read as a Python dictionary.
+
+```python
+from pathlib import Path
+
+import yaml
+
+
+dataset_root = Path("./example_spectrogram_dataset")
+
+dataset_info = yaml.safe_load(
+    (dataset_root / "dataset_info.yaml").read_text()
+) or {}
+writer_info = yaml.safe_load(
+    (dataset_root / "writer_info.yaml").read_text()
+) or {}
+
+print("Dataset length:", dataset_info.get("dataset_length"))
+print("Seed:", dataset_info.get("seed"))
+print("Target labels:", dataset_info.get("target_labels"))
+print("FFT size:", dataset_info.get("dataset_metadata", {}).get("fft_size"))
+print("Writer complete:", writer_info.get("complete"))
+print("Items written:", writer_info.get("items_written"))
+```
+
+Prefer `.get(...)` while inspecting metadata so a missing field produces
+`None` instead of immediately raising `KeyError`.
+
+
+8. A beginner-friendly validation test
+---------------------------------------
+
+This example collects useful error messages and reports all problems together.
+
+```python
+from pathlib import Path
+
+import numpy as np
+import yaml
+
+from torchsig.datasets.datasets import StaticTorchSigDataset
+
+
+dataset_root = Path("./example_spectrogram_dataset")
+expected_length = 10
+expected_fft_size = 256
+problems = []
+
+dataset_info_path = dataset_root / "dataset_info.yaml"
+writer_info_path = dataset_root / "writer_info.yaml"
+
+if not dataset_info_path.is_file():
+    problems.append(f"Missing {dataset_info_path}")
+if not writer_info_path.is_file():
+    problems.append(f"Missing {writer_info_path}")
+
+dataset_info = (
+    yaml.safe_load(dataset_info_path.read_text()) or {}
+    if dataset_info_path.is_file()
+    else {}
+)
+writer_info = (
+    yaml.safe_load(writer_info_path.read_text()) or {}
+    if writer_info_path.is_file()
+    else {}
+)
+
+if dataset_info.get("dataset_length") != expected_length:
+    problems.append(
+        f"Expected dataset_length={expected_length}, "
+        f"found {dataset_info.get('dataset_length')!r}"
+    )
+
+stored_fft_size = dataset_info.get("dataset_metadata", {}).get("fft_size")
+if stored_fft_size != expected_fft_size:
+    problems.append(
+        f"Expected fft_size={expected_fft_size}, found {stored_fft_size!r}"
+    )
+
+if writer_info.get("complete") is not True:
+    problems.append("The writer did not mark dataset creation as complete")
+if writer_info.get("items_written") != expected_length:
+    problems.append(
+        f"Expected {expected_length} written items, "
+        f"found {writer_info.get('items_written')!r}"
+    )
+
+dataset = StaticTorchSigDataset(root=dataset_root, target_labels=[])
+try:
+    sample = dataset[0]
+finally:
+    dataset.reader.teardown()
+
+if not isinstance(sample, np.ndarray):
+    problems.append(f"Expected a NumPy array, found {type(sample).__name__}")
+else:
+    if sample.ndim != 2:
+        problems.append(f"Expected a 2-D spectrogram, found shape {sample.shape}")
+    elif sample.shape[0] != expected_fft_size:
+        problems.append(
+            f"Expected {expected_fft_size} frequency bins, "
+            f"found {sample.shape[0]}"
+        )
+    if not np.issubdtype(sample.dtype, np.floating):
+        problems.append(f"Expected floating-point data, found {sample.dtype}")
+    if not np.all(np.isfinite(sample)):
+        problems.append("The sample contains NaN or infinite values")
+
+if problems:
+    print("Test Failed")
+    for problem in problems:
+        print(f"- {problem}")
+else:
+    print(
+        "Test Passed: "
+        f"{expected_length} spectrograms, fft_size={expected_fft_size}, "
+        "and dataset creation completed successfully"
+    )
+```
+
+
+9. Reproducibility
+------------------
+
+Use the same seed for the dataset and `WorkerSeedingDataLoader` when you want a
+repeatable generation run:
+
+```python
+seed = 42
+dataset = default_dataset(seed=seed, target_labels=[])
+loader = WorkerSeedingDataLoader(dataset, seed=seed, num_workers=0)
+```
+
+When increasing `num_workers`, keep using `WorkerSeedingDataLoader`. It gives
+each worker a distinct but reproducible random stream. Exact reproducibility
+also requires keeping the TorchSIG version, configuration, transforms, and
+dataset metadata the same.
+
+
+10. Common mistakes
+-------------------
+
+1. Passing the `data.h5` path to `StaticTorchSigDataset`.
+   Pass its parent dataset folder instead.
+
+2. Expecting a DataLoader to create files.
+   A DataLoader only produces batches. Pass it to `DatasetCreator` to save the
+   data and metadata files.
+
+3. Forgetting the batch dimension.
+   A single spectrogram may have shape `(frequency, time)`, while a batch has
+   shape `(batch, frequency, time)`.
+
+4. Using `target_labels=None` when only an array is expected.
+   Use `target_labels=[]` for data-only output. A non-empty list returns data
+   together with labels.
+
+5. Starting with many workers.
+   Begin with `num_workers=0`. Increase it after the code works correctly.
+
+6. Treating every two-dimensional array as proof of a spectrogram.
+   Also check the real floating dtype and expected FFT dimension, and retain the
+   original `TorchSigDatasetConfig` when an authoritative representation record
+   is required.
+
+7. Ignoring `writer_info.yaml`.
+   Check that `complete` is true and `items_written` matches the expected
+   dataset length before training with the saved data.
