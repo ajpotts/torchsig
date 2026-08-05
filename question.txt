@@ -1,0 +1,17 @@
+# Code that I have so far
+from pathlib import Path
+from torchsig.utils.file_handlers.hdf5 import HDF5Reader
+
+reader = HDF5Reader(<parent folder of dataset file>)
+print(len(reader))
+
+signal = reader.read(0)
+reader.teardown()
+
+print(type(signal))
+
+# Code that I don't know how to write
+if isSpectrogram(signal):
+  print('Test Passed')
+else:
+  print('Test Failed')
