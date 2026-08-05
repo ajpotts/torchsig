@@ -1,19 +1,65 @@
 """Some classes that define abstract data structures in other class relationships
 This code is used behind the scenes in several places, and sensitive to errors; modify with caution
 """
+
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Literal
 
+from torchsig.utils.metadata_debug_mixin import MetadataDebugMixin
+from torchsig.utils.metadata_logging import (
+    MetadataDebugConfig,
+    MetadataDebugStatistics,
+)
 from torchsig.utils.random import Seedable
 
-__all__ = ["MetadataAttributeError", "HierarchicalMetadataObject"]
+__all__ = [
+    "HierarchicalMetadataObject",
+    "MetadataAttributeError",
+    "MetadataDebugConfig",
+    "MetadataDebugStatistics",
+    "MetadataResolution",
+]
+
+
+@dataclass(frozen=True)
+class MetadataResolution:
+    """Describe how a metadata key resolves through an object hierarchy.
+
+    The result intentionally excludes the metadata value so diagnostic output
+    can be logged or displayed without exposing large or sensitive values.
+
+    Attributes:
+        key: Metadata key that was inspected.
+        found: Whether the key resolves to a value.
+        source: Whether the winning value is local, inherited, or missing.
+        depth: Number of parent links to the winning value, or ``None`` when
+            the key is missing.
+        owner_type: Class name of the object owning the winning value, or
+            ``None`` when the key is missing.
+        overrides_parent: Whether the winning value shadows another value for
+            the same key farther up the hierarchy.
+        cycle_detected: Whether parent traversal encountered a cycle.
+        path: Class names visited during parent traversal.
+    """
+
+    key: str
+    found: bool
+    source: Literal["local", "inherited", "missing"]
+    depth: int | None
+    owner_type: str | None
+    overrides_parent: bool
+    cycle_detected: bool
+    path: tuple[str, ...]
+
 
 class MetadataAttributeError(AttributeError):
     """Custom exception for metadata attribute errors.
 
     This exception is raised when there are issues accessing or manipulating metadata fields.
     """
+
     def __init__(self, message: str, **kwargs: Any) -> None:
         """Initialize the MetadataAttributeError.
 
@@ -27,7 +73,7 @@ class MetadataAttributeError(AttributeError):
         super().__init__(message, **kwargs)
 
 
-class HierarchicalMetadataObject(Seedable):
+class HierarchicalMetadataObject(MetadataDebugMixin, Seedable):
     """A class for representing objects which have metadata in a hierarchical relationship.
 
     Metadata can be accessed directly (e.g., obj["some_field"]), or through the metadata field (e.g., obj.metadata["some_field"]).
@@ -44,7 +90,7 @@ class HierarchicalMetadataObject(Seedable):
         seed: int | None = None,
         parent: HierarchicalMetadataObject | None = None,
         metadata: dict[str, Any] | None = None,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> None:
         """Initialize the HierarchicalMetadataObject.
 
@@ -57,6 +103,7 @@ class HierarchicalMetadataObject(Seedable):
         Note:
             This will override fields in the object passed in with arguments directly given to the generator; useful for making multiple similar but not identical objects.
         """
+        self._initialize_metadata_debug()
         self._metadata = {}
         Seedable.__init__(self, seed=seed, parent=parent)
         if metadata is not None and len(metadata.keys()) > 0:
@@ -86,6 +133,84 @@ class HierarchicalMetadataObject(Seedable):
         for key in self.keys():
             full_metadata[key] = self[key]
         return full_metadata
+
+    def explain_metadata(self, key: str) -> MetadataResolution:
+        """Explain where a metadata key resolves without returning its value.
+
+        This diagnostic method walks the object's metadata-parent hierarchy and
+        reports the first object defining ``key``. It also reports whether that
+        definition overrides another parent definition and safely terminates if
+        a malformed hierarchy contains a parent cycle. Ordinary item and
+        attribute lookup behavior is not modified.
+
+        Args:
+            key: Metadata key to inspect.
+
+        Returns:
+            Structured information describing the key's resolution.
+
+        Raises:
+            TypeError: If ``key`` is not a string.
+        """
+        if not isinstance(key, str):
+            raise TypeError("metadata key must be a string")
+
+        current: HierarchicalMetadataObject | None = self
+        visited: set[int] = set()
+        path: list[str] = []
+        owner: HierarchicalMetadataObject | None = None
+        owner_depth: int | None = None
+        overrides_parent = False
+        cycle_detected = False
+        depth = 0
+
+        while isinstance(current, HierarchicalMetadataObject):
+            current_id = id(current)
+            if current_id in visited:
+                cycle_detected = True
+                break
+
+            visited.add(current_id)
+            path.append(type(current).__name__)
+
+            current_metadata = object.__getattribute__(current, "_metadata")
+            defines_key = key == "metadata" and depth == 0
+            defines_key = defines_key or key in current_metadata
+            if defines_key:
+                if owner is None:
+                    owner = current
+                    owner_depth = depth
+                else:
+                    overrides_parent = True
+
+            parent = current.parent
+            if not isinstance(parent, HierarchicalMetadataObject):
+                break
+            current = parent
+            depth += 1
+
+        if owner is None:
+            return MetadataResolution(
+                key=key,
+                found=False,
+                source="missing",
+                depth=None,
+                owner_type=None,
+                overrides_parent=False,
+                cycle_detected=cycle_detected,
+                path=tuple(path),
+            )
+
+        return MetadataResolution(
+            key=key,
+            found=True,
+            source="local" if owner_depth == 0 else "inherited",
+            depth=owner_depth,
+            owner_type=type(owner).__name__,
+            overrides_parent=overrides_parent,
+            cycle_detected=cycle_detected,
+            path=tuple(path),
+        )
 
     def keys(self) -> list[str]:
         """Get all metadata keys.
@@ -145,6 +270,13 @@ class HierarchicalMetadataObject(Seedable):
             >>> obj["key"]
             'value'
         """
+        debug_enabled = object.__getattribute__(self, "__dict__").get(
+            "_metadata_debug_enabled",
+            False,
+        )
+        if debug_enabled and isinstance(key, str):
+            self._log_metadata_event("lookup", key)
+
         if key == "_metadata":
             raise KeyError(
                 "unknown bug occured for:"
@@ -180,6 +312,12 @@ class HierarchicalMetadataObject(Seedable):
             'value'
         """
         self._metadata[key] = value
+        debug_enabled = object.__getattribute__(self, "__dict__").get(
+            "_metadata_debug_enabled",
+            False,
+        )
+        if debug_enabled and isinstance(key, str):
+            self._log_metadata_event("set", key, value)
 
     def __delitem__(self, key: str) -> None:
         """Delete a metadata value by key.
@@ -193,7 +331,14 @@ class HierarchicalMetadataObject(Seedable):
             >>> "key" in obj.keys()
             False
         """
+        deleted_value = self._metadata[key]
         del self._metadata[key]
+        debug_enabled = object.__getattribute__(self, "__dict__").get(
+            "_metadata_debug_enabled",
+            False,
+        )
+        if debug_enabled and isinstance(key, str):
+            self._log_metadata_event("delete", key, deleted_value)
 
     def key_lookup(self, key: str) -> Any:
         """Lookup a metadata key with enhanced error reporting.
@@ -221,6 +366,8 @@ class HierarchicalMetadataObject(Seedable):
     def __setstate__(self, data):
         """Workaround pickling with multiple workers."""
         self.__dict__.update(data)
+        self.__dict__.setdefault("_metadata_debug_enabled", False)
+        self.__dict__.setdefault("_metadata_debug_session", None)
 
     def __getattribute__(self, key: str) -> Any:
         """Get an attribute, falling back to metadata lookup if not found.
@@ -245,3 +392,7 @@ class HierarchicalMetadataObject(Seedable):
             raise
         except AttributeError:
             return self.key_lookup(key)
+
+    def _is_metadata_debug_target(self, target: Any) -> bool:
+        """Return whether an object supports hierarchical metadata debugging."""
+        return isinstance(target, HierarchicalMetadataObject)

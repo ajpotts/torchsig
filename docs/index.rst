@@ -20,6 +20,7 @@ TorchSig
     signals
     transforms
     metadata_transforms
+    metadata_debugging
     utils
     api
 

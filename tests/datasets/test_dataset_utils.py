@@ -9,6 +9,7 @@ from torchsig.datasets.dataset_utils import (
     frequency_shift_signal,
     save_type,
 )
+from torchsig.signals.signal_types import Signal
 
 
 class DummySignal:
@@ -193,6 +194,43 @@ def test_frequency_shift_signal_filters_lower_edge_aliasing(
     assert result["center_freq_set"] is True
 
     anti_aliasing_filter_mock.assert_called_once()
+
+
+@patch("torchsig.datasets.dataset_utils.upconversion_anti_aliasing_filter")
+@patch("torchsig.datasets.dataset_utils.frequency_shift")
+def test_frequency_shift_signal_recalculates_edges_after_alias_filtering(
+    frequency_shift_mock,
+    anti_aliasing_filter_mock,
+) -> None:
+    """Final edges must use the center and bandwidth returned by filtering."""
+    signal = Signal(
+        data=np.ones(32, dtype=np.complex64),
+        center_freq=0.0,
+        bandwidth=20.0,
+    )
+    frequency_shift_mock.return_value = signal.data.copy()
+    anti_aliasing_filter_mock.return_value = (
+        signal.data.copy(),
+        44.0,
+        12.0,
+    )
+
+    result = frequency_shift_signal(
+        signal=signal,
+        center_freq_min=45.0,
+        center_freq_max=45.0,
+        sample_rate=100.0,
+        frequency_max=50.0,
+        frequency_min=-50.0,
+        random_generator=np.random.default_rng(42),
+    )
+
+    assert result.center_freq == pytest.approx(44.0)
+    assert result.bandwidth == pytest.approx(12.0)
+    assert result.lower_freq == pytest.approx(38.0)
+    assert result.upper_freq == pytest.approx(50.0)
+    assert "_lower_frequency" not in result.metadata
+    assert "_upper_frequency" not in result.metadata
 
 
 @patch("torchsig.datasets.dataset_utils.np.random.default_rng")

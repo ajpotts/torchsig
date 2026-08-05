@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, ClassVar
 
+import numpy as np
 import yaml
 
 from torchsig.signals.signal_types import Signal
@@ -15,8 +16,10 @@ from torchsig.utils.printing import generate_repr_str
 __all__ = [
     "GroupingLabel",
     "MetadataTransform",
+    "MultiHotLabel",
     "YOLOLabel",
 ]
+
 
 ## Base/Helper Classes
 class MetadataTransform(Transform):
@@ -63,9 +66,7 @@ class MetadataTransform(Transform):
             raise TypeError(f"input ({type(signal)}) is not a Signal object.")
         for required_metadatum in self.required_metadata:
             if not hasattr(signal, required_metadatum):
-                raise ValueError(
-                    f"key: {required_metadatum} is missing from signal metadata, but is required by {self.__class__.__name__}"
-                )
+                raise ValueError(f"key: {required_metadatum} is missing from signal metadata, but is required by {self.__class__.__name__}")
         return signal
 
     def __call__(self, signal: Signal) -> Signal:
@@ -100,6 +101,106 @@ class MetadataTransform(Transform):
             A string representation of the transform object.
         """
         return generate_repr_str(self, exclude_params=["required_metadata"])
+
+
+class MultiHotLabel(MetadataTransform):
+    """Add a sample-level multi-hot classification label.
+
+    Each class present in a signal's components is represented by a ``1`` in
+    the output vector. Repeated instances of the same class still produce a
+    single ``1``. For a signal without components, its own ``class_index`` is
+    used. An empty composite signal produces an all-zero vector.
+
+    This transform is intended for multilabel classification of composite
+    samples such as wideband signals. The number of classes can be supplied
+    explicitly or inferred from the signal's ``class_names`` metadata.
+
+    Args:
+        num_classes: Length of the output vector. If ``None``, infer the
+            length from the signal's ``class_names`` metadata.
+        output_key: Metadata key under which to store the vector.
+        **kwargs: Additional keyword arguments passed to the parent class.
+
+    Attributes:
+        targets_metadata: Metadata fields added by the transform.
+    """
+
+    def __init__(
+        self,
+        num_classes: int | None = None,
+        output_key: str = "multi_hot_label",
+        **kwargs,
+    ) -> None:
+        if num_classes is not None and (not isinstance(num_classes, int) or isinstance(num_classes, bool) or num_classes < 1):
+            raise ValueError("num_classes must be a positive integer or None")
+        if not isinstance(output_key, str) or not output_key:
+            raise ValueError("output_key must be a non-empty string")
+
+        super().__init__(**kwargs)
+        self.num_classes = num_classes
+        self.output_key = output_key
+        self.targets_metadata = [output_key]
+
+    def __call__(self, signal: Signal) -> Signal:
+        """Add a multi-hot vector representing all classes in ``signal``.
+
+        Args:
+            signal: Signal whose component class indices should be encoded.
+
+        Returns:
+            The input signal with the sample-level label added.
+
+        Raises:
+            TypeError: If ``signal`` is not a ``Signal`` or a class index is
+                not an integer.
+            ValueError: If the class count cannot be inferred or a class
+                index is outside the output vector.
+        """
+        self.__validate__(signal)
+
+        num_classes = self.num_classes
+        if num_classes is None:
+            metadata = signal.get_full_metadata()
+            if "class_names" not in metadata:
+                raise ValueError("num_classes was not provided and class_names is missing from signal metadata")
+            num_classes = len(metadata["class_names"])
+            if num_classes < 1:
+                raise ValueError("class_names must contain at least one class")
+
+        label = np.zeros(num_classes, dtype=np.float32)
+        if signal.component_signals:
+            signals = signal.component_signals
+        elif "class_index" in signal.metadata:
+            signals = [signal]
+        else:
+            signals = []
+
+        for component in signals:
+            if not hasattr(component, "class_index"):
+                raise ValueError("class_index is missing from signal metadata")
+            class_index = component.class_index
+            if not isinstance(class_index, (int, np.integer)) or isinstance(class_index, (bool, np.bool_)):
+                raise TypeError("class_index must be an integer")
+            if class_index < 0 or class_index >= num_classes:
+                raise ValueError(f"class_index {class_index} is outside [0, {num_classes})")
+            label[int(class_index)] = 1.0
+
+        signal[self.output_key] = label
+        return signal
+
+    def __apply__(self, signal: Signal) -> Signal:
+        """Apply the transform to a single signal.
+
+        ``MultiHotLabel`` aggregates a complete sample in ``__call__`` and
+        therefore does not apply labels independently to components.
+
+        Args:
+            signal: Signal to transform.
+
+        Returns:
+            The transformed signal.
+        """
+        return self(signal)
 
 
 class YOLOLabel(MetadataTransform):
@@ -147,9 +248,7 @@ class YOLOLabel(MetadataTransform):
         x_center = signal.start + (width / 2.0)
         # normalize center frequency with sample rate
         # subtract from 1 since (0,0) for YOLO is upper left, but we define (0,0) lower left
-        y_center = (
-            1 - ((signal.sample_rate / 2.0) + signal.center_freq) / signal.sample_rate
-        )
+        y_center = 1 - ((signal.sample_rate / 2.0) + signal.center_freq) / signal.sample_rate
         yolo_label = (class_index, x_center, y_center, width, height)
         signal["yolo_label"] = yolo_label
         return signal
@@ -253,9 +352,7 @@ class GroupingLabel(MetadataTransform):
         self.groups = grouping_config.get("groups")
 
         self._validate_config()
-        self._compiled_rules = [
-            self._compile_rule(group) for group in self.groups
-        ]
+        self._compiled_rules = [self._compile_rule(group) for group in self.groups]
 
         super().__init__(required_metadata=[self.source], **kwargs)
         self.targets_metadata = [self.name_label, self.index_label]
@@ -306,15 +403,10 @@ class GroupingLabel(MetadataTransform):
                 "default",
             } & group.keys()
             if len(rule_names) != 1:
-                raise ValueError(
-                    f"group {name!r} must define exactly one of values, "
-                    "regex, formula, or default"
-                )
+                raise ValueError(f"group {name!r} must define exactly one of values, regex, formula, or default")
             if "default" in group:
                 if group["default"] is not True:
-                    raise ValueError(
-                        f"group {name!r} default rule must be true"
-                    )
+                    raise ValueError(f"group {name!r} default rule must be true")
                 if group_index != len(self.groups) - 1:
                     raise ValueError("the default group must be last")
 
@@ -329,29 +421,21 @@ class GroupingLabel(MetadataTransform):
         if "values" in group:
             values = group["values"]
             if not isinstance(values, list) or not values:
-                raise ValueError(
-                    f"group {group['name']!r} values must be a non-empty list"
-                )
+                raise ValueError(f"group {group['name']!r} values must be a non-empty list")
             return "values", values
 
         if "regex" in group:
             pattern = group["regex"]
             if not isinstance(pattern, str) or not pattern:
-                raise ValueError(
-                    f"group {group['name']!r} regex must be a non-empty string"
-                )
+                raise ValueError(f"group {group['name']!r} regex must be a non-empty string")
             try:
                 return "regex", re.compile(pattern)
             except re.error as error:
-                raise ValueError(
-                    f"group {group['name']!r} has invalid regex: {error}"
-                ) from error
+                raise ValueError(f"group {group['name']!r} has invalid regex: {error}") from error
 
         formula = group["formula"]
         if not isinstance(formula, str) or not formula:
-            raise ValueError(
-                f"group {group['name']!r} formula must be a non-empty string"
-            )
+            raise ValueError(f"group {group['name']!r} formula must be a non-empty string")
         return "formula", self._compile_formula(formula)
 
     def _compile_formula(self, formula: str) -> Any:
@@ -364,29 +448,19 @@ class GroupingLabel(MetadataTransform):
         for node in ast.walk(expression):
             if not isinstance(node, self._SAFE_AST_NODES):
                 raise ValueError(  # noqa: TRY004 - invalid formula syntax
-                    f"grouping formula uses unsupported syntax: "
-                    f"{type(node).__name__}"
+                    f"grouping formula uses unsupported syntax: {type(node).__name__}"
                 )
             if isinstance(node, ast.Name) and node.id != "value":
-                raise ValueError(
-                    "grouping formula may only reference the name 'value'"
-                )
-            if (
-                isinstance(node, ast.Attribute)
-                and node.attr not in self._SAFE_STRING_METHODS
-            ):
-                raise ValueError(
-                    f"grouping formula method {node.attr!r} is not allowed"
-                )
+                raise ValueError("grouping formula may only reference the name 'value'")
+            if isinstance(node, ast.Attribute) and node.attr not in self._SAFE_STRING_METHODS:
+                raise ValueError(f"grouping formula method {node.attr!r} is not allowed")
             if isinstance(node, ast.Call):
                 if not isinstance(node.func, ast.Attribute):
                     raise ValueError(  # noqa: TRY004 - invalid formula call
                         "grouping formula may only call safe string methods"
                     )
                 if node.keywords:
-                    raise ValueError(
-                        "grouping formula method calls do not accept keywords"
-                    )
+                    raise ValueError("grouping formula method calls do not accept keywords")
 
         return expression.body
 
@@ -409,14 +483,8 @@ class GroupingLabel(MetadataTransform):
             return set(items)
         if isinstance(node, ast.BoolOp):
             if isinstance(node.op, ast.And):
-                return all(
-                    bool(self._evaluate_formula(item, value))
-                    for item in node.values
-                )
-            return any(
-                bool(self._evaluate_formula(item, value))
-                for item in node.values
-            )
+                return all(bool(self._evaluate_formula(item, value)) for item in node.values)
+            return any(bool(self._evaluate_formula(item, value)) for item in node.values)
         if isinstance(node, ast.UnaryOp):
             operand = self._evaluate_formula(node.operand, value)
             if isinstance(node.op, ast.Not):
@@ -469,14 +537,9 @@ class GroupingLabel(MetadataTransform):
         if isinstance(node, ast.Call):
             target = self._evaluate_formula(node.func.value, value)
             method = getattr(target, node.func.attr)
-            args = [
-                self._evaluate_formula(argument, value)
-                for argument in node.args
-            ]
+            args = [self._evaluate_formula(argument, value) for argument in node.args]
             return method(*args)
-        raise TypeError(
-            f"unsupported validated formula node: {type(node).__name__}"
-        )
+        raise TypeError(f"unsupported validated formula node: {type(node).__name__}")
 
     def _rule_matches(
         self,
@@ -500,21 +563,14 @@ class GroupingLabel(MetadataTransform):
             ValueError: If the source field is missing or no group matches.
         """
         if not hasattr(signal, self.source):
-            raise ValueError(
-                f"GroupingLabel requires signal metadata field {self.source!r}"
-            )
+            raise ValueError(f"GroupingLabel requires signal metadata field {self.source!r}")
         value = getattr(signal, self.source)
 
-        for group_index, (group, compiled_rule) in enumerate(
-            zip(self.groups, self._compiled_rules, strict=True)
-        ):
+        for group_index, (group, compiled_rule) in enumerate(zip(self.groups, self._compiled_rules, strict=True)):
             rule_type, rule = compiled_rule
             if self._rule_matches(rule_type, rule, value):
                 signal[self.name_label] = group["name"]
                 signal[self.index_label] = group_index
                 return signal
 
-        raise ValueError(
-            f"value {value!r} from metadata field {self.source!r} did not "
-            "match any configured group"
-        )
+        raise ValueError(f"value {value!r} from metadata field {self.source!r} did not match any configured group")

@@ -8,6 +8,7 @@ from torchsig.signals.signal_types import Signal
 from torchsig.transforms.metadata_transforms import (
     GroupingLabel,
     MetadataTransform,
+    MultiHotLabel,
     YOLOLabel,
 )
 
@@ -114,6 +115,73 @@ def test_metadata_transform_repr_excludes_required_metadata():
     assert "required_metadata" not in repr_str
 
 
+def test_multi_hot_label_encodes_unique_component_classes():
+    signal = Signal(
+        data=np.zeros(100, dtype=np.complex64),
+        component_signals=[
+            Signal(class_index=1),
+            Signal(class_index=3),
+            Signal(class_index=1),
+        ],
+        class_names=["a", "b", "c", "d"],
+    )
+
+    transformed = MultiHotLabel()(signal)
+
+    np.testing.assert_array_equal(
+        transformed.multi_hot_label,
+        np.array([0, 1, 0, 1], dtype=np.float32),
+    )
+
+
+def test_multi_hot_label_supports_leaf_and_explicit_class_count():
+    signal = Signal(class_index=np.int64(2))
+
+    transformed = MultiHotLabel(num_classes=4, output_key="classes")(signal)
+
+    np.testing.assert_array_equal(
+        transformed.classes,
+        np.array([0, 0, 1, 0], dtype=np.float32),
+    )
+
+
+def test_multi_hot_label_encodes_empty_composite_as_all_zero():
+    signal = Signal(class_names=["a", "b", "c"])
+
+    transformed = MultiHotLabel()(signal)
+
+    np.testing.assert_array_equal(
+        transformed.multi_hot_label,
+        np.zeros(3, dtype=np.float32),
+    )
+
+
+@pytest.mark.parametrize("num_classes", [0, -1, 2.5, True])
+def test_multi_hot_label_rejects_invalid_class_count(num_classes):
+    with pytest.raises(ValueError, match="positive integer"):
+        MultiHotLabel(num_classes=num_classes)
+
+
+def test_multi_hot_label_requires_class_names_when_count_is_not_given():
+    with pytest.raises(ValueError, match="class_names is missing"):
+        MultiHotLabel()(Signal(class_index=0))
+
+
+@pytest.mark.parametrize("class_index", [-1, 3])
+def test_multi_hot_label_rejects_out_of_range_class_index(class_index):
+    signal = Signal(class_index=class_index)
+
+    with pytest.raises(ValueError, match="outside"):
+        MultiHotLabel(num_classes=3)(signal)
+
+
+def test_multi_hot_label_rejects_non_integer_class_index():
+    signal = Signal(class_index=1.5)
+
+    with pytest.raises(TypeError, match="must be an integer"):
+        MultiHotLabel(num_classes=3)(signal)
+
+
 def test_yolo_label_initializes_expected_metadata_fields():
     transform = YOLOLabel()
 
@@ -135,11 +203,11 @@ def test_yolo_label_adds_expected_label_to_component_signal(parent_signal):
     component_signal = transformed_signal.component_signals[0]
     assert component_signal.yolo_label == pytest.approx(
         (
-            3,      # class_index
-            0.5,    # start + duration / 2
-            0.4,    # 1 - ((sample_rate / 2 + center_freq) / sample_rate)
-            0.5,    # duration
-            0.2,    # bandwidth / sample_rate
+            3,  # class_index
+            0.5,  # start + duration / 2
+            0.4,  # 1 - ((sample_rate / 2 + center_freq) / sample_rate)
+            0.5,  # duration
+            0.2,  # bandwidth / sample_rate
         )
     )
 
@@ -251,9 +319,7 @@ def test_grouping_label_values_are_available_as_dataset_targets(parent_signal):
 
 
 def test_grouping_label_rejects_unmatched_value():
-    transform = GroupingLabel(
-        {"groups": [{"name": "linear", "values": ["bpsk"]}]}
-    )
+    transform = GroupingLabel({"groups": [{"name": "linear", "values": ["bpsk"]}]})
 
     with pytest.raises(
         ValueError,

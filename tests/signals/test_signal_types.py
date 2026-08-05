@@ -73,6 +73,64 @@ def test_signal_metadata_frequency_properties_from_center_and_bandwidth():
     assert metadata.upper_freq == pytest.approx(1100.0)
 
 
+def test_signal_metadata_center_freq_update_recalculates_cached_edges():
+    metadata = SignalMetadataObject(
+        center_freq=1000.0,
+        bandwidth=200.0,
+    )
+    assert metadata.lower_freq == pytest.approx(900.0)
+    assert metadata.upper_freq == pytest.approx(1100.0)
+
+    metadata["center_freq"] = -500.0
+
+    assert metadata.lower_freq == pytest.approx(-600.0)
+    assert metadata.upper_freq == pytest.approx(-400.0)
+    assert "_lower_frequency" not in metadata.metadata
+    assert "_upper_frequency" not in metadata.metadata
+
+
+def test_signal_metadata_bandwidth_update_recalculates_cached_edges():
+    metadata = SignalMetadataObject(
+        center_freq=1000.0,
+        bandwidth=200.0,
+    )
+    assert metadata.lower_freq == pytest.approx(900.0)
+    assert metadata.upper_freq == pytest.approx(1100.0)
+
+    metadata["bandwidth"] = 600.0
+
+    assert metadata.lower_freq == pytest.approx(700.0)
+    assert metadata.upper_freq == pytest.approx(1300.0)
+    assert "_lower_frequency" not in metadata.metadata
+    assert "_upper_frequency" not in metadata.metadata
+
+
+def test_signal_metadata_canonical_fields_override_legacy_cached_edges():
+    metadata = SignalMetadataObject(
+        center_freq=1000.0,
+        bandwidth=200.0,
+        _lower_frequency=-999.0,
+        _upper_frequency=999.0,
+    )
+
+    assert metadata.lower_freq == pytest.approx(900.0)
+    assert metadata.upper_freq == pytest.approx(1100.0)
+
+
+def test_signal_metadata_edge_setter_updates_existing_canonical_interval():
+    metadata = SignalMetadataObject(
+        center_freq=1000.0,
+        bandwidth=200.0,
+    )
+
+    metadata.lower_freq = 800.0
+
+    assert metadata.lower_freq == pytest.approx(800.0)
+    assert metadata.upper_freq == pytest.approx(1100.0)
+    assert metadata.center_freq == pytest.approx(950.0)
+    assert metadata.bandwidth == pytest.approx(300.0)
+
+
 def test_signal_metadata_upper_freq_setter_updates_bandwidth_and_center_freq():
     metadata = SignalMetadataObject()
 
@@ -83,6 +141,8 @@ def test_signal_metadata_upper_freq_setter_updates_bandwidth_and_center_freq():
     assert metadata.upper_freq == pytest.approx(1300.0)
     assert metadata.bandwidth == pytest.approx(400.0)
     assert metadata.center_freq == pytest.approx(1100.0)
+    assert "_lower_frequency" not in metadata.metadata
+    assert "_upper_frequency" not in metadata.metadata
 
 
 def test_signal_metadata_lower_freq_setter_updates_bandwidth_and_center_freq():
@@ -94,6 +154,8 @@ def test_signal_metadata_lower_freq_setter_updates_bandwidth_and_center_freq():
     assert metadata.upper_freq == pytest.approx(1300.0)
     assert metadata.bandwidth == pytest.approx(600.0)
     assert metadata.center_freq == pytest.approx(1000.0)
+    assert "_lower_frequency" not in metadata.metadata
+    assert "_upper_frequency" not in metadata.metadata
 
 
 def test_signal_metadata_frequency_properties_raise_when_missing_inputs():
