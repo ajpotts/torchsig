@@ -1,0 +1,104 @@
+Title: Prototype generator-integrated viewport dataset for design feedback
+
+Status: Prototype / request for feedback — not ready to merge
+
+Summary
+-------
+This MR contains an experimental implementation of a generator-integrated
+time-frequency viewport dataset. It explores how TorchSIG could generate a
+larger wideband canvas and return a smaller receiver viewport, including
+signals that intersect only the front, tail, lower-frequency edge, or
+upper-frequency edge of that viewport.
+
+The purpose of this MR is to make the proposed behavior concrete enough to
+review and discuss. It is not intended to be merged in its current form.
+
+Prototype behavior
+------------------
+The prototype:
+
+* Selects viewport time and frequency coordinates before generating a scene.
+* Places generated components so they intersect the selected viewport.
+* Extracts the corresponding IQ interval from the larger canvas.
+* Downconverts and decimates the selected interval to the viewport sample rate.
+* Clips component metadata to the time-frequency intersection.
+* Retains the generated canvas for visualization and debugging.
+* Includes tests and a benchmark intended to exercise the proposed geometry.
+
+This differs from applying a crop after ordinary dataset generation. Selecting
+the viewport first allows the generator to deliberately include partial bursts
+and frequency-edge intersections rather than relying on random chance to
+produce them.
+
+Why the viewport can look vertically flipped
+--------------------------------------------
+The example visualization compares two different processing stages:
+
+* The canvas is retained before dataset-level transforms are applied.
+* The returned viewport is displayed after dataset-level transforms.
+
+TorchSIG impairment level 0 still includes random ML augmentations through
+RandAugment. The available operations include ChannelSwap and TimeReversal,
+which can spectrally invert the IQ data. When one of those operations is
+selected, energy below the viewport center appears above zero in the returned
+viewport, and energy above the center appears below zero. The component
+metadata and bounding boxes are transformed with the signal, so they move with
+the inverted energy.
+
+This can make the viewport appear to have been flipped during trimming, but the
+viewport extraction and downconversion are not performing that inversion. The
+apparent orientation change is caused by comparing the pre-augmentation canvas
+with the post-augmentation viewport. Because the augmentation is random, only
+some generated examples exhibit the flip.
+
+For a direct visual comparison of crop geometry, a follow-on version of the
+example should either disable dataset augmentations or show clearly labeled
+pre- and post-augmentation views.
+
+Feedback requested
+------------------
+Reviewers are asked to comment on the design rather than treat the current API
+as final. In particular:
+
+1. Should viewport selection be integrated into dataset generation, implemented
+   as a transform, or exposed as a separate dataset wrapper?
+2. Should the viewport be selected before component generation so partial
+   intersections can be guaranteed?
+3. What metadata should describe the original canvas coordinates versus the
+   returned viewport coordinates?
+4. Should clipped components retain their original duration and bandwidth in
+   additional fields, or should canonical metadata describe only the visible
+   intersection?
+5. How should anti-alias filtering, downconversion, and decimation be shared
+   with existing TorchSIG DSP utilities?
+6. Should empty viewports be allowed, configurable, or prohibited?
+7. At what stage should component transforms, dataset transforms, and target
+   extraction run?
+8. What public API and naming would best communicate canvas and viewport
+   semantics?
+
+Why this is not merge-ready
+---------------------------
+Before this work can be considered for merge, it needs:
+
+* Agreement on the public API and ownership model.
+* A decision about transform ordering and visualization semantics.
+* Review of metadata conventions for clipped components.
+* Validation of DSP behavior at time and frequency boundaries.
+* Broader deterministic tests, including aliasing and decimation edge cases.
+* Performance and memory measurements on representative wideband datasets.
+* Removal or relocation of prototype and development-only code.
+* User-facing documentation and a supported example.
+* Confirmation that existing dataset generation remains backward compatible.
+
+Current files
+-------------
+The branch currently includes:
+
+* `torchsig/datasets/prototype_viewport_dataset.py`
+* `tests/datasets/test_prototype_viewport_dataset.py`
+* `examples/scripts/dev/prototype_viewport_dataset.py`
+* `benchmarks/optional/benchmark_viewport_dataset.py`
+
+These names and locations are intentionally provisional.
+
