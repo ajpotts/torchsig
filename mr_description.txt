@@ -1,0 +1,29 @@
+Summary
+
+Fixes the DataModule test that could hang and leave orphaned Python worker
+processes when run with num_workers=2.
+
+Changes
+
+- Keeps the regular DataLoader unit test single-process with num_workers=0.
+- Adds a separate test for multiprocessing DataLoaders using num_workers=2.
+- Runs the multiprocessing scenario in an isolated Python subprocess.
+- Creates and releases each train, validation, and test DataLoader individually.
+- Applies a 30-second timeout.
+- Terminates and reaps the entire subprocess group on timeout to prevent
+  orphaned workers.
+- Includes captured subprocess output when reporting failures.
+
+Rationale
+
+Running persistent PyTorch DataLoader workers directly inside pytest can
+deadlock and leave workers running after the test process stops. Isolating the
+multiprocessing coverage provides the same functional validation while giving
+the test explicit control over timeout and cleanup.
+
+Testing
+
+pytest -q tests/datasets/test_datamodules.py \
+  -k 'test_datamodule_dataloaders_return_batches or test_datamodule_dataloaders_with_workers_return_batches'
+
+2 passed, 17 deselected in 5.21s
