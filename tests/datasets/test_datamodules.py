@@ -1,54 +1,189 @@
 """Unit Tests for datamodules"""
 import random
 from pathlib import Path
+from unittest.mock import MagicMock, Mock, call, patch
 
+import numpy as np
 import pytest
 import torch
+from torch.utils.data import DataLoader, Subset
 
-from torchsig.datasets.datamodules import TorchSigDataModule
+from torchsig.datasets.datamodules import (
+    SplitTorchSigDataModule,
+    TorchSigDataModule,
+    _seed_worker,
+    set_global_seed,
+)
+from torchsig.datasets.datasets import TorchSigDatasetConfig
 from torchsig.utils.defaults import TorchSigDefaults
 from torchsig.utils.writer import identity_collate_fn
 
 
-@pytest.mark.filterwarnings(r"ignore:.*fork\(\) may lead to deadlocks in the child:DeprecationWarning")
-@pytest.mark.parametrize(
-    "num_workers, overwrite",
-    [
-        (None, True),  # single worker with overwrite (should create dataset files on disk)
-        (None, False), # single worker with no overwrite (should not error, just skip creation)
-        (2, True),     # multiworker with overwrite (should create dataset files on disk)
-        (3, False),    # multiworker with no overwrite (should not error, just skip creation)
-    ],
-)
-def test_TorchSigDataModule_smoke_and_disk_artifacts(tmp_path, num_workers, overwrite):
-    # tests that TorchSigDataModule can prepare data and set up dataloaders without error, and that
-    # it creates dataset files on disk after prepare_data/setup (multiworker)
-    metadata = TorchSigDefaults().default_dataset_metadata
+@pytest.fixture
+def split_configs():
+    """Return distinct train, validation, and test dataset configs."""
+    metadata = TorchSigDefaults().default_dataset_metadata.copy()
+    metadata.update(
+        {
+            "num_iq_samples_dataset": 4096,
+            "fft_size": 64,
+            "fft_stride": 64,
+            "num_signals_min": 1,
+            "num_signals_max": 1,
+            "signal_duration_in_samples_min": 3276,
+            "signal_duration_in_samples_max": 4096,
+        }
+    )
 
-    dm = TorchSigDataModule(
+    common = {
+        "dataset_id": "test_dataset",
+        "dataset_metadata": metadata,
+        "output_representation": "iq",
+        "output_spectrogram_fft": None,
+        "signal_sampling_mode": "random",
+        "impairment_level": 0,
+    }
+
+    return (
+        TorchSigDatasetConfig(
+            **common,
+            dataset_length=12,
+            seed=11,
+        ),
+        TorchSigDatasetConfig(
+            **common,
+            dataset_length=6,
+            seed=22,
+        ),
+        TorchSigDatasetConfig(
+            **common,
+            dataset_length=4,
+            seed=33,
+        ),
+    )
+
+def _mock_config(
+    *,
+    dataset_id: str = "test_dataset",
+    dataset_length: int,
+    seed: int,
+    output_representation: str = "iq",
+) -> MagicMock:
+    cfg = MagicMock(spec=TorchSigDatasetConfig)
+    cfg.dataset_id = dataset_id
+    cfg.dataset_length = dataset_length
+    cfg.seed = seed
+    cfg.output_representation = output_representation
+    cfg.dataset_metadata = {}
+    return cfg
+
+
+@pytest.mark.parametrize("overwrite", [True, False])
+def test_datamodule_prepare_data_creates_dataset(
+    tmp_path: Path,
+    overwrite: bool,
+) -> None:
+    """Verify prepare_data creates artifacts and respects overwrite."""
+
+    fft_size = 16
+    metadata = TorchSigDefaults().default_dataset_metadata.copy()
+    metadata.update(
+        {
+            "num_iq_samples_dataset": fft_size**2,
+            "fft_size": fft_size,
+            "fft_stride": fft_size,
+            "num_signals_min": 1,
+            "num_signals_max": 1,
+            "signal_duration_in_samples_min": fft_size,
+            "signal_duration_in_samples_max": fft_size**2,
+        }
+    )
+
+    initial = TorchSigDataModule(
         root=tmp_path,
         metadata=metadata,
-        dataset_size=16,
+        dataset_size=4,
+        overwrite=True,
+        impairment_level=0,
+        collate_fn=identity_collate_fn,
+        num_workers=0,
+        create_num_workers=0,
+        seed=42,
+    )
+    initial.prepare_data()
+
+    assert any(tmp_path.iterdir())
+
+    sentinel = tmp_path / "sentinel.txt"
+    sentinel.write_text("existing data")
+
+    datamodule = TorchSigDataModule(
+        root=tmp_path,
+        metadata=metadata,
+        dataset_size=4,
         overwrite=overwrite,
         impairment_level=0,
         collate_fn=identity_collate_fn,
-        num_workers=num_workers,
+        num_workers=0,
+        create_num_workers=0,
+        seed=42,
     )
-    dm.prepare_data()
-    dm.setup()
+    datamodule.prepare_data()
 
-    assert dm.impairment_level == 0
-
-    dls = [dm.train_dataloader(), dm.val_dataloader(), dm.test_dataloader()]
-    for dl in dls:
-        for _batch_idx, data in enumerate(dl): # check all batches (multiworker issues)
-            assert hasattr(data, "__len__")
-            print(len(data))
-
-
-    # At least ensure dataset directory is populated after prepare_data/setup.
-    # (Exact filenames depend on file handler; HDF5 usually uses data.h5.)
     assert any(tmp_path.iterdir())
+    assert sentinel.exists() is not overwrite
+
+
+@pytest.mark.filterwarnings(
+    r"ignore:.*fork\(\) may lead to deadlocks in the child:DeprecationWarning"
+)
+@pytest.mark.parametrize("num_workers", [0, 2])
+def test_datamodule_dataloaders_return_batches(
+    tmp_path: Path,
+    num_workers: int,
+) -> None:
+    """Verify train, validation, and test dataloaders return batches."""
+
+    fft_size = 16
+    metadata = TorchSigDefaults().default_dataset_metadata.copy()
+    metadata.update(
+        {
+            "num_iq_samples_dataset": fft_size**2,
+            "fft_size": fft_size,
+            "fft_stride": fft_size,
+            "num_signals_min": 1,
+            "num_signals_max": 1,
+            "signal_duration_in_samples_min": fft_size,
+            "signal_duration_in_samples_max": fft_size**2,
+        }
+    )
+
+    datamodule = TorchSigDataModule(
+        root=tmp_path,
+        metadata=metadata,
+        dataset_size=6,
+        dataset_splits=[0.5, 0.25, 0.25],
+        batch_size=1,
+        overwrite=True,
+        impairment_level=0,
+        collate_fn=identity_collate_fn,
+        num_workers=num_workers,
+        create_num_workers=0,
+        seed=42,
+    )
+
+    datamodule.prepare_data()
+    datamodule.setup()
+
+    assert datamodule.impairment_level == 0
+
+    for loader in (
+        datamodule.train_dataloader(),
+        datamodule.val_dataloader(),
+        datamodule.test_dataloader(),
+    ):
+        batch = next(iter(loader))
+        assert len(batch) > 0
 
 
 def _first_n_batches(loader, n: int):
@@ -84,101 +219,470 @@ def _tensors_identical(a: torch.Tensor, b: torch.Tensor) -> bool:
     # Same shape → do a normal allclose check.
     return torch.allclose(a, b)
 
-@pytest.mark.parametrize("num_workers", [0, 1, 2])
-def test_dataloader_reproducibility(tmp_path: Path, num_workers: int):
-    # -----------------------------------------------------------------
-    #    Make the *global* Python RNG deterministic (this influences
-    #    the *order* of the shuffling RNG inside DataLoader when `shuffle=True`).
-    # -----------------------------------------------------------------
-    random.seed(0)
 
-    # -----------------------------------------------------------------
-    #    Common configuration for all three DataModule instances
-    # -----------------------------------------------------------------
-    metadata = TorchSigDefaults().default_dataset_metadata
-    dataset_size = 10                     # tiny dataset -- fast to generate
+@pytest.fixture(scope="module")
+def reproducibility_dataset(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[Path, dict]:
+    """Create one small static dataset for reproducibility tests."""
+
+    root = tmp_path_factory.mktemp("dataloader_reproducibility")
+    metadata = TorchSigDefaults().default_dataset_metadata.copy()
+    metadata.update(
+        {
+            "num_iq_samples_dataset": 256,
+            "fft_size": 16,
+            "fft_stride": 16,
+            "num_signals_min": 1,
+            "num_signals_max": 1,
+            "signal_duration_in_samples_min": 16,
+            "signal_duration_in_samples_max": 256,
+        }
+    )
+
+    data_module = TorchSigDataModule(
+        root=root,
+        metadata=metadata,
+        dataset_size=10,
+        dataset_splits=[0.6, 0.2, 0.2],
+        batch_size=2,
+        num_workers=0,
+        create_num_workers=0,
+        seed=42,
+        collate_fn=list,
+    )
+    data_module.prepare_data()
+
+    return root, metadata
+
+
+def _loader_data(loader: DataLoader) -> list[np.ndarray]:
+    """Return copied sample arrays from a complete dataloader iteration."""
+
+    return [
+        signal.data.copy()
+        for batch in loader
+        for signal in batch
+    ]
+
+
+def _assert_same_samples(
+    actual: list[np.ndarray],
+    expected: list[np.ndarray],
+) -> None:
+    """Assert that two loaders returned identical samples in identical order."""
+
+    assert len(actual) == len(expected)
+
+    for actual_sample, expected_sample in zip(actual, expected, strict=True):
+        np.testing.assert_array_equal(actual_sample, expected_sample)
+
+
+@pytest.mark.parametrize("num_workers", [0, 2])
+def test_dataloader_reproducibility(
+    reproducibility_dataset: tuple[Path, dict],
+    num_workers: int,
+) -> None:
+    """Verify seeded data modules produce identical splits and loader order."""
+
+    root, metadata = reproducibility_dataset
+
     shared_kwargs = {
-        "root": tmp_path,
-        "metadata": metadata,
-        "dataset_size": dataset_size,
-        "dataset_splits": [0.6, 0.2, 0.2],   # explicit train/val/test fractions
+        "root": root,
+        "metadata": metadata.copy(),
+        "dataset_size": 10,
+        "dataset_splits": [0.6, 0.2, 0.2],
         "batch_size": 2,
-        "num_workers": num_workers,          # the “problematic” setting we want to test
+        "num_workers": num_workers,
         "seed": 42,
-        "collate_fn": lambda x: x,           # identity -- we only care about the raw Signal objects
+        "collate_fn": list,
     }
 
-    # -----------------------------------------------------------------
-    #    Create the on-disk dataset **once** (deterministic because we pass seed=42)
-    # -----------------------------------------------------------------
-    dm_create = TorchSigDataModule(
-        **shared_kwargs,
-        create_num_workers=0,
+    first = TorchSigDataModule(**shared_kwargs)
+    second = TorchSigDataModule(**shared_kwargs)
+
+    first.setup()
+    second.setup()
+
+    loader_pairs = (
+        (first.train_dataloader(), second.train_dataloader()),
+        (first.val_dataloader(), second.val_dataloader()),
+        (first.test_dataloader(), second.test_dataloader()),
     )
-    dm_create.prepare_data()
 
-    # -----------------------------------------------------------------
-    #     Build **two** independent DataModules that will read the SAME
-    #     on-disk files.  All random seeds are the same, so every step
-    #     (split, shuffle, worker-level RNG) must be identical.
-    # -----------------------------------------------------------------
-    dm1 = TorchSigDataModule(**shared_kwargs)
-    dm2 = TorchSigDataModule(**shared_kwargs)
+    for first_loader, second_loader in loader_pairs:
+        _assert_same_samples(
+            _loader_data(first_loader),
+            _loader_data(second_loader),
+        )
 
-    # -----------------------------------------------------------------
-    #    Initialise the splits (random_split uses a seeded Generator)
-    # -----------------------------------------------------------------
-    dm1.setup()
-    dm2.setup()
 
-    # -----------------------------------------------------------------
-    #    Grab the first 2 batches (4 samples) from each loader
-    # -----------------------------------------------------------------
-    train_batches_1 = _first_n_batches(dm1.train_dataloader(), 2)
-    train_batches_2 = _first_n_batches(dm2.train_dataloader(), 2)
+def test_split_datamodule_initializes_from_three_configs(tmp_path):
+    train_cfg = _mock_config(dataset_length=12, seed=11)
+    val_cfg = _mock_config(dataset_length=6, seed=22)
+    test_cfg = _mock_config(dataset_length=4, seed=33)
 
-    val_batches_1   = _first_n_batches(dm1.val_dataloader(),   2)
-    val_batches_2   = _first_n_batches(dm2.val_dataloader(),   2)
+    dm = SplitTorchSigDataModule(
+        train_cfg=train_cfg,
+        val_cfg=val_cfg,
+        test_cfg=test_cfg,
+        root=tmp_path,
+        batch_size=8,
+        num_workers=None,
+        create_batch_size=4,
+        create_num_workers=2,
+        signal_generators=["bpsk"],
+    )
 
-    test_batches_1  = _first_n_batches(dm1.test_dataloader(),  2)
-    test_batches_2  = _first_n_batches(dm2.test_dataloader(),  2)
+    assert dm.train_cfg is train_cfg
+    assert dm.val_cfg is val_cfg
+    assert dm.test_cfg is test_cfg
 
-    # -----------------------------------------------------------------
-    #    Convert the list of `Signal` objects into a single Tensor.
-    #    (All Signals contain a NumPy array under the `.data` attribute.)
-    # -----------------------------------------------------------------
-    def _signals_to_tensor(batches):
-        # `batches` is a list of batch-lists, e.g. [[sig0, sig1], [sig2, sig3]]
-        flat = [sig for batch in batches for sig in batch]
-        return torch.stack([torch.from_numpy(sig.data) for sig in flat])
+    assert dm.root == tmp_path / "test_dataset"
+    assert dm.batch_size == 8
+    assert dm.num_workers == 0
+    assert dm.create_batch_size == 4
+    assert dm.create_num_workers == 2
+    assert dm.signal_generators == ["bpsk"]
 
-    data_train_1 = _signals_to_tensor(train_batches_1)
-    data_train_2 = _signals_to_tensor(train_batches_2)
+    assert dm.train is None
+    assert dm.val is None
+    assert dm.test is None
 
-    data_val_1   = _signals_to_tensor(val_batches_1)
-    data_val_2   = _signals_to_tensor(val_batches_2)
+def test_split_datamodule_rejects_mismatched_output_representations(tmp_path):
+    train_cfg = _mock_config(
+        dataset_length=12,
+        seed=11,
+        output_representation="iq",
+    )
+    val_cfg = _mock_config(
+        dataset_length=6,
+        seed=22,
+        output_representation="spectrogram",
+    )
+    test_cfg = _mock_config(
+        dataset_length=4,
+        seed=33,
+        output_representation="iq",
+    )
 
-    data_test_1  = _signals_to_tensor(test_batches_1)
-    data_test_2  = _signals_to_tensor(test_batches_2)
+    with pytest.raises(
+        ValueError,
+        match="same output representation",
+    ):
+        SplitTorchSigDataModule(
+            train_cfg=train_cfg,
+            val_cfg=val_cfg,
+            test_cfg=test_cfg,
+            root=tmp_path,
+        )
 
-    # -----------------------------------------------------------------
-    #    Assertions -- each pair must be *exactly* equal.
-    # -----------------------------------------------------------------
-    assert torch.allclose(data_train_1, data_train_2), "TRAIN split not reproducible"
-    assert torch.allclose(data_val_1,   data_val_2),   "VAL   split not reproducible"
-    assert torch.allclose(data_test_1,  data_test_2),  "TEST  split not reproducible"
+@patch("torchsig.datasets.datamodules.DatasetCreator")
+@patch("torchsig.datasets.datamodules.WorkerSeedingDataLoader")
+@patch("torchsig.datasets.datamodules.TorchSigIterableDataset")
+def test_split_datamodule_prepare_data_creates_all_splits(
+    iterable_dataset_cls,
+    dataloader_cls,
+    dataset_creator_cls,
+    tmp_path,
+):
+    train_cfg = _mock_config(dataset_length=12, seed=11)
+    val_cfg = _mock_config(dataset_length=6, seed=22)
+    test_cfg = _mock_config(dataset_length=4, seed=33)
 
-    # T be extra-sure that the *order* of the splits is the same,
-    # check that the concatenation of the three tensors
-    # reproduces the original full dataset:
-    full_1 = torch.cat([data_train_1, data_val_1, data_test_1])
-    full_2 = torch.cat([data_train_2, data_val_2, data_test_2])
-    assert torch.allclose(full_1, full_2), "Full-dataset ordering mismatched"
+    datasets = [MagicMock(), MagicMock(), MagicMock()]
+    iterable_dataset_cls.side_effect = datasets
 
-    # -----------------------------------------------------------------
-    #  Verify that the three splits are **not** identical.
-    #  The helper works even if the tensors have different lengths.
-    # -----------------------------------------------------------------
-    assert not _tensors_identical(data_train_1, data_test_1), "TRAIN and TEST should differ"
-    assert not _tensors_identical(data_val_1,   data_test_1), "VAL   and TEST should differ"
-    assert not _tensors_identical(data_val_1,   data_train_1), "VAL   and TRAIN should differ"
+    loaders = [MagicMock(), MagicMock(), MagicMock()]
+    dataloader_cls.side_effect = loaders
+
+    creators = [MagicMock(), MagicMock(), MagicMock()]
+    dataset_creator_cls.side_effect = creators
+
+    dm = SplitTorchSigDataModule(
+        train_cfg=train_cfg,
+        val_cfg=val_cfg,
+        test_cfg=test_cfg,
+        root=tmp_path,
+        create_batch_size=4,
+        create_num_workers=2,
+        overwrite=True,
+        signal_generators=["bpsk", "qpsk"],
+    )
+
+    dm.prepare_data()
+
+    assert iterable_dataset_cls.call_count == 3
+    assert dataloader_cls.call_count == 3
+    assert dataset_creator_cls.call_count == 3
+
+    assert dataset_creator_cls.call_args_list[0].kwargs[
+        "dataset_length"
+    ] == 12
+    assert dataset_creator_cls.call_args_list[1].kwargs[
+        "dataset_length"
+    ] == 6
+    assert dataset_creator_cls.call_args_list[2].kwargs[
+        "dataset_length"
+    ] == 4
+
+    assert Path(dataset_creator_cls.call_args_list[0].kwargs["root"]) == (
+        tmp_path / "test_dataset" / "train"
+    )
+    assert Path(dataset_creator_cls.call_args_list[1].kwargs["root"]) == (
+        tmp_path / "test_dataset" / "val"
+    )
+    assert Path(dataset_creator_cls.call_args_list[2].kwargs["root"]) == (
+        tmp_path / "test_dataset" / "test"
+    )
+
+    for creator in creators:
+        creator.create.assert_called_once_with()
+
+@patch("torchsig.datasets.datamodules.DatasetCreator")
+@patch("torchsig.datasets.datamodules.WorkerSeedingDataLoader")
+@patch("torchsig.datasets.datamodules.TorchSigIterableDataset")
+def test_split_datamodule_uses_split_specific_seeds(
+    iterable_dataset_cls,
+    dataloader_cls,
+    dataset_creator_cls,
+    tmp_path,
+):
+    train_cfg = _mock_config(dataset_length=12, seed=11)
+    val_cfg = _mock_config(dataset_length=6, seed=22)
+    test_cfg = _mock_config(dataset_length=4, seed=33)
+
+    dm = SplitTorchSigDataModule(
+        train_cfg=train_cfg,
+        val_cfg=val_cfg,
+        test_cfg=test_cfg,
+        root=tmp_path,
+    )
+
+    dm.prepare_data()
+
+    dataset_seeds = [
+        call_args.kwargs["seed"]
+        for call_args in iterable_dataset_cls.call_args_list
+    ]
+    loader_seeds = [
+        call_args.kwargs["seed"]
+        for call_args in dataloader_cls.call_args_list
+    ]
+
+    assert dataset_seeds == [11, 22, 33]
+    assert loader_seeds == [11, 22, 33]
+
+
+@patch("torchsig.datasets.datamodules.StaticTorchSigDataset")
+def test_split_datamodule_setup_fit_loads_train_and_val_only(
+    static_dataset_cls,
+    tmp_path,
+):
+    train_cfg = _mock_config(dataset_length=12, seed=11)
+    val_cfg = _mock_config(dataset_length=6, seed=22)
+    test_cfg = _mock_config(dataset_length=4, seed=33)
+
+    train_dataset = MagicMock()
+    val_dataset = MagicMock()
+    static_dataset_cls.side_effect = [train_dataset, val_dataset]
+
+    dm = SplitTorchSigDataModule(
+        train_cfg=train_cfg,
+        val_cfg=val_cfg,
+        test_cfg=test_cfg,
+        root=tmp_path,
+    )
+
+    dm.setup("fit")
+
+    assert dm.train is train_dataset
+    assert dm.val is val_dataset
+    assert dm.test is None
+
+    assert static_dataset_cls.call_count == 2
+
+    assert Path(static_dataset_cls.call_args_list[0].kwargs["root"]) == (
+        tmp_path / "test_dataset" / "train"
+    )
+    assert Path(static_dataset_cls.call_args_list[1].kwargs["root"]) == (
+        tmp_path / "test_dataset" / "val"
+    )
+
+
+@patch("torchsig.datasets.datamodules.StaticTorchSigDataset")
+def test_split_datamodule_setup_test_loads_test_only(
+    static_dataset_cls,
+    tmp_path,
+):
+    train_cfg = _mock_config(dataset_length=12, seed=11)
+    val_cfg = _mock_config(dataset_length=6, seed=22)
+    test_cfg = _mock_config(dataset_length=4, seed=33)
+
+    test_dataset = MagicMock()
+    static_dataset_cls.return_value = test_dataset
+
+    dm = SplitTorchSigDataModule(
+        train_cfg=train_cfg,
+        val_cfg=val_cfg,
+        test_cfg=test_cfg,
+        root=tmp_path,
+    )
+
+    dm.setup("test")
+
+    assert dm.train is None
+    assert dm.val is None
+    assert dm.test is test_dataset
+
+    static_dataset_cls.assert_called_once()
+
+    assert Path(static_dataset_cls.call_args.kwargs["root"]) == (
+        tmp_path / "test_dataset" / "test"
+    )
+
+
+@patch("torchsig.datasets.datamodules.StaticTorchSigDataset")
+def test_split_datamodule_setup_none_loads_all_splits(
+    static_dataset_cls,
+    tmp_path,
+):
+    train_cfg = _mock_config(dataset_length=12, seed=11)
+    val_cfg = _mock_config(dataset_length=6, seed=22)
+    test_cfg = _mock_config(dataset_length=4, seed=33)
+
+    datasets = [MagicMock(), MagicMock(), MagicMock()]
+    static_dataset_cls.side_effect = datasets
+
+    dm = SplitTorchSigDataModule(
+        train_cfg=train_cfg,
+        val_cfg=val_cfg,
+        test_cfg=test_cfg,
+        root=tmp_path,
+    )
+
+    dm.setup(None)
+
+    assert dm.train is datasets[0]
+    assert dm.val is datasets[1]
+    assert dm.test is datasets[2]
+
+
+@patch("torchsig.datasets.datamodules.random_split")
+@patch("torchsig.datasets.datamodules.StaticTorchSigDataset")
+def test_split_datamodule_does_not_use_random_split(
+    static_dataset_cls,
+    random_split_mock,
+    tmp_path,
+):
+    train_cfg = _mock_config(dataset_length=12, seed=11)
+    val_cfg = _mock_config(dataset_length=6, seed=22)
+    test_cfg = _mock_config(dataset_length=4, seed=33)
+
+    static_dataset_cls.side_effect = [
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
+    ]
+
+    dm = SplitTorchSigDataModule(
+        train_cfg=train_cfg,
+        val_cfg=val_cfg,
+        test_cfg=test_cfg,
+        root=tmp_path,
+    )
+
+    dm.setup(None)
+
+    random_split_mock.assert_not_called()
+
+
+@patch("torchsig.datasets.datamodules.DataLoader")
+def test_split_datamodule_dataloader_shuffle_behavior(
+    dataloader_cls,
+    tmp_path,
+):
+    train_cfg = _mock_config(dataset_length=12, seed=11)
+    val_cfg = _mock_config(dataset_length=6, seed=22)
+    test_cfg = _mock_config(dataset_length=4, seed=33)
+
+    dataloader_cls.side_effect = [
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
+    ]
+
+    dm = SplitTorchSigDataModule(
+        train_cfg=train_cfg,
+        val_cfg=val_cfg,
+        test_cfg=test_cfg,
+        root=tmp_path,
+        shuffle=True,
+    )
+    dm.train = MagicMock()
+    dm.val = MagicMock()
+    dm.test = MagicMock()
+
+    dm.train_dataloader()
+    dm.val_dataloader()
+    dm.test_dataloader()
+
+    assert dataloader_cls.call_args_list[0].kwargs["shuffle"] is True
+    assert dataloader_cls.call_args_list[1].kwargs["shuffle"] is False
+    assert dataloader_cls.call_args_list[2].kwargs["shuffle"] is False
+
+
+@pytest.mark.parametrize(
+    "method_name",
+    [
+        "train_dataloader",
+        "val_dataloader",
+        "test_dataloader",
+    ],
+)
+def test_split_datamodule_dataloader_requires_setup(
+    method_name,
+    tmp_path,
+):
+    train_cfg = _mock_config(dataset_length=12, seed=11)
+    val_cfg = _mock_config(dataset_length=6, seed=22)
+    test_cfg = _mock_config(dataset_length=4, seed=33)
+
+    dm = SplitTorchSigDataModule(
+        train_cfg=train_cfg,
+        val_cfg=val_cfg,
+        test_cfg=test_cfg,
+        root=tmp_path,
+    )
+
+    with pytest.raises(RuntimeError, match="setup"):
+        getattr(dm, method_name)()
+
+    
+@pytest.mark.slow_no_gpu
+def test_split_datamodule_smoke(tmp_path, split_configs):
+    train_cfg, val_cfg, test_cfg = split_configs
+
+    dm = SplitTorchSigDataModule(
+        train_cfg=train_cfg,
+        val_cfg=val_cfg,
+        test_cfg=test_cfg,
+        root=tmp_path,
+        batch_size=2,
+        num_workers=0,
+        create_batch_size=2,
+        create_num_workers=0,
+        overwrite=True,
+        collate_fn=identity_collate_fn,
+    )
+
+    dm.prepare_data()
+    dm.setup(None)
+
+    assert len(dm.train) == train_cfg.dataset_length
+    assert len(dm.val) == val_cfg.dataset_length
+    assert len(dm.test) == test_cfg.dataset_length
+
+    assert next(iter(dm.train_dataloader()))
+    assert next(iter(dm.val_dataloader()))
+    assert next(iter(dm.test_dataloader()))

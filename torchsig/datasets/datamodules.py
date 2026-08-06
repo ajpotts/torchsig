@@ -27,12 +27,18 @@ from torchsig.transforms.metadata_transforms import YOLOLabel
 from torchsig.transforms.transforms import ComplexTo2D, Spectrogram
 from torchsig.utils.data_loading import WorkerSeedingDataLoader
 from torchsig.utils.file_handlers.hdf5 import HDF5Reader, HDF5Writer
-from torchsig.utils.writer import DatasetCreator
+from torchsig.utils.writer import DatasetCreator, identity_collate_fn
+from torchsig.utils.defaults import TorchSigDefaults
+from torchsig.utils.yaml import load_config_from_yaml
 
 if TYPE_CHECKING:
     from torchsig.utils.file_handlers import BaseFileHandler
 
-__all__ = ["set_global_seed", "TorchSigDataModule"]
+__all__ = [
+    "set_global_seed",
+    "TorchSigDataModule",
+    "SplitTorchSigDataModule",
+]
 
 # --------------------------------------------------------------
 #  GLOBAL REPRODUCIBILITY HELPERS
@@ -55,6 +61,49 @@ def set_global_seed(seed: int) -> None:
 # --------------------------------------------------------------
 #  DATA MODULE
 # --------------------------------------------------------------
+
+
+def _load_dataset_config(
+    cfg: TorchSigDatasetConfig | str | Path,
+) -> TorchSigDatasetConfig:
+    """Load a TorchSig dataset config when given a YAML path."""
+    if isinstance(cfg, TorchSigDatasetConfig):
+        return cfg
+
+    return load_config_from_yaml(Path(cfg))
+
+
+def _dataset_metadata(cfg: TorchSigDatasetConfig) -> dict[str, Any]:
+    """Merge TorchSig default metadata with config-specific metadata."""
+    metadata = TorchSigDefaults().default_dataset_metadata.copy()
+    metadata.update(cfg.dataset_metadata)
+    return metadata
+
+
+def _config_transforms(cfg: TorchSigDatasetConfig) -> list[Any]:
+    """Construct output transforms for a dataset config."""
+    output_representation = cfg.output_representation.lower()
+
+    if output_representation == "iq":
+        return [ComplexTo2D()]
+
+    if output_representation == "spectrogram":
+        fft_size = getattr(cfg, "output_spectrogram_fft", None)
+
+        if fft_size is None:
+            fft_size = getattr(cfg, "fft_size", None)
+
+        if fft_size is None:
+            fft_size = cfg.dataset_metadata.get("fft_size", 256)
+
+        return [
+            Spectrogram(fft_size=int(fft_size)),
+            YOLOLabel(),
+        ]
+
+    fft_size = getattr(cfg, "fft_size", 256)
+    return [Spectrogram(fft_size=int(fft_size))]
+
 
 def _seed_worker(worker_id: int) -> None:
     """Initialise deterministic NumPy / Python RNGs **inside a DataLoader worker**.
@@ -259,10 +308,6 @@ class TorchSigDataModule(pl.LightningDataModule):
         Raises:
             ValueError: If required parameters for spectrogram output are missing
         """
-        from torchsig.utils.defaults import TorchSigDefaults
-        from torchsig.utils.yaml import load_config_from_yaml
-        from torchsig.utils.defaults import TorchSigDefaults
-
         # Convert path to config if needed
         if isinstance(cfg, (str, Path)):
             cfg = load_config_from_yaml(Path(cfg))
@@ -434,3 +479,227 @@ class TorchSigDataModule(pl.LightningDataModule):
             RuntimeError: If the test dataset is not initialized.
         """
         return self._build_dataloader(self.test, shuffle=False)
+
+
+class SplitTorchSigDataModule(pl.LightningDataModule):
+    """Lightning DataModule for independently generated TorchSig data splits.
+
+    This DataModule creates separate static training, validation, and test
+    datasets from three ``TorchSigDatasetConfig`` objects. Unlike
+    ``TorchSigDataModule``, it does not create one dataset and partition it
+    with ``random_split``.
+
+    The generated directory layout is::
+
+        root/
+            dataset_id/
+                train/
+                val/
+                test/
+
+    Args:
+        train_cfg: Training dataset config or path to a YAML config.
+        val_cfg: Validation dataset config or path to a YAML config.
+        test_cfg: Test dataset config or path to a YAML config.
+        root: Parent directory in which datasets are stored.
+        signal_generators: Signal generators available during dataset creation.
+        batch_size: Batch size used by model-facing DataLoaders.
+        num_workers: Number of workers used by model-facing DataLoaders.
+        create_batch_size: Batch size used while creating static datasets.
+        create_num_workers: Number of workers used while creating datasets.
+        file_writer: File handler used to write static datasets.
+        file_reader: File handler used to read static datasets.
+        overwrite: Whether existing datasets should be overwritten.
+        shuffle: Whether the training DataLoader should shuffle samples.
+        collate_fn: Function used to collate model-facing batches.
+        target_labels: Metadata fields returned as targets.
+    """
+
+    def __init__(
+        self,
+        train_cfg: TorchSigDatasetConfig | str | Path,
+        val_cfg: TorchSigDatasetConfig | str | Path,
+        test_cfg: TorchSigDatasetConfig | str | Path,
+        root: str | Path,
+        *,
+        signal_generators: str | list[str] = "all",
+        batch_size: int = 1,
+        num_workers: int | None = None,
+        create_batch_size: int = 8,
+        create_num_workers: int = 4,
+        file_writer: type[BaseFileHandler] = HDF5Writer,
+        file_reader: type[BaseFileHandler] = HDF5Reader,
+        overwrite: bool = False,
+        shuffle: bool = True,
+        collate_fn: Callable | None = None,
+        target_labels: list[str] | None = None,
+    ) -> None:
+        """Initialize the split-based TorchSig DataModule."""
+        super().__init__()
+
+        self.train_cfg = _load_dataset_config(train_cfg)
+        self.val_cfg = _load_dataset_config(val_cfg)
+        self.test_cfg = _load_dataset_config(test_cfg)
+
+        self.root = Path(root) / self.train_cfg.dataset_id
+        self.signal_generators = signal_generators
+
+        self.batch_size = batch_size
+        self.num_workers = 0 if num_workers is None else num_workers
+        self.create_batch_size = create_batch_size
+        self.create_num_workers = create_num_workers
+
+        self.file_writer = file_writer
+        self.file_reader = file_reader
+        self.overwrite = overwrite
+
+        self.shuffle = shuffle
+        self.collate_fn = collate_fn or default_collate
+        self.target_labels = target_labels or ["class_index"]
+
+        self.train: StaticTorchSigDataset | None = None
+        self.val: StaticTorchSigDataset | None = None
+        self.test: StaticTorchSigDataset | None = None
+
+        self._validate_configs()
+
+    def _validate_configs(self) -> None:
+        """Validate assumptions shared by the split configs."""
+        train_representation = self.train_cfg.output_representation.lower()
+
+        for split_name, cfg in (
+            ("validation", self.val_cfg),
+            ("test", self.test_cfg),
+        ):
+            representation = cfg.output_representation.lower()
+
+            if representation != train_representation:
+                raise ValueError(
+                    "All split configs must use the same output representation. "
+                    f"Training uses {train_representation!r}, but "
+                    f"{split_name} uses {representation!r}."
+                )
+
+    def _create_split(
+        self,
+        cfg: TorchSigDatasetConfig,
+        split: str,
+    ) -> None:
+        """Create one static dataset split."""
+        split_root = self.root / split
+
+        dataset = TorchSigIterableDataset(
+            metadata=_dataset_metadata(cfg),
+            transforms=_config_transforms(cfg),
+            signal_generators=self.signal_generators,
+            seed=cfg.seed,
+        )
+
+        loader = WorkerSeedingDataLoader(
+            dataset=dataset,
+            batch_size=self.create_batch_size,
+            num_workers=self.create_num_workers,
+            collate_fn=identity_collate_fn,
+            seed=cfg.seed,
+        )
+
+        creator = DatasetCreator(
+            dataloader=loader,
+            dataset_length=int(cfg.dataset_length),
+            root=split_root,
+            overwrite=self.overwrite,
+            file_writer=self.file_writer,
+        )
+        creator.create()
+
+    def prepare_data(self) -> None:
+        """Create independent training, validation, and test datasets."""
+        self.root.mkdir(parents=True, exist_ok=True)
+
+        self._create_split(self.train_cfg, "train")
+        self._create_split(self.val_cfg, "val")
+        self._create_split(self.test_cfg, "test")
+
+    def _load_split(self, split: str) -> StaticTorchSigDataset:
+        """Load one static dataset split."""
+        return StaticTorchSigDataset(
+            root=self.root / split,
+            file_handler_class=self.file_reader,
+            target_labels=self.target_labels,
+        )
+
+    def setup(self, stage: str | None = None) -> None:
+        """Load the datasets required for a Lightning stage."""
+        if stage in (None, "fit"):
+            if self.train is None:
+                self.train = self._load_split("train")
+
+            if self.val is None:
+                self.val = self._load_split("val")
+
+        if stage == "validate" and self.val is None:
+            self.val = self._load_split("val")
+
+        if stage in (None, "test", "predict") and self.test is None:
+            self.test = self._load_split("test")
+
+    def _build_dataloader(
+        self,
+        dataset: StaticTorchSigDataset | None,
+        *,
+        shuffle: bool,
+        seed: int,
+    ) -> DataLoader:
+        """Build a deterministic model-facing DataLoader."""
+        if dataset is None:
+            raise RuntimeError(
+                "Dataset has not been initialized. Call setup() before "
+                "requesting its DataLoader."
+            )
+
+        generator = Generator().manual_seed(seed)
+        persistent_workers = self.num_workers > 0
+
+        return DataLoader(
+            dataset=dataset,
+            batch_size=self.batch_size,
+            shuffle=shuffle,
+            collate_fn=self.collate_fn,
+            num_workers=self.num_workers,
+            pin_memory=True,
+            generator=generator,
+            worker_init_fn=_seed_worker,
+            persistent_workers=persistent_workers,
+        )
+
+    def train_dataloader(self) -> DataLoader:
+        """Return the training DataLoader."""
+        return self._build_dataloader(
+            self.train,
+            shuffle=self.shuffle,
+            seed=self.train_cfg.seed,
+        )
+
+    def val_dataloader(self) -> DataLoader:
+        """Return the validation DataLoader."""
+        return self._build_dataloader(
+            self.val,
+            shuffle=False,
+            seed=self.val_cfg.seed,
+        )
+
+    def test_dataloader(self) -> DataLoader:
+        """Return the test DataLoader."""
+        return self._build_dataloader(
+            self.test,
+            shuffle=False,
+            seed=self.test_cfg.seed,
+        )
+
+    def predict_dataloader(self) -> DataLoader:
+        """Return the test split for prediction."""
+        return self._build_dataloader(
+            self.test,
+            shuffle=False,
+            seed=self.test_cfg.seed,
+        )

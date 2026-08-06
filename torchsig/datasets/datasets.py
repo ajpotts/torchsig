@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import logging
 import warnings
-from dataclasses import dataclass
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
-from torch.utils.data import Dataset, IterableDataset
+from torch.utils.data import Dataset, IterableDataset, get_worker_info
 
 from torchsig.datasets.dataset_utils import frequency_shift_signal
 from torchsig.signals.builder import BaseSignalGenerator, ConcatSignalGenerator
@@ -18,6 +19,10 @@ from torchsig.utils.abstractions import HierarchicalMetadataObject
 from torchsig.utils.coordinate_system import Coordinate, Rectangle, is_rectangle_overlap
 from torchsig.utils.dsp import compute_spectrogram, update_signal_snr_bandwidth
 from torchsig.utils.file_handlers.hdf5 import HDF5Reader
+from torchsig.utils.metadata_logging import (
+    get_metadata_logging_context,
+    metadata_logging_context,
+)
 from torchsig.utils.random import Seedable
 from torchsig.utils.signal_building import lookup_signal_generator_by_string
 
@@ -28,6 +33,8 @@ log = logging.getLogger(__name__)
 
 # Type checking imports
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
+
     from torchsig.transforms.base_transforms import Transform
 
 __all__ = ["StaticTorchSigDataset", "TorchSigDatasetConfig", "TorchSigIterableDataset", "apply_label_to_signal", "apply_transforms_and_labels_to_signal"]
@@ -46,6 +53,7 @@ class TorchSigDatasetConfig:
         output_spectrogram_fft: The FFT size to use when generating spectrograms (if output_representation is "spectrogram").
         signal_sampling_mode: The mode for sampling signals, either "per_signal" or "per_family".
         dataset_metadata: A dictionary containing additional metadata about the dataset.
+        target_labels: A list of target_labels. Defaults to ["class_index"].
     """
     dataset_id: str
     dataset_length: int
@@ -55,35 +63,57 @@ class TorchSigDatasetConfig:
     output_spectrogram_fft: int | None
     signal_sampling_mode: Literal["per_signal", "per_family"]
     dataset_metadata: dict[str, Any]
+    target_labels: list[str] = field(default_factory=lambda: ["class_index"]) # default classification use case
 
 
 def apply_label_to_signal(sample: Signal, target_label: str) -> list:
-    """Recursively applies the specified label to a signal sample and its components.
+    """Extract a target label from a signal and its component signals.
+
+    Target labels are resolved through the public ``Signal`` interface rather
+    than directly from the underlying metadata dictionary. This allows both
+    stored metadata fields (e.g. ``class_name``) and computed properties
+    (e.g. ``start``, ``stop``, ``lower_freq``, and ``upper_freq``) to be
+    requested uniformly.
+
+    A label stored directly on the sample, but not on any component, is
+    returned as one sample-level value. Otherwise, if the signal contains
+    component signals, labels are extracted only from the components. If it
+    has no components, the label is extracted from the signal itself. This
+    avoids returning duplicate labels for both a composite signal and its
+    children while supporting aggregate labels such as multi-hot vectors.
 
     Args:
-        sample: The signal sample to apply the label to.
-        target_label: The label that should be used to identify relevant values in the signal sample.
+        sample: Signal from which to extract target labels.
+        target_label: Name of the target label or ``Signal`` property to
+            extract.
 
     Returns:
-        A list of values corresponding to the label specified in the sample and its component signals.
+        A list containing a sample-level value, one value for each component
+        signal, or a single value for a signal without components.
     """
+    is_sample_level_label = (
+        target_label in sample.metadata
+        and not any(
+            target_label in component.metadata
+            for component in sample.component_signals
+        )
+    )
+    if is_sample_level_label:
+        return [sample[target_label]]
+
     values = []
 
-    for component in sample.component_signals:
-        metadata = component.get_full_metadata()
+    signals = sample.component_signals if sample.component_signals else [sample]
 
+    for signal in signals:
         if target_label == "class_index":
-            if "class_name" in component.keys():
-                class_names = metadata["class_names"]
-                class_name = component["class_name"]
-                values.append(int(list(class_names).index(class_name)))
-            elif "class_index" in component.keys():
-                values.append(component["class_index"])
-        elif target_label in component.keys():
-            values.append(component[target_label])
-
-    if not sample.component_signals and target_label in sample.keys():
-        values.append(sample[target_label])
+            if hasattr(signal, "class_index"):
+                values.append(int(signal.class_index))
+            elif hasattr(signal, "class_name"):
+                class_names = signal.get_full_metadata()["class_names"]
+                values.append(int(list(class_names).index(signal.class_name)))
+        elif hasattr(signal, target_label):
+            values.append(getattr(signal, target_label))
 
     return values
 
@@ -120,7 +150,16 @@ def apply_transforms_and_labels_to_signal(
     targets = {}
     for key in target_labels:
         values = apply_label_to_signal(sample, key)
-        if sample["num_signals_max"] == 1 and len(values) == 1:
+        is_sample_level_label = (
+            key in sample.metadata
+            and not any(
+                key in component.metadata
+                for component in sample.component_signals
+            )
+        )
+        if len(values) == 1 and (
+            is_sample_level_label or sample["num_signals_max"] == 1
+        ):
             values = values[0]
         targets[key] = values
     if len(target_labels) == 1:
@@ -147,8 +186,8 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
     def __init__(
         self,
         signal_generators: str | ConcatSignalGenerator | list = "all",
-        transforms: list[Transform | callable] = [],
-        component_transforms: list[Transform | callable] = [],
+        transforms: list[Transform | callable] | None = None,
+        component_transforms: list[Transform | callable] | None = None,
         target_labels: list | None = None,
         # will try to validate required metadata in this dataset; can be turned off if a dataset needs to be initialized before it's metadata is known
         validate_init: bool = True,
@@ -171,8 +210,9 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         self.signal_probabilities = np.array([], dtype=float)
         self._signal_probability_mode = "likelihood"
         self.target_labels = target_labels
-        self.transforms = transforms
-        self.component_transforms = component_transforms
+        self.transforms = [] if transforms is None else transforms
+        self.component_transforms = [] if component_transforms is None else component_transforms
+        self._metadata_logging_sample_index = 0
         if not hasattr(self, "class_names"):
             self["class_names"] = []
         if "num_signals_min" not in self.keys():
@@ -191,7 +231,8 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
             signal_generators = signal_generators.signal_generators
         for generator in signal_generators:
             self.init_signal_generator(generator)
-
+        if self.validate_init:
+            self.validate_metadata_fields()
 
     @staticmethod
     def _validate_positive_weight(value: float, parameter_name: str) -> float:
@@ -289,86 +330,136 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         likelihood: float | None = None,
         probability: float | None = None,
     ) -> None:
-        """Adds a signal generator to this dataset.
+        """Add a signal generator to this dataset.
 
         Args:
-            signal_generator: A callable object which takes no arguments and returns a Signal.
-            class_name: (optional) A name for this signal class in the dataset. 
-                If None, the signal will be generated and added to the data, 
-                but no labels will be made for the signal.
-            likelihood: (optional) Relative sampling weight for this signal class. 
-                If no explicit probabilities are provided anywhere, omitted
-                likelihoods default to 1.0 which yields uniform class sampling.
-            probability: (optional) Explicit probability for this signal class.
-                When any generator is added with ``probability=``, every
-                generator added to the dataset must also use explicit
-                probabilities, and the final probabilities must sum to 1.0
-                before sampling.
+            signal_generator: Callable that takes no arguments and returns a Signal.
+            class_name: Optional name for this signal class. If omitted, the signal
+                is generated and added to the data without a class-name label.
+            class_index: Optional class index. If omitted, the generator's position
+                in the dataset is used.
+            likelihood: Relative sampling weight for this signal class. When
+                explicit probabilities are not used, omitted likelihoods default
+                to 1.0.
+            probability: Explicit sampling probability for this signal class. Once
+                explicit probability mode is selected, every generator must specify
+                a probability. The final probabilities must sum to 1.0 before
+                sampling.
+
+        Raises:
+            TypeError: If a likelihood or probability is not a real number.
+            ValueError: If the sampling configuration is invalid.
         """
-        # validate sampling configuration
-        if probability is not None and likelihood is not None:
+        if likelihood is not None and probability is not None:
             raise ValueError(
                 "Specify only one of likelihood or probability for a signal generator"
             )
+
+        has_generators = bool(self.signal_generators)
+        using_probability_mode = self._signal_probability_mode == "probability"
+        using_likelihood_mode = (
+            self._signal_probability_mode == "likelihood" and has_generators
+        )
+
+        if using_probability_mode and probability is None:
+            raise ValueError(
+                "All signal generators must specify probability once probability mode is used"
+            )
+
+        if using_likelihood_mode and probability is not None:
+            raise ValueError(
+                "Cannot mix explicit probability with likelihood/default likelihood generators"
+            )
+
         if probability is not None:
-            self._signal_probability_mode = "probability"
-            probability = self._validate_positive_weight(probability, "probability")
+            probability = self._validate_positive_weight(
+                probability,
+                "probability",
+            )
 
             candidate_probabilities = np.append(
                 np.asarray(self.signal_probabilities, dtype=float),
                 probability,
             )
-            if float(np.sum(candidate_probabilities)) > (1.0 + 1e-8):
+            probability_sum = float(np.sum(candidate_probabilities))
+
+            if probability_sum > 1.0 + 1e-8:
                 raise ValueError(
                     "signal probabilities must sum to 1.0 or less while "
                     f"configuring the dataset, found {probability_sum}"
                 )
         else:
-            self._signal_probability_mode = "likelihood"
-            if likelihood is None:
-                likelihood = 1.0
-            likelihood = self._validate_positive_weight(likelihood, "likelihood")
+            likelihood = 1.0 if likelihood is None else likelihood
+            likelihood = self._validate_positive_weight(
+                likelihood,
+                "likelihood",
+            )
 
         if isinstance(signal_generator, Seedable):
             signal_generator.add_parent(self)
+
         try:
             if self.validate_init:
                 signal_generator.validate_metadata_fields()
         except AttributeError:
-            pass  # proceed without a validation function at own risk
-        signal_generator["class_index"] = len(self.signal_generators)
-        if class_index is None:
-            signal_generator["class_index"] = len(self.signal_generators)
-        else:
-            signal_generator["class_index"] = class_index
-        self.signal_generators += [signal_generator]
+            pass  # Proceed without validation at the caller's risk.
+
+        resolved_class_index = (
+            len(self.signal_generators)
+            if class_index is None
+            else class_index
+        )
+        signal_generator["class_index"] = resolved_class_index
+
         if class_name is not None:
             signal_generator["class_name"] = class_name
+
+        self.signal_generators.append(signal_generator)
+
         if (
             hasattr(signal_generator, "class_name")
             and signal_generator["class_name"] is not None
         ):
-            self["class_names"] += [signal_generator["class_name"]]
+            self["class_names"].append(signal_generator["class_name"])
 
-        if self._signal_probability_mode == "probability":
-            self.signal_probabilities = np.append(
-                np.asarray(self.signal_probabilities, dtype=float),
-                probability,
-            )
+        if probability is not None:
+            self._signal_probability_mode = "probability"
+            self.signal_probabilities = candidate_probabilities
         else:
-            self.signal_likelihoods += [likelihood]
+            self._signal_probability_mode = "likelihood"
+            self.signal_likelihoods.append(likelihood)
+
         self._refresh_signal_probabilities()
 
 
     def validate_metadata_fields(self) -> bool:
-        """Validates signal metadata for each signal generators.
+        """Validate dataset and signal generator metadata."""
+        self._validate_signal_duration_limits()
 
-        Returns:
-            Whether Signal metadata is valid.
-        """
         for generator in self.signal_generators:
             generator.validate_metadata_fields()
+
         return True
+
+    def _validate_signal_duration_limits(self) -> None:
+        """Warn when configured signal durations exceed the dataset sample length.
+
+        Signals longer than the dataset IQ buffer are supported, but they will be
+        truncated during sample generation. This warning helps identify metadata
+        configurations that are likely to truncate every generated component.
+        """
+        if (
+            self["signal_duration_in_samples_max"]
+            > self["num_iq_samples_dataset"]
+        ):
+            warnings.warn(
+                "signal_duration_in_samples_max exceeds "
+                "num_iq_samples_dataset; generated component signals may be "
+                "truncated to fit within the dataset sample",
+                UserWarning,
+                stacklevel=2,
+            )
+
 
     def __iter__(self):
         """Returns an iterator object for the dataset.
@@ -387,12 +478,89 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         Raises:
             IndexError: If the index is out of bounds of the generated samples.
         """
-        # user requesting another sample at index +1 larger than current list of generates samples
-        # generate new sample
-        sample = self.__generate_new_signal__()
-        return apply_transforms_and_labels_to_signal(
-            sample, self.transforms, self.target_labels
+        sample_index = self._metadata_logging_sample_index
+        self._metadata_logging_sample_index += 1
+        if not self._metadata_logging_is_active():
+            sample = self.__generate_new_signal__()
+            return apply_transforms_and_labels_to_signal(
+                sample,
+                self.transforms,
+                self.target_labels,
+            )
+
+        with self._metadata_logging_sample_context(sample_index):
+            sample = self._run_with_metadata_logging_stage(
+                "generate",
+                self.__generate_new_signal__,
+            )
+            return self._run_with_metadata_logging_stage(
+                "transform",
+                lambda: self._transform_and_log_metadata_snapshot(
+                    sample,
+                    lambda: apply_transforms_and_labels_to_signal(
+                        sample,
+                        self.transforms,
+                        self.target_labels,
+                    ),
+                ),
+            )
+
+    @contextmanager
+    def _metadata_logging_sample_context(
+        self,
+        sample_index: int,
+    ) -> Iterator[None]:
+        """Establish correlation fields for one generated dataset sample."""
+        outer_context = get_metadata_logging_context()
+        worker = get_worker_info()
+        worker_id = worker.id if worker is not None else 0
+        local_metadata = object.__getattribute__(self, "_metadata")
+        dataset_id = local_metadata.get(
+            "dataset_id",
+            outer_context.dataset_id or type(self).__name__,
         )
+        with metadata_logging_context(
+            dataset_id=str(dataset_id),
+            sample_index=sample_index,
+            worker_id=worker_id,
+        ):
+            yield
+
+    def _metadata_logging_is_active(self) -> bool:
+        """Return whether sample correlation should be established."""
+        instance_attributes = object.__getattribute__(self, "__dict__")
+        if instance_attributes.get("_metadata_debug_enabled", False):
+            return True
+        return get_metadata_logging_context().session_id is not None
+
+    @staticmethod
+    def _run_with_metadata_logging_stage(
+        stage: str,
+        operation: Callable[[], Any],
+    ) -> Any:
+        """Run one generation stage with an optional correlation field."""
+        if get_metadata_logging_context().session_id is None:
+            return operation()
+        with metadata_logging_context(fields={"stage": stage}):
+            return operation()
+
+    def _transform_and_log_metadata_snapshot(
+        self,
+        sample: Signal,
+        operation: Callable[[], Any],
+    ) -> Any:
+        """Run final transforms and optionally log the completed metadata."""
+        result = operation()
+        session = object.__getattribute__(self, "__dict__").get(
+            "_metadata_debug_session"
+        )
+        if (
+            self.metadata_debug_enabled
+            and session is not None
+            and "snapshot" in session.config.events
+        ):
+            self.log_metadata_snapshot(sample, include_components=True)
+        return result
 
     def __call__(self) -> Signal | np.ndarray | tuple:
         """Same as next(); returns the next item in the dataset.
@@ -454,126 +622,188 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         return iq_samples.astype(np.complex64)
 
     def __generate_new_signal__(self) -> Signal:
-        """Generates a new dataset signal/sample.
+        """Generate a new synthetic dataset sample.
 
-        This method creates a new signal by:
-        1. Building a noise floor
-        2. Generating multiple signal components
-        3. Placing them in the frequency domain
-        4. Combining them into a final signal
+        The generated sample consists of a noise floor plus zero or more component
+        signals placed into the IQ buffer. Each component is generated at complex
+        baseband, transformed, updated with SNR and bandwidth metadata, frequency
+        shifted, checked for overlap, and inserted into the dataset sample.
 
         Returns:
-            A new generated dataset signal containing the data and metadata.
-
-        Raises:
-            RuntimeError: If unable to generate a valid signal after maximum attempts.
-            ValueError: If signal parameters are invalid.
+            A generated Signal containing IQ data and component signal metadata.
         """
-        # build noise floor
         iq_samples = self._build_noise_floor()
+        component_signals = []
+        signal_rectangles = []
 
-        # empty signal list initialization
-        signals = []
-
-        # determine number of signals in sample
-        num_signals_to_generate = self.random_generator.integers(
-            low=self["num_signals_min"], high=self["num_signals_max"] + 1
+        num_signals_to_generate = int(
+            self.random_generator.integers(
+                low=self["num_signals_min"],
+                high=self["num_signals_max"] + 1,
+            )
         )
+        max_attempts = 10 * num_signals_to_generate
 
-        # list of rectangles representing the individual signals within the dataset IQ
-        signal_rectangle_list = []
+        for _ in range(max_attempts):
+            if len(component_signals) >= num_signals_to_generate:
+                break
 
-        # counter to avoid stuck in infinite loop
-        infinite_loop_counter = 0
-        infinite_loop_counter_max = 10 * num_signals_to_generate
-
-        # generate individual bursts
-        num_signals_created = 0
-        while (
-            num_signals_created < num_signals_to_generate
-            and infinite_loop_counter < infinite_loop_counter_max
-        ):
-
-            # increment fail-safe counter
-            infinite_loop_counter += 1
-
-            # choose random signal
-            generator = self._random_signal_generator()
-
-            # generate signal at complex baseband
-            new_signal = generator()
-
-            # apply component transforms
-            for ctransform in self.component_transforms:
-                new_signal = ctransform(new_signal)
-
-            # Update snr and bbox of signal
-            update_signal_snr_bandwidth(self, new_signal)
-
-            # frequency shift signal
-            # after signal transforms applied at complex baseband
-            new_signal = frequency_shift_signal(
+            new_signal = self._generate_component_signal()
+            start_sample = self._choose_start_sample(
+                iq_samples,
                 new_signal,
-                center_freq_min=self["signal_center_freq_min"],
-                center_freq_max=self["signal_center_freq_max"],
-                sample_rate=self["sample_rate"],
-                frequency_max=self["frequency_max"],
-                frequency_min=self["frequency_min"],
-                random_generator=self.random_generator,
             )
 
-            # map the signal bounding box into a rectangle in cartesian coordinate system
-            if len(iq_samples) - len(new_signal.data) < 1:
-                warnings.warn(
-                    "generated signal is too large to fit in spectrogram; it will be cut off",
-                    UserWarning,
-                    stacklevel=2
-                )
-            start_sample = self.random_generator.integers(
-                low=0, high=max(len(iq_samples) - len(new_signal.data), 1)
+            # Truncate before calculating the overlap rectangle so the rectangle
+            # reflects the portion of the component that will actually be inserted.
+            self._truncate_component_signal(
+                iq_samples,
+                new_signal,
+                start_sample,
             )
-            new_rectangle = self._map_to_coordinates(new_signal, start_sample)
 
-            # check if the new_rectangle overlaps with any others in spectrogram
-            has_overlap = self._check_if_overlap(new_rectangle, signal_rectangle_list)
+            new_rectangle = self._map_to_coordinates(
+                new_signal,
+                start_sample,
+            )
+            has_overlap = self._check_if_overlap(
+                new_rectangle,
+                signal_rectangles,
+            )
 
-            p = self.random_generator.uniform(0, 1)
-            p_o = p < self["cochannel_overlap_probability"]
-            # signal is used if there is no overlap OR with some random chance
-            if (
-                not has_overlap or
-                p_o
-            ):
-                num_signals_created += 1
-                # store the rectangle for future overlap checking
-                signal_rectangle_list.append(new_rectangle)
-                stop_sample = min(start_sample + len(new_signal.data), len(iq_samples))
-                # place signal on iq sample cut
-                iq_samples[
-                    start_sample : stop_sample
-                ] += new_signal.data[:stop_sample]
-                # append the signal on the list
-                new_signal["start_in_samples"] = start_sample
-                signals.append(new_signal)
-        # form the sample (dataset object)
+            if has_overlap and not self._allow_cochannel_overlap():
+                continue
+
+            self._insert_component_signal(
+                iq_samples,
+                new_signal,
+                start_sample,
+            )
+            signal_rectangles.append(new_rectangle)
+            component_signals.append(new_signal)
+
         sample = Signal(
             data=iq_samples,
-            component_signals=signals,
+            component_signals=component_signals,
             center_freq=0,
-            bandwidth=max([0] + [signal.bandwidth for signal in signals]),
+            bandwidth=max(
+                [0] + [signal.bandwidth for signal in component_signals]
+            ),
         )
-         # Set class name if available
+
         if hasattr(self, "class_name"):
             sample.class_name = self.class_name
 
         if sample.parent is None:
-            # register=False: the assembled sample Signal is transient. It
-            # needs the parent link so transforms and label extraction can
-            # inherit dataset-level metadata, but it must NOT be appended to
-            # self.children, which would retain every sample in memory for the
-            # lifetime of the dataset
-            sample.add_parent(self, register=False) # transient parent link
+            # The generated sample needs access to dataset metadata, but registering
+            # it as a child would retain every generated sample in memory.
+            sample.add_parent(self, register=False)
+
         return sample
+
+
+    def _generate_component_signal(self) -> Signal:
+        """Generate and prepare one component signal."""
+        generator = self._random_signal_generator()
+        signal = generator()
+
+        for component_transform in self.component_transforms:
+            signal = component_transform(signal)
+
+        update_signal_snr_bandwidth(self, signal)
+
+        return frequency_shift_signal(
+            signal,
+            center_freq_min=self["signal_center_freq_min"],
+            center_freq_max=self["signal_center_freq_max"],
+            sample_rate=self["sample_rate"],
+            frequency_max=self["frequency_max"],
+            frequency_min=self["frequency_min"],
+            random_generator=self.random_generator,
+        )
+
+
+    def _choose_start_sample(
+        self,
+        iq_samples: np.ndarray,
+        signal: Signal,
+    ) -> int:
+        """Choose a valid start index for a component signal."""
+        num_available_samples = len(iq_samples)
+        num_signal_samples = len(signal.data)
+
+        if num_signal_samples > num_available_samples:
+            warnings.warn(
+                "generated signal is too large to fit in the dataset sample; "
+                "it will be cut off",
+                UserWarning,
+                stacklevel=2,
+            )
+
+        # NumPy's upper bound is exclusive, so add one to include the final valid
+        # start position.
+        num_valid_start_positions = max(
+            num_available_samples - num_signal_samples + 1,
+            1,
+        )
+
+        return int(
+            self.random_generator.integers(
+                low=0,
+                high=num_valid_start_positions,
+            )
+        )
+
+
+    def _truncate_component_signal(
+        self,
+        iq_samples: np.ndarray,
+        signal: Signal,
+        start_sample: int,
+    ) -> None:
+        """Truncate a component to the portion that fits in the IQ buffer."""
+        num_samples_to_add = max(
+            min(
+                len(signal.data),
+                len(iq_samples) - start_sample,
+            ),
+            0,
+        )
+
+        if num_samples_to_add < len(signal.data):
+            signal.data = signal.data[:num_samples_to_add]
+            signal["duration_in_samples"] = num_samples_to_add
+
+
+    def _allow_cochannel_overlap(self) -> bool:
+        """Return whether an overlapping component should be accepted."""
+        return bool(
+            self.random_generator.uniform(0, 1)
+            < self["cochannel_overlap_probability"]
+        )
+
+
+    def _insert_component_signal(
+        self,
+        iq_samples: np.ndarray,
+        signal: Signal,
+        start_sample: int,
+    ) -> None:
+        """Insert the portion of a component signal that fits in the IQ buffer."""
+        # Keep this method safe when called directly, even though normal generation
+        # truncates the signal before overlap detection.
+        self._truncate_component_signal(
+            iq_samples,
+            signal,
+            start_sample,
+        )
+
+        stop_sample = start_sample + len(signal.data)
+
+        iq_samples[start_sample:stop_sample] += signal.data
+        signal["start_in_samples"] = start_sample
+        signal["duration_in_samples"] = len(signal.data)
+
 
     def _map_to_coordinates(self, new_signal: Signal, start_sample: int) -> Rectangle:
         """Maps a new signal to coordinates based on the start sample and signal characteristics.
@@ -704,29 +934,49 @@ class SafeTorchSigIterableDataset(
         Note:
             All pipeline failures are logged to aid debugging and monitoring.
         """
-        # Stage 1: generation + component_transforms
-        # If this fails, no raw/original sample exists yet.
-        def generate_raw_signal():
-            return self.__generate_new_signal__()
-
-        raw_signal = self._run_with_fallback(
-            generate_raw_signal,
-            fallback_raw_signal=None,
-        )
-
-        # Stage 2: whole-signal transforms + labels
-        # If this fails, raw_signal exists, so original fallback is possible.
-        def transform_raw_signal():
-            return apply_transforms_and_labels_to_signal(
-                raw_signal,
-                self.transforms,
-                self.target_labels,
+        sample_index = self._metadata_logging_sample_index
+        self._metadata_logging_sample_index += 1
+        if not self._metadata_logging_is_active():
+            raw_signal = self._run_with_fallback(
+                self.__generate_new_signal__,
+                fallback_raw_signal=None,
+            )
+            return self._run_with_fallback(
+                lambda: apply_transforms_and_labels_to_signal(
+                    raw_signal,
+                    self.transforms,
+                    self.target_labels,
+                ),
+                fallback_raw_signal=raw_signal,
             )
 
-        return self._run_with_fallback(
-            transform_raw_signal,
-            fallback_raw_signal=raw_signal,
-        )
+        with self._metadata_logging_sample_context(sample_index):
+            # Stage 1: generation + component_transforms. If this fails, no
+            # raw/original sample exists yet.
+            raw_signal = self._run_with_metadata_logging_stage(
+                "generate",
+                lambda: self._run_with_fallback(
+                    self.__generate_new_signal__,
+                    fallback_raw_signal=None,
+                ),
+            )
+
+            # Stage 2: whole-signal transforms + labels. If this fails,
+            # raw_signal exists, so original fallback is possible.
+            return self._run_with_metadata_logging_stage(
+                "transform",
+                lambda: self._transform_and_log_metadata_snapshot(
+                    raw_signal,
+                    lambda: self._run_with_fallback(
+                        lambda: apply_transforms_and_labels_to_signal(
+                            raw_signal,
+                            self.transforms,
+                            self.target_labels,
+                        ),
+                        fallback_raw_signal=raw_signal,
+                    ),
+                ),
+            )
 
 
     def set_fallback_policy(
@@ -858,5 +1108,5 @@ class StaticTorchSigDataset(Dataset, Seedable):
         return (
             f"{self.__class__.__name__}"
             f"(root={self.root}, "
-            f"file_handler_class={self.reader}"
+            f"file_handler_class={self.reader})"
         )
