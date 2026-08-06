@@ -102,6 +102,133 @@ def test_sampling_grouping_balances_groups_and_classes_within_groups():
     assert abs(empirical["2fsk"] - 0.5) < 0.04
 
 
+def test_sampling_grouping_uses_configured_group_probabilities():
+    dataset = make_dataset()
+    for class_name in ["bpsk", "qpsk", "8psk", "2fsk"]:
+        dataset.add_signal_generator(DummySignalGenerator(class_name))
+    grouping = GroupingLabel(
+        {
+            "groups": [
+                {
+                    "name": "phase",
+                    "regex": "psk$",
+                    "probability": 0.25,
+                },
+                {
+                    "name": "frequency",
+                    "values": ["2fsk"],
+                    "probability": 0.75,
+                },
+            ]
+        }
+    )
+
+    dataset.balance_signal_generators_by_group(grouping)
+
+    assert np.allclose(
+        dataset.signal_probabilities,
+        [1 / 12, 1 / 12, 1 / 12, 3 / 4],
+    )
+
+
+def test_sampling_grouping_defaults_missing_probability_to_zero():
+    dataset = make_dataset()
+    for class_name in ["bpsk", "qpsk", "2fsk"]:
+        dataset.add_signal_generator(DummySignalGenerator(class_name))
+
+    with pytest.warns(
+        UserWarning,
+        match="probability is missing for group 'phase'; defaulting to 0.0",
+    ):
+        grouping = GroupingLabel(
+            {
+                "groups": [
+                    {"name": "phase", "regex": "psk$"},
+                    {
+                        "name": "frequency",
+                        "values": ["2fsk"],
+                        "probability": 1.0,
+                    },
+                ]
+            }
+        )
+
+    dataset.balance_signal_generators_by_group(grouping)
+
+    assert grouping.groups[0]["probability"] == 0.0
+    assert np.allclose(dataset.signal_probabilities, [0.0, 0.0, 1.0])
+
+
+def test_sampling_grouping_normalizes_group_likelihoods():
+    dataset = make_dataset()
+    for class_name in ["bpsk", "qpsk", "8psk", "2fsk"]:
+        dataset.add_signal_generator(DummySignalGenerator(class_name))
+    grouping = GroupingLabel(
+        {
+            "groups": [
+                {"name": "phase", "regex": "psk$", "likelihood": 1.0},
+                {
+                    "name": "frequency",
+                    "values": ["2fsk"],
+                    "likelihood": 3.0,
+                },
+            ]
+        }
+    )
+
+    dataset.balance_signal_generators_by_group(grouping)
+
+    assert np.allclose(
+        dataset.signal_probabilities,
+        [1 / 12, 1 / 12, 1 / 12, 3 / 4],
+    )
+
+
+def test_sampling_grouping_defaults_missing_likelihood_to_one():
+    dataset = make_dataset()
+    for class_name in ["bpsk", "qpsk", "2fsk"]:
+        dataset.add_signal_generator(DummySignalGenerator(class_name))
+    grouping = GroupingLabel(
+        {
+            "groups": [
+                {"name": "phase", "regex": "psk$", "likelihood": 3.0},
+                {"name": "frequency", "values": ["2fsk"]},
+            ]
+        }
+    )
+
+    dataset.balance_signal_generators_by_group(grouping)
+
+    assert np.allclose(dataset.signal_probabilities, [3 / 8, 3 / 8, 1 / 4])
+
+
+def test_sampling_grouping_rejects_probability_for_unrepresented_group():
+    dataset = make_dataset()
+    dataset.add_signal_generator(DummySignalGenerator("bpsk"))
+    grouping = GroupingLabel(
+        {
+            "groups": [
+                {
+                    "name": "phase",
+                    "regex": "psk$",
+                    "probability": 0.75,
+                },
+                {
+                    "name": "frequency",
+                    "values": ["2fsk"],
+                    "probability": 0.25,
+                },
+            ]
+        }
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="positive probability to groups without signal generators",
+    ):
+        dataset.balance_signal_generators_by_group(grouping)
+
+
 def test_sampling_grouping_constructor_accepts_yaml(tmp_path):
     config_path = tmp_path / "groups.yaml"
     config_path.write_text(
@@ -110,8 +237,10 @@ source: class_name
 groups:
   - name: phase
     regex: 'psk$'
+    probability: 0.25
   - name: frequency
     values: [2fsk]
+    probability: 0.75
 """
     )
     metadata = make_dataset().metadata
@@ -127,7 +256,7 @@ groups:
 
     assert np.allclose(
         dataset.signal_probabilities,
-        [1 / 4, 1 / 4, 1 / 2],
+        [1 / 8, 1 / 8, 3 / 4],
     )
 
 

@@ -364,6 +364,49 @@ def test_grouping_label_rejects_unmatched_value():
         transform(Signal(class_name="tone"))
 
 
+def test_grouping_label_rejects_mixed_sampling_weights():
+    config = {
+        "groups": [
+            {"name": "phase", "regex": "psk$", "probability": 0.5},
+            {"name": "frequency", "regex": "fsk$", "likelihood": 1.0},
+        ]
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="cannot mix probability and likelihood",
+    ):
+        GroupingLabel(config)
+
+
+@pytest.mark.parametrize(
+    ("groups", "expected_message"),
+    [
+        (
+            [
+                {"name": "phase", "regex": "psk$", "probability": 0.4},
+                {"name": "frequency", "regex": "fsk$", "probability": 0.4},
+            ],
+            "group probabilities must sum to 1.0",
+        ),
+        (
+            [{"name": "phase", "regex": "psk$", "probability": -1.0}],
+            "probability must be >= 0",
+        ),
+        (
+            [{"name": "phase", "regex": "psk$", "likelihood": 0.0}],
+            "likelihood must be > 0",
+        ),
+    ],
+)
+def test_grouping_label_rejects_invalid_sampling_weights(
+    groups,
+    expected_message,
+):
+    with pytest.raises(ValueError, match=expected_message):
+        GroupingLabel({"groups": groups})
+
+
 @pytest.mark.parametrize(
     ("config", "expected_message"),
     [

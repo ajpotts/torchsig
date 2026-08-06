@@ -206,8 +206,9 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
             target_labels: Labels to extract from the signal.
             sampling_grouping: A GroupingLabel, grouping YAML path, or
                 grouping configuration mapping. When provided, signal
-                generators are weighted so each represented group has equal
-                probability and classes within a group are uniform.
+                generators use each group's configured ``probability`` or
+                normalized ``likelihood``. Without weights, represented
+                groups are equiprobable. Classes within a group are uniform.
             validate_init: Whether to validate metadata during initialization.
             **kwargs: Additional keyword arguments passed to the parent class.
         """
@@ -271,8 +272,10 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
                 raise ValueError(
                     "signal probability count does not match number of generators"
                 )
-            if np.any(probabilities <= 0.0):
-                raise ValueError("all signal probabilities must be > 0")
+            if np.any(probabilities < 0.0):
+                raise ValueError("all signal probabilities must be >= 0")
+            if not np.any(probabilities > 0.0):
+                raise ValueError("at least one signal probability must be > 0")
 
             probability_sum = float(np.sum(probabilities))
             if probability_sum > 1.0 + 1e-8:
@@ -319,11 +322,14 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         self,
         grouping: GroupingLabel | str | Path | Mapping[str, Any],
     ) -> None:
-        """Weight generators for equal probability among configured groups.
+        """Weight generators using the configured group sampling weights.
 
         Groups are resolved from metadata already available on each signal
         generator. A grouping based on generated metadata, such as a realized
         bandwidth, cannot be balanced before generation and raises an error.
+        Group probabilities are used directly and must sum to one. Group
+        likelihoods are normalized over represented groups. When neither is
+        configured, represented groups receive equal probability.
 
         Args:
             grouping: A GroupingLabel instance, YAML path, or configuration
@@ -362,11 +368,60 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
             group_name: generator_groups.count(group_name)
             for group_name in set(generator_groups)
         }
-        num_groups = len(group_counts)
+        configured_groups = {
+            group["name"]: group for group in grouping.groups
+        }
+        uses_probabilities = any(
+            "probability" in group for group in grouping.groups
+        )
+        uses_likelihoods = any(
+            "likelihood" in group for group in grouping.groups
+        )
+
+        if uses_probabilities:
+            unrepresented_probability_groups = [
+                group_name
+                for group_name, group in configured_groups.items()
+                if group_name not in group_counts
+                and group.get("probability", 0.0) > 0.0
+            ]
+            if unrepresented_probability_groups:
+                raise ValueError(
+                    "cannot assign positive probability to groups without "
+                    "signal generators: "
+                    f"{unrepresented_probability_groups}"
+                )
+            group_probabilities = {
+                group_name: configured_groups[group_name].get(
+                    "probability",
+                    0.0,
+                )
+                for group_name in group_counts
+            }
+        elif uses_likelihoods:
+            group_likelihoods = {
+                group_name: configured_groups[group_name].get(
+                    "likelihood",
+                    1.0,
+                )
+                for group_name in group_counts
+            }
+            likelihood_sum = float(sum(group_likelihoods.values()))
+            group_probabilities = {
+                group_name: likelihood / likelihood_sum
+                for group_name, likelihood in group_likelihoods.items()
+            }
+        else:
+            equal_group_probability = 1.0 / len(group_counts)
+            group_probabilities = dict.fromkeys(
+                group_counts,
+                equal_group_probability,
+            )
+
         self._signal_probability_mode = "probability"
         self.signal_probabilities = np.asarray(
             [
-                1.0 / (num_groups * group_counts[group_name])
+                group_probabilities[group_name] / group_counts[group_name]
                 for group_name in generator_groups
             ],
             dtype=float,

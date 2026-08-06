@@ -3,6 +3,7 @@
 import ast
 import copy
 import re
+import warnings
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, ClassVar
@@ -393,7 +394,7 @@ class GroupingLabel(MetadataTransform):
     ) -> dict[str, Any]:
         """Load and copy grouping configuration."""
         if isinstance(config, Mapping):
-            return dict(config)
+            return copy.deepcopy(dict(config))
         if isinstance(config, str) and config in _BUILTIN_GROUPING_CONFIGS:
             return copy.deepcopy(_BUILTIN_GROUPING_CONFIGS[config])
         if isinstance(config, (str, Path)):
@@ -454,6 +455,80 @@ class GroupingLabel(MetadataTransform):
 
         if len(names) != len(set(names)):
             raise ValueError("group names must be unique")
+
+        probability_groups = [
+            group for group in self.groups if "probability" in group
+        ]
+        likelihood_groups = [
+            group for group in self.groups if "likelihood" in group
+        ]
+        if probability_groups and likelihood_groups:
+            raise ValueError(
+                "grouping config cannot mix probability and likelihood"
+            )
+
+        if probability_groups:
+            probabilities = []
+            for group in self.groups:
+                if "probability" not in group:
+                    warnings.warn(
+                        f"probability is missing for group {group['name']!r}; "
+                        "defaulting to 0.0",
+                        UserWarning,
+                        stacklevel=3,
+                    )
+                    group["probability"] = 0.0
+                probability = group["probability"]
+                probabilities.append(
+                    self._validate_sampling_weight(
+                        probability,
+                        "probability",
+                        group["name"],
+                        allow_zero=True,
+                    )
+                )
+            probability_sum = float(np.sum(probabilities))
+            if not np.isclose(probability_sum, 1.0, atol=1e-8):
+                raise ValueError(
+                    "group probabilities must sum to 1.0, "
+                    f"found {probability_sum}"
+                )
+        elif likelihood_groups:
+            for group in likelihood_groups:
+                self._validate_sampling_weight(
+                    group["likelihood"],
+                    "likelihood",
+                    group["name"],
+                    allow_zero=False,
+                )
+
+    @staticmethod
+    def _validate_sampling_weight(
+        value: Any,
+        weight_name: str,
+        group_name: str,
+        *,
+        allow_zero: bool,
+    ) -> float:
+        """Validate a probability or likelihood stored on a group."""
+        if isinstance(value, bool) or not isinstance(
+            value,
+            (int, float, np.integer, np.floating),
+        ):
+            raise TypeError(
+                f"group {group_name!r} {weight_name} must be a real number"
+            )
+        value = float(value)
+        if not np.isfinite(value):
+            raise ValueError(
+                f"group {group_name!r} {weight_name} must be finite"
+            )
+        if value < 0.0 or (value == 0.0 and not allow_zero):
+            comparator = ">= 0" if allow_zero else "> 0"
+            raise ValueError(
+                f"group {group_name!r} {weight_name} must be {comparator}"
+            )
+        return value
 
     def _compile_rule(self, group: dict[str, Any]) -> tuple[str, Any]:
         """Validate and compile one configured matching rule."""

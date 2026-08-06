@@ -9,9 +9,10 @@ Previously, GroupingLabel could assign grouped output labels, but generator
 selection remained uniform per signal class. Groups containing many classes
 therefore appeared more frequently than groups containing only a few classes.
 
-TorchSigIterableDataset now accepts sampling_grouping. It assigns equal total
-probability to every represented group and distributes that probability
-uniformly among the generators within the group.
+TorchSigIterableDataset now accepts sampling_grouping. Groups may define an
+explicit probability or a relative likelihood, and the resulting group share
+is distributed uniformly among the generators within that group. If no
+weights are configured, represented groups remain equiprobable.
 
 Usage
 
@@ -57,7 +58,38 @@ The preset is generated from CLASS_FAMILY_DICT. Family names are sorted to
 provide stable numeric indices, and each GroupingLabel receives an independent
 configuration copy.
 
-Probability calculation
+Probability and likelihood configuration
+
+Weights are added directly to group entries. Explicit probabilities must sum
+to 1.0:
+
+    groups:
+      - name: phase
+        regex: 'psk$'
+        probability: 0.25
+      - name: frequency
+        regex: 'fsk$'
+        probability: 0.75
+
+When any group uses probability mode, a group without a probability emits a
+warning and receives probability 0.0. A positive probability assigned to a
+group with no available generator is rejected because that distribution
+cannot be realized.
+
+Likelihoods are relative weights and are normalized over represented groups:
+
+    groups:
+      - name: phase
+        regex: 'psk$'
+        likelihood: 1
+      - name: frequency
+        regex: 'fsk$'
+        likelihood: 3
+
+A missing likelihood defaults to 1.0. Probability and likelihood cannot be
+mixed in one grouping configuration.
+
+Equal-probability calculation
 
 Generator probability is calculated as:
 
@@ -126,6 +158,9 @@ The new tests verify:
 - Errors for empty datasets and generators that match no configured group.
 - Correct and independently copied canonical family presets.
 - Equal sampling through sampling_grouping="family".
+- Exact group probabilities and normalized group likelihoods.
+- Warning and zero probability behavior for omitted probabilities.
+- Validation for mixed, invalid, and unrealizable group weights.
 
 Commands run:
 
