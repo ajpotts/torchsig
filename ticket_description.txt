@@ -1,0 +1,38 @@
+Title: Correct fractional resampling for rates near unity
+
+Type: Bug
+Priority: Medium
+
+Description
+
+The fractional polyphase resampler converts a requested floating-point rate
+into an integer up/down ratio. The current implementation calculates the down
+rate with ceil(), which always biases the selected ratio in the same direction.
+
+For very small Doppler shifts near a 1:1 rate, that bias can quantize the
+requested shift into a substantially larger shift. It also makes equivalent
+approaching and receding velocities produce asymmetric rate errors.
+
+Proposed work
+
+1. Add a focused helper for converting a requested fractional rate into the
+   resampler's integer up/down rates.
+2. Select the down rate by rounding to the nearest integer rather than always
+   rounding upward.
+3. Ensure the down rate remains at least one.
+4. Add deterministic tests for rate accuracy near unity and symmetry around
+   unity.
+
+Acceptance criteria
+
+- Near-unity requested rates are represented accurately by the selected
+  integer ratio.
+- Equal-magnitude approaching and receding Doppler rates have approximately
+  symmetric quantization errors.
+- Existing DSP tests continue to pass.
+- The change does not alter the public resampler API.
+
+Validation command
+
+pytest -q tests/utils/test_dsp.py
+

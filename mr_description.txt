@@ -1,0 +1,33 @@
+Summary
+
+Corrects fractional polyphase resampling for requested rates near unity by
+selecting the closest available integer up/down ratio.
+
+Changes
+
+- Adds _polyphase_fractional_integer_rates to centralize conversion of a
+  floating-point fractional rate into integer up/down rates.
+- Replaces ceil-based down-rate selection with rounding to the nearest integer.
+- Clamps the selected down rate to a minimum of one.
+- Adds tests covering near-unity rate accuracy.
+- Adds tests confirming symmetric quantization errors around a 1:1 rate.
+
+Rationale
+
+The previous ceil-based calculation always biased the effective resampling rate
+in the same direction. For small Doppler shifts, especially rates very close to
+unity, this could turn a small requested shift into a noticeably larger one and
+produce asymmetric behavior for approaching and receding velocities.
+
+This is the first MR in the Doppler correctness and performance series. It is a
+focused DSP correctness change and does not include filter caching, dtype
+optimization, scalar Doppler changes, batched Doppler support, or benchmarks.
+
+Testing
+
+pytest -q tests/utils/test_dsp.py
+
+23 passed, 1 warning in 2.52s
+
+The warning is an environment-specific NVML initialization warning and is not
+related to the fractional resampler.
