@@ -932,7 +932,9 @@ def test_ofdm_signal_generator_generate():
     rng.integers.side_effect = [
         150,
         800,
+        16,
     ]
+    rng.uniform.return_value = 0.75
 
     class GeneratorStub:
         random_generator = rng
@@ -958,6 +960,7 @@ def test_ofdm_signal_generator_generate():
     assert rng.integers.call_args_list == [
         call(low=100, high=201),
         call(low=500, high=1_001),
+        call(2, 32),
     ]
 
     modulator.assert_called_once_with(
@@ -966,12 +969,42 @@ def test_ofdm_signal_generator_generate():
         10_000,
         150,
         rng,
+        16,
     )
 
     signal_class.assert_called_once_with(
         data=signal_data,
         center_freq=0,
         bandwidth=800,
+        has_cyclic_prefix=True,
+        cyclic_prefix_len=16,
     )
 
     assert result is expected_signal
+
+
+def test_ofdm_signal_generator_labels_absent_cyclic_prefix():
+    """An omitted cyclic prefix should be represented by false and zero labels."""
+    metadata = {
+        "sample_rate": 10_000,
+        "bandwidth_min": 500,
+        "bandwidth_max": 1_000,
+        "num_subcarriers": 64,
+        "signal_duration_in_samples_min": 100,
+        "signal_duration_in_samples_max": 200,
+    }
+    rng = MagicMock(spec=np.random.Generator)
+    rng.integers.side_effect = [150, 800]
+    rng.uniform.return_value = 0.25
+
+    class GeneratorStub:
+        random_generator = rng
+
+        def __getitem__(self, key):
+            return metadata[key]
+
+    with patch(f"{MODULE_PATH}.ofdm_modulator", return_value=np.ones(150)):
+        signal = OFDMSignalGenerator.generate(GeneratorStub())
+
+    assert signal.has_cyclic_prefix is False
+    assert signal.cyclic_prefix_len == 0

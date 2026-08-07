@@ -1,0 +1,14 @@
+Want to include labels such that mod-rec can be trained to report:
+
+
+        
+      cyclic prefix yes/no for OFDM
+
+        
+      cyclic prefix length for OFDM
+
+        
+      pulse shaping filter for constellation waveforms
+
+        
+      puslse shaping roll-off factor for constellation waveforms
