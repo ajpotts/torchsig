@@ -1,0 +1,36 @@
+Title: Repair the optional passband-ripple benchmarks
+
+Type: Bug
+Priority: Low
+
+Description
+
+The optional passband-ripple benchmark uses arguments that are no longer
+accepted by the passband_ripple functional implementation. Its fallback case
+also relies on parameter selection to trigger a filter-construction failure,
+which is indirect and can change as the implementation evolves.
+
+As a result, the benchmark can fail before measuring the transform or fail to
+exercise the intended fallback path.
+
+Proposed work
+
+1. Remove the obsolete coefficient_decay_rate and max_counter arguments.
+2. Update the benchmark parameterization to match the current public API.
+3. Trigger the filter-construction failure deterministically in the fallback
+   benchmark.
+4. Verify that fallback="original" returns the original input object.
+
+Acceptance criteria
+
+- The optional passband-ripple benchmark uses only currently supported
+  arguments.
+- The normal benchmark cases complete successfully.
+- The fallback benchmark deterministically exercises the filter failure path.
+- The fallback benchmark verifies that the original input is returned.
+- Running the benchmark module with --benchmark-only succeeds.
+
+Validation command
+
+pytest -q benchmarks/optional/benchmark_passband_ripple.py --benchmark-only
+
