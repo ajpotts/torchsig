@@ -1,0 +1,31 @@
+Summary
+
+Repairs the optional passband-ripple benchmarks so they match the current
+functional API and exercise fallback behavior deterministically.
+
+Changes
+
+- Removes the obsolete coefficient_decay_rate argument from the normal
+  benchmark cases.
+- Removes obsolete coefficient_decay_rate and max_counter arguments from the
+  fallback benchmark.
+- Updates parameter formatting and numeric literals for readability.
+- Injects a filter-construction failure with monkeypatch so the fallback path
+  is tested reliably.
+- Verifies that fallback="original" returns the original input object.
+
+Rationale
+
+The benchmark had fallen out of sync with the passband_ripple API. In addition,
+using unusually strict parameters to provoke a failure made the fallback case
+dependent on implementation details. Injecting the failure directly makes the
+benchmark deterministic and keeps it focused on fallback performance.
+
+Testing
+
+pytest -q benchmarks/optional/benchmark_passband_ripple.py --benchmark-only
+
+5 passed, 10 warnings in 8.91s
+
+The warnings report that requested tap counts below the enforced minimum are
+raised to 65 by the implementation; they do not indicate benchmark failures.
