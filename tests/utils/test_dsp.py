@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import pytest
 
+from torchsig.utils import dsp
 from torchsig.utils.dsp import (
     TorchSigComplexDataType,
     compute_spectrogram,
@@ -105,5 +106,65 @@ def test_compute_spectrogram_input_not_modified():
     original = samples.copy()
     compute_spectrogram(samples, FFT_SIZE, FFT_SIZE)
     np.testing.assert_array_equal(samples, original)
+
+
+PROPAGATION_SPEED = 2.9979e8
+
+
+def _actual_fractional_rate(monkeypatch, requested_rate: float) -> float:
+    """Capture the integer rate selected by the fractional resampler."""
+    selected_rate = None
+
+    def fake_upfirdn(weights, data, up, down):
+        nonlocal selected_rate
+        selected_rate = up / down
+        return np.zeros(data.size + len(weights), dtype=np.complex64)
+
+    monkeypatch.setattr(
+        dsp,
+        "prototype_polyphase_filter_interpolation",
+        lambda _num_branches: np.ones(20_001),
+    )
+    monkeypatch.setattr(dsp.sp, "upfirdn", fake_upfirdn)
+
+    dsp.polyphase_fractional_resampler(
+        np.ones(16, dtype=np.complex64),
+        requested_rate,
+    )
+
+    return selected_rate
+
+
+def test_fractional_resampler_preserves_near_unity_rate(monkeypatch) -> None:
+    """A small Doppler shift should not be quantized into a larger shift."""
+    velocity = 10.0
+    alpha = PROPAGATION_SPEED / (PROPAGATION_SPEED - velocity)
+    requested_rate = 1 / alpha
+
+    actual_rate = _actual_fractional_rate(monkeypatch, requested_rate)
+
+    assert actual_rate == pytest.approx(requested_rate, rel=1e-6)
+
+
+def test_fractional_resampler_is_symmetric_around_unity(monkeypatch) -> None:
+    """Equal approaching and receding speeds should have symmetric errors."""
+    velocity = 10.0
+    approaching_alpha = PROPAGATION_SPEED / (PROPAGATION_SPEED - velocity)
+    receding_alpha = PROPAGATION_SPEED / (PROPAGATION_SPEED + velocity)
+
+    approaching_rate = _actual_fractional_rate(
+        monkeypatch,
+        1 / approaching_alpha,
+    )
+    receding_rate = _actual_fractional_rate(
+        monkeypatch,
+        1 / receding_alpha,
+    )
+
+    assert abs(approaching_rate - 1.0) == pytest.approx(
+        abs(receding_rate - 1.0),
+        rel=1e-2,
+        abs=1e-8,
+    )
  
  
