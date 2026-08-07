@@ -1,0 +1,19 @@
+Summary
+Update the return annotation and documentation for HierarchicalMetadataObject.keys.
+Problem
+keys() is annotated as returning list[str], but it currently returns self._metadata.keys(), which is a dynamic dict_keys view rather than a list.
+Acceptance criteria
+
+
+        
+      Annotate the return type as KeysView[str] or another accurate mapping-key view type.
+
+        
+      Update the docstring to describe the returned key view.
+
+        
+      Preserve the current dynamic-view behavior.
+
+        
+      Add or update tests covering the return type and behavior.
+ 
