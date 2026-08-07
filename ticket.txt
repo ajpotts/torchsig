@@ -1,0 +1,18 @@
+Summary
+Provide an explicit extension mechanism for copying subclasses with required constructor arguments.
+Problem
+HierarchicalMetadataObject.copy() reconstructs an object using only parent, seed, and metadata. Subclasses with additional required constructor arguments cannot use the inherited method.
+Acceptance criteria
+
+
+        
+      Define the supported constructor contract for subclasses, or introduce a protected copy-construction hook.
+
+        
+      Allow subclasses to preserve required state without replacing the entire copy implementation.
+
+        
+      Preserve shallow-copy and preserve_parent behavior.
+
+        
+      Add tests for subclasses with required constructor arguments.
