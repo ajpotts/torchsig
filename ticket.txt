@@ -1,0 +1,13 @@
+customizing datasets on a per-signal basis:
+
+
+        
+      SNR
+
+        
+      signal duration
+
+        
+      signal bandwidth
+
+For example, this means that QPSK can have an SNR range of [0,10] while AM-DSB-SC can have an SNR range of [15,30]
