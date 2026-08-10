@@ -1,25 +1,48 @@
-Optimize TorchSig’s Doppler implementation by preserving complex64 processing, caching reusable polyphase filters, handling near-unity rates efficiently, and adding an optional batched API for signals sharing a Doppler rate. Fix length, dtype, validation, and filter-cache issues, and add focused unit and optional performance benchmarks.
-Expected outcomes include roughly 40–50% faster common scalar Doppler calls and substantial additional gains for batched processing, while preserving numerical and spectral behavior.
+Title: Add optional Doppler performance benchmarks
 
-Summary
-This MR improves the correctness and performance of TorchSig’s wideband Doppler resampling.
-Changes
-Fix Doppler output-length handling for long signals.
-Validate invalid physical parameters and multidimensional scalar inputs.
-Preserve complex64 throughout resampling by using dtype-aware float32 filters.
-Cache base and finalized interpolation/decimation filters.
-Bypass filtering when the effective resampling rate is unity.
-Improve fractional-rate selection near unity.
-Avoid unnecessary final dtype copies.
-Add doppler_batch for equal-length signals sharing one velocity.
-Extend polyphase resampling to operate along the final array axis.
-Add optional scalar, batched, and dataset-generation benchmarks.
-Add unit tests for shape, dtype, numerical precision, spectral performance, caching, edge cases, and reproducibility.
-Repair the outdated passband-ripple fallback benchmark.
-Performance
-Compared with the original implementation:
-Short and medium scalar Doppler calls are approximately 40–50% faster.
-Long scalar calls are approximately 12–16% faster.
-Dataset generation with Doppler is approximately 50–65% faster.
-Batched processing is approximately 69–94% faster for short and medium signals and 11–28% faster for long signals.
-Numerical comparisons remain within complex64 precision, with filter passband and stopband behavior preserved.
+## Summary
+
+This MR adds an optional pytest-benchmark suite for measuring the performance
+of the Doppler optimization stack. It covers scalar calls, shared-rate batched
+processing, and Doppler overhead during dataset generation.
+
+The cases use deterministic complex64 inputs and seeded datasets. Each path is
+warmed before timing, and benchmark results are checked for expected shape,
+dtype, and finite values so performance measurements do not hide correctness
+regressions.
+
+## Changes
+
+- Benchmark scalar Doppler across four signal lengths and three velocities.
+- Compare `doppler_batch` with a scalar-loop baseline across batch sizes and
+  signal lengths.
+- Compare seeded dataset generation with and without Doppler.
+- Keep implementation lookup tables so future candidates can be compared with
+  the current implementation consistently.
+- Keep all cases in the optional benchmark directory.
+
+## Test Plan
+
+Collect the benchmark cases without executing them:
+
+    pytest --collect-only -q benchmarks/optional/benchmark_doppler.py
+
+Run all Doppler benchmarks:
+
+    pytest benchmarks/optional/benchmark_doppler.py --benchmark-only
+
+Run one category when iterating:
+
+    pytest benchmarks/optional/benchmark_doppler.py --benchmark-only \
+        -k benchmark_doppler_batch
+
+Useful comparisons are scalar performance by signal length and velocity,
+`axis-batch` versus `scalar-loop`, and `dataset-with-doppler` versus
+`dataset-baseline`. Benchmark output should be attached to the MR or recorded
+in its discussion rather than committed as a result file.
+
+## Scope
+
+This is Part 5 of the Doppler optimization MR split and is stacked on Part 4.
+It does not include implementation changes, committed benchmark results, or the
+independent passband-ripple benchmark repair.
