@@ -1,2 +1,39 @@
-Please review notebook for spelling mistakes. Here are some examples
+Title: Correct spelling and wording errors in example notebooks
 
+Background
+
+Several example notebooks contain spelling mistakes, inconsistent product-name
+capitalization, repeated words, and nearby wording errors that make the
+documentation harder to read. The original report referenced the SatNOGS
+processor notebook, but that outdated notebook has already been removed from
+the repository. The review should therefore cover all currently tracked
+notebooks.
+
+Scope
+
+- Review Markdown cells and user-facing code comments in every tracked
+  notebook.
+- Correct spelling mistakes and typographical errors.
+- Standardize names such as PyTorch, NumPy, GNU Radio, CSV, and TorchSig APIs.
+- Fix repeated or missing words and closely related grammatical errors where
+  needed for the corrected sentence to read naturally.
+- Preserve technical meaning, executable code, notebook metadata, cell order,
+  and stored outputs.
+
+Acceptance criteria
+
+- Clear misspellings are removed from all current notebooks.
+- Product names, API names, and common file-format names use consistent
+  capitalization.
+- Every edited notebook remains valid notebook JSON.
+- No executable behavior or dependency changes are introduced.
+- No notebook cells need to be re-executed solely for these prose corrections.
+- The resulting diff contains only focused notebook text changes and supporting
+  ticket/MR descriptions.
+
+Validation
+
+- Parse every tracked `.ipynb` file as JSON.
+- Spell-check extracted Markdown text and review remaining technical terms and
+  proper nouns manually.
+- Run `git diff --check` to identify whitespace errors.

@@ -1,0 +1,36 @@
+Title: Correct spelling and wording in example notebooks
+
+## Summary
+
+This MR corrects spelling, capitalization, and closely related wording errors
+across the currently tracked example notebooks. The changes make instructional
+text and code comments easier to read without changing notebook behavior,
+source logic, cell ordering, metadata, or stored outputs.
+
+The original ticket referenced the SatNOGS processor notebook, but that outdated
+notebook was removed previously and is no longer present in the repository.
+This update therefore covers all current notebooks instead.
+
+## Changes
+
+- Correct misspellings such as `arhcitecture`, `continous`, `deefault`,
+  `demonstates`, `instantenous`, `recevier`, `straightfoward`, and
+  `unneccessary`.
+- Standardize product and format names including PyTorch, NumPy, GNU Radio, CSV,
+  and TorchSigIterableDataset.
+- Fix repeated or missing words and nearby grammatical errors where necessary
+  to make the corrected sentences read naturally.
+- Clarify inaccurate wording such as “multiphase polyphase resampler” while
+  preserving the technical meaning.
+- Leave notebook code behavior and generated outputs unchanged.
+
+## Test Plan
+
+- Parse every tracked notebook with `jq` to confirm valid notebook JSON.
+- Extract Markdown cell text and run an `aspell` spelling scan.
+- Review the remaining reported words as expected technical terms, API names,
+  abbreviations, or proper nouns.
+- Run `git diff --check` to detect whitespace errors.
+
+Notebook execution is unnecessary because these edits only change prose and
+comments; no executable statements or dependencies are modified.
