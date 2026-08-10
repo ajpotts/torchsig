@@ -1,0 +1,41 @@
+Title: Cache polyphase filters and preserve resampler input precision
+
+Background
+
+TorchSIG repeatedly loads or designs identical polyphase prototype filters and
+reconstructs their interpolation and decimation variants. The finalized filter
+coefficients also default to float64, which promotes float32 and complex64 input
+signals during resampling. This adds avoidable I/O and computation and uses more
+memory than required by the caller's input precision.
+
+Scope
+
+- Cache base prototype filters in memory by branch count and attenuation.
+- Cache finalized interpolation and decimation filters independently by branch
+  count, attenuation, and coefficient dtype.
+- Keep prototype_polyphase_filter() results independently mutable so callers
+  cannot modify cached state.
+- Make finalized cached filters immutable.
+- Use float32 coefficients for float32 and complex64 inputs and float64
+  coefficients for higher-precision inputs.
+- Preserve complex64 through fractional resampling, integer interpolation,
+  integer decimation, and multistage resampling.
+
+Acceptance criteria
+
+- Repeated requests for the same base filter load or design it only once.
+- Repeated requests for an identical finalized filter return the cached result.
+- Float32 and float64 finalized filters occupy distinct cache entries.
+- Mutating a public prototype-filter result does not affect later calls.
+- Cached finalized filters cannot be modified by callers.
+- Complex64 resampler inputs produce complex64 outputs.
+- Float32 processing remains numerically consistent with the float64 reference.
+- Float32 coefficients preserve the expected passband and stopband response.
+- Existing DSP tests continue to pass.
+
+Dependencies and exclusions
+
+This is Part 2 of the Doppler optimization split and is intended to follow the
+fractional-resampling correctness work in Part 1. It does not include scalar
+Doppler fixes, batched Doppler support, performance benchmarks, or unrelated
+benchmark maintenance.
