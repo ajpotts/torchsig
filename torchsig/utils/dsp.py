@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from torchsig.datasets.datasets import TorchSigIterableDataset
     from torchsig.signals.signal_types import Signal
 
-__all__ = ["TorchSigComplexDataType", "TorchSigRealDataType", "bandwidth_from_lower_upper_freq", "center_freq_from_lower_upper_freq", "compute_spectrogram", "convolve", "design_half_band_filter", "estimate_filter_length", "estimate_tone_bandwidth", "frequency_shift", "gaussian_taps", "interpolate_power_of_2_resampler", "is_even", "is_multiple_of_4", "is_odd", "low_pass", "low_pass_iterative_design", "lower_freq_from_center_freq_bandwidth", "multistage_polyphase_decimator", "multistage_polyphase_interpolator", "multistage_polyphase_resampler", "multistage_polyphase_resampler_actual_rate", "noise_generator", "pad_head_tail_to_length", "partition_polyphase", "polyphase_decimator", "polyphase_fractional_resampler", "polyphase_integer_interpolator", "prototype_polyphase_filter", "prototype_polyphase_filter_decimation", "prototype_polyphase_filter_interpolation", "sampling_clock_impairments", "slice_head_tail_to_length", "slice_tail_to_length", "srrc_taps", "upconversion_anti_aliasing_filter", "update_signal_snr_bandwidth", "upper_freq_from_center_freq_bandwidth", "upsample"]
+__all__ = ["TorchSigComplexDataType", "TorchSigRealDataType", "bandwidth_from_lower_upper_freq", "center_freq_from_lower_upper_freq", "compute_spectrogram", "convolve", "design_half_band_filter", "estimate_filter_length", "estimate_tone_bandwidth", "frequency_shift", "gaussian_taps", "interpolate_power_of_2_resampler", "is_even", "is_multiple_of_4", "is_odd", "low_pass", "low_pass_iterative_design", "lower_freq_from_center_freq_bandwidth", "multistage_polyphase_decimator", "multistage_polyphase_interpolator", "multistage_polyphase_resampler", "noise_generator", "pad_head_tail_to_length", "partition_polyphase", "polyphase_decimator", "polyphase_fractional_resampler", "polyphase_integer_interpolator", "prototype_polyphase_filter", "prototype_polyphase_filter_decimation", "prototype_polyphase_filter_interpolation", "sampling_clock_impairments", "slice_head_tail_to_length", "slice_tail_to_length", "srrc_taps", "upconversion_anti_aliasing_filter", "update_signal_snr_bandwidth", "upper_freq_from_center_freq_bandwidth", "upsample"]
 
 # floor applied to linear power spectrogram (1e-10 in power is -100 dB relative to strongest bin)
 _POWER_FLOOR_RATIO = 1e-10
@@ -464,9 +464,8 @@ def multistage_polyphase_resampler_actual_rate(resample_rate: float) -> float:
         integer_rate = int(resample_rate)
         fractional_rate = resample_rate / integer_rate
         if fractional_rate > 1:
-            up_rate, down_rate = _polyphase_fractional_integer_rates(
-                fractional_rate
-            )
+            up_rate = 10_000
+            down_rate = int(np.ceil(up_rate / fractional_rate))
             fractional_rate = up_rate / down_rate
         return integer_rate * fractional_rate
 
@@ -476,22 +475,14 @@ def multistage_polyphase_resampler_actual_rate(resample_rate: float) -> float:
         fractional_rate = decimation_rate / integer_rate
         if fractional_rate > 1:
             requested_fractional_rate = 1 / fractional_rate
-            up_rate, down_rate = _polyphase_fractional_integer_rates(
-                requested_fractional_rate
-            )
+            up_rate = 10_000
+            down_rate = int(np.ceil(up_rate / requested_fractional_rate))
             requested_fractional_rate = up_rate / down_rate
         else:
             requested_fractional_rate = 1.0
         return requested_fractional_rate / integer_rate
 
     return 1.0
-
-
-def _polyphase_fractional_integer_rates(fractional_rate: float) -> tuple[int, int]:
-    """Map a requested fractional rate to the resampler's integer ratio."""
-    up_rate = 10000
-    down_rate = max(1, int(np.round(up_rate / fractional_rate)))
-    return up_rate, down_rate
 
 
 def multistage_polyphase_decimator(
@@ -579,19 +570,12 @@ def polyphase_fractional_resampler(
         np.ndarray: Resampled signal
     """
     # map the fractional part to an up and down rate
-    up_rate, down_rate = _polyphase_fractional_integer_rates(fractional_rate)
-    base_rate = up_rate
+    base_rate = 10000
+    up_rate = base_rate
+    down_rate = int(np.ceil(base_rate / fractional_rate))
 
     # design the prototype filter
-    filter_dtype = (
-        np.float32
-        if input_signal.dtype in (np.dtype(np.float32), np.dtype(np.complex64))
-        else np.float64
-    )
-    prototype_filter = prototype_polyphase_filter_interpolation(
-        base_rate,
-        dtype=filter_dtype,
-    )
+    prototype_filter = prototype_polyphase_filter_interpolation(base_rate)
     filter_length = len(prototype_filter)
     taps_per_branch = (filter_length - 1) / base_rate
 
@@ -605,68 +589,58 @@ def polyphase_fractional_resampler(
     subtract_begin = int(np.floor(total_subtract_off / 2))
     subtract_end = int(np.ceil(total_subtract_off / 2))
 
-    return fractional_interp_out[..., subtract_begin:-subtract_end]
+    return fractional_interp_out[subtract_begin:-subtract_end]
 
-
-@lru_cache(maxsize=16)
 def prototype_polyphase_filter_interpolation(
-    num_branches: int,
-    attenuation_db=120,
-    dtype=np.float64,
+    num_branches: int, attenuation_db=120
 ) -> np.ndarray:
     """Designs polyphase filterbank weights for interpolation
 
     Args:
         num_branches (int): Number of branches in the polyphase filterbank.
         attenuation_db (int, optional): Sidelobe attenuation level in dB. Defaults to 120.
-        dtype: Data type for the finalized coefficients. Defaults to float64.
 
     Returns:
         np.ndarray: Filter weights
     """
     # design the prototype filter
-    weights = _prototype_polyphase_filter_cached(
-        num_branches,
-        attenuation_db,
-    ).astype(dtype, copy=True)
+    weights = prototype_polyphase_filter(num_branches, attenuation_db)
     # scale the weights for interpolation
     weights *= num_branches
-    weights.setflags(write=False)
     return weights
 
 
-@lru_cache(maxsize=16)
 def prototype_polyphase_filter_decimation(
-    num_branches: int,
-    attenuation_db=120,
-    dtype=np.float64,
+    num_branches: int, attenuation_db=120
 ) -> np.ndarray:
     """Designs polyphase filterbank weights for decimation
 
     Args:
         num_branches (int): Number of branches in the polyphase filterbank.
         attenuation_db (int, optional): Sidelobe attenuation level in dB. Defaults to 120.
-        dtype: Data type for the finalized coefficients. Defaults to float64.
 
     Returns:
         np.ndarray: Filter weights
     """
     # design the prototype filter
-    weights = _prototype_polyphase_filter_cached(
-        num_branches,
-        attenuation_db,
-    ).astype(dtype, copy=True)
+    weights = prototype_polyphase_filter(num_branches, attenuation_db)
     # scale the weights for decimation
     weights /= num_branches
-    weights.setflags(write=False)
     return weights
 
 
-@lru_cache(maxsize=8)
-def _prototype_polyphase_filter_cached(
+def prototype_polyphase_filter(
     num_branches: int, attenuation_db: float = 120
 ) -> np.ndarray:
-    """Load or design prototype weights and retain them in memory."""
+    """Designs the prototype filter for a polyphase filter bank
+
+    Args:
+        num_branches (int): Number of branches in the polyphase filterbank
+        attenuation_db (int, optional): Sidelobe attenuation level. Defaults to 120.
+
+    Returns:
+        np.ndarray: Filter weights
+    """
     # design filter
     sample_rate = 1.0
     cutoff = sample_rate / (2 * num_branches)
@@ -708,21 +682,6 @@ def _prototype_polyphase_filter_cached(
     return filter_weights
 
 
-def prototype_polyphase_filter(
-    num_branches: int, attenuation_db: float = 120
-) -> np.ndarray:
-    """Designs the prototype filter for a polyphase filter bank.
-
-    Args:
-        num_branches (int): Number of branches in the polyphase filterbank
-        attenuation_db (int, optional): Sidelobe attenuation level. Defaults to 120.
-
-    Returns:
-        np.ndarray: Filter weights
-    """
-    return _prototype_polyphase_filter_cached(num_branches, attenuation_db).copy()
-
-
 def polyphase_integer_interpolator(
     input_signal: np.ndarray, interpolation_rate: int
 ) -> np.ndarray:
@@ -742,15 +701,7 @@ def polyphase_integer_interpolator(
     num_branches = interpolation_rate
 
     # design the prototype polyphase filter
-    filter_dtype = (
-        np.float32
-        if input_signal.dtype in (np.dtype(np.float32), np.dtype(np.complex64))
-        else np.float64
-    )
-    interpolation_filter = prototype_polyphase_filter_interpolation(
-        num_branches,
-        dtype=filter_dtype,
-    )
+    interpolation_filter = prototype_polyphase_filter_interpolation(num_branches)
 
     # apply interpolation
     interpolate_out = sp.upfirdn(
@@ -766,15 +717,15 @@ def polyphase_integer_interpolator(
         subtract_off_begin = half_filter_length - int(np.floor(num_branches / 2))
         subtract_off_end = half_filter_length - int(np.ceil(num_branches / 2)) + 1
 
-    interpolate_out = interpolate_out[..., subtract_off_begin:-subtract_off_end]
+    interpolate_out = interpolate_out[subtract_off_begin:-subtract_off_end]
 
     # length check for even interpolation rates
-    equal_lengths_boolean = interpolate_out.shape[-1] == int(
-        num_branches * input_signal.shape[-1]
+    equal_lengths_boolean = len(interpolate_out) == int(
+        num_branches * len(input_signal)
     )
     # length check for odd interpolation rates
-    lengths_off_by_one_boolean = interpolate_out.shape[-1] == int(
-        (num_branches * input_signal.shape[-1]) + 1
+    lengths_off_by_one_boolean = len(interpolate_out) == int(
+        (num_branches * len(input_signal)) + 1
     )
 
     if not (equal_lengths_boolean or lengths_off_by_one_boolean):
@@ -802,15 +753,7 @@ def polyphase_decimator(input_signal: np.ndarray, decimation_rate: int) -> np.nd
     num_branches = decimation_rate
 
     # design the prototype polyphase filter
-    filter_dtype = (
-        np.float32
-        if input_signal.dtype in (np.dtype(np.float32), np.dtype(np.complex64))
-        else np.float64
-    )
-    decimation_filter = prototype_polyphase_filter_decimation(
-        num_branches,
-        dtype=filter_dtype,
-    )
+    decimation_filter = prototype_polyphase_filter_decimation(num_branches)
 
     # apply interpolation
     decimate_out = sp.upfirdn(decimation_filter, input_signal, 1, decimation_rate)
@@ -825,16 +768,12 @@ def polyphase_decimator(input_signal: np.ndarray, decimation_rate: int) -> np.nd
         subtract_off_begin = int(np.floor(half_filter_length / decimation_rate))
         subtract_off_end = int(np.ceil(half_filter_length / decimation_rate)) + 1
 
-    decimate_out = decimate_out[..., subtract_off_begin:-subtract_off_end]
+    decimate_out = decimate_out[subtract_off_begin:-subtract_off_end]
 
     # length checks, have to account the ceil() and floor() round-off
-    fractional_length = input_signal.shape[-1] / num_branches
-    length_floor_boolean = decimate_out.shape[-1] == int(
-        np.floor(fractional_length)
-    )
-    length_ceil_boolean = decimate_out.shape[-1] == int(
-        np.ceil(fractional_length)
-    )
+    fractional_length = len(input_signal) / num_branches
+    length_floor_boolean = len(decimate_out) == int(np.floor(fractional_length))
+    length_ceil_boolean = len(decimate_out) == int(np.ceil(fractional_length))
 
     length_off_by_one_floor_boolean = len(decimate_out) == int(
         np.floor(fractional_length) - 1

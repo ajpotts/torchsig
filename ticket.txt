@@ -1,0 +1,34 @@
+Title: Fix scalar Doppler correctness and input validation
+
+Background
+
+The scalar Doppler transform calculates padding from the ideal Doppler factor,
+while the polyphase resampler uses an approximated integer ratio. For long
+signals, this mismatch can produce too few output samples. Existing padding
+also promotes complex64 input, and the transform performs avoidable filtering
+or copying when the effective rate or output dtype already matches.
+
+Scope
+
+- Calculate the effective rate selected by the multistage resampler.
+- Use the effective rate when padding to preserve the requested output length.
+- Preserve the input dtype when adding padding.
+- Bypass resampling when the effective rate is exactly unity.
+- Avoid an unnecessary final copy when the result is already complex64.
+- Validate propagation speed, velocity, and one-dimensional NumPy input.
+- Add focused scalar Doppler regression tests.
+
+Acceptance criteria
+
+- Long Doppler inputs retain their original length and valid tail content.
+- Padding does not promote complex64 input.
+- Effective unity-rate requests do not invoke the resampler.
+- Complex64 resampler output is reused when possible.
+- Invalid propagation speeds, velocities, and scalar input shapes are rejected.
+- Existing scalar Doppler behavior and tests continue to pass.
+
+Dependencies and exclusions
+
+This is Part 3 of the Doppler optimization split and follows Parts 1 and 2. It
+does not add a batched Doppler API, performance benchmarks, or unrelated
+benchmark changes.
