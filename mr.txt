@@ -1,25 +1,38 @@
-Optimize TorchSig’s Doppler implementation by preserving complex64 processing, caching reusable polyphase filters, handling near-unity rates efficiently, and adding an optional batched API for signals sharing a Doppler rate. Fix length, dtype, validation, and filter-cache issues, and add focused unit and optional performance benchmarks.
-Expected outcomes include roughly 40–50% faster common scalar Doppler calls and substantial additional gains for batched processing, while preserving numerical and spectral behavior.
+Title: Fix scalar Doppler correctness and validation
 
-Summary
-This MR improves the correctness and performance of TorchSig’s wideband Doppler resampling.
-Changes
-Fix Doppler output-length handling for long signals.
-Validate invalid physical parameters and multidimensional scalar inputs.
-Preserve complex64 throughout resampling by using dtype-aware float32 filters.
-Cache base and finalized interpolation/decimation filters.
-Bypass filtering when the effective resampling rate is unity.
-Improve fractional-rate selection near unity.
-Avoid unnecessary final dtype copies.
-Add doppler_batch for equal-length signals sharing one velocity.
-Extend polyphase resampling to operate along the final array axis.
-Add optional scalar, batched, and dataset-generation benchmarks.
-Add unit tests for shape, dtype, numerical precision, spectral performance, caching, edge cases, and reproducibility.
-Repair the outdated passband-ripple fallback benchmark.
-Performance
-Compared with the original implementation:
-Short and medium scalar Doppler calls are approximately 40–50% faster.
-Long scalar calls are approximately 12–16% faster.
-Dataset generation with Doppler is approximately 50–65% faster.
-Batched processing is approximately 69–94% faster for short and medium signals and 11–28% faster for long signals.
-Numerical comparisons remain within complex64 precision, with filter passband and stopband behavior preserved.
+## Summary
+
+This MR fixes output-length and dtype issues in the scalar wideband Doppler
+transform and adds validation for invalid physical parameters and input shape.
+
+Padding is now based on the effective integer ratio selected by the multistage
+polyphase resampler rather than only the ideal Doppler factor. This prevents
+long approaching-signal inputs from producing shortened output or zero-filled
+tails. Padding retains the caller's dtype, effective unity-rate requests bypass
+filtering, and final complex64 normalization avoids a copy when possible.
+
+## Changes
+
+- Add effective multistage-resampling rate calculation.
+- Base scalar Doppler padding on the effective rate.
+- Preserve input dtype during padding.
+- Skip resampling for an effective 1:1 rate.
+- Avoid unnecessary final complex64 copies.
+- Validate propagation speed, velocity, and one-dimensional NumPy input.
+- Add focused scalar Doppler regression tests.
+
+## Test Plan
+
+Run:
+
+    pytest -q tests/transforms/test_functional.py
+
+Coverage includes long-signal length and tail preservation, invalid physical
+parameters, input dimensionality, padding dtype, unity-rate bypass, and
+copy-free complex64 output normalization.
+
+## Scope
+
+This is Part 3 of the Doppler optimization MR split and follows Parts 1 and 2.
+It excludes batched Doppler support, performance benchmarks, and the independent
+passband-ripple benchmark repair.
