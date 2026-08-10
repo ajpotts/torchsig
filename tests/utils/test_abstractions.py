@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import logging
 import pickle
+from collections.abc import KeysView
 
 import pytest
-
 
 from torchsig.utils.abstractions import (
     HierarchicalMetadataObject,
@@ -111,6 +111,27 @@ def test_metadata_property_returns_copy():
 
     assert obj["field"] == "original"
     assert "new_field" not in obj.keys()
+
+
+def test_keys_returns_keys_view():
+    """keys() should expose a mapping-key view rather than a list."""
+    obj = HierarchicalMetadataObject(metadata={"field": "value"})
+
+    keys = obj.keys()
+
+    assert isinstance(keys, KeysView)
+    assert set(keys) == {"field"}
+
+
+def test_keys_view_reflects_later_metadata_changes():
+    """A previously returned key view should remain linked to local metadata."""
+    obj = HierarchicalMetadataObject(metadata={"original": 1})
+    keys = obj.keys()
+
+    obj["added"] = 2
+    del obj["original"]
+
+    assert set(keys) == {"added"}
 
 
 def test_getitem_returns_local_metadata_value():
