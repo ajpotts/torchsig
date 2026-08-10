@@ -1,25 +1,36 @@
-Optimize TorchSig’s Doppler implementation by preserving complex64 processing, caching reusable polyphase filters, handling near-unity rates efficiently, and adding an optional batched API for signals sharing a Doppler rate. Fix length, dtype, validation, and filter-cache issues, and add focused unit and optional performance benchmarks.
-Expected outcomes include roughly 40–50% faster common scalar Doppler calls and substantial additional gains for batched processing, while preserving numerical and spectral behavior.
+Title: Add batched Doppler support
 
-Summary
-This MR improves the correctness and performance of TorchSig’s wideband Doppler resampling.
-Changes
-Fix Doppler output-length handling for long signals.
-Validate invalid physical parameters and multidimensional scalar inputs.
-Preserve complex64 throughout resampling by using dtype-aware float32 filters.
-Cache base and finalized interpolation/decimation filters.
-Bypass filtering when the effective resampling rate is unity.
-Improve fractional-rate selection near unity.
-Avoid unnecessary final dtype copies.
-Add doppler_batch for equal-length signals sharing one velocity.
-Extend polyphase resampling to operate along the final array axis.
-Add optional scalar, batched, and dataset-generation benchmarks.
-Add unit tests for shape, dtype, numerical precision, spectral performance, caching, edge cases, and reproducibility.
-Repair the outdated passband-ripple fallback benchmark.
-Performance
-Compared with the original implementation:
-Short and medium scalar Doppler calls are approximately 40–50% faster.
-Long scalar calls are approximately 12–16% faster.
-Dataset generation with Doppler is approximately 50–65% faster.
-Batched processing is approximately 69–94% faster for short and medium signals and 11–28% faster for long signals.
-Numerical comparisons remain within complex64 precision, with filter passband and stopband behavior preserved.
+## Summary
+
+This MR adds a public `doppler_batch` API for applying one Doppler rate to a
+two-dimensional batch of equal-length IQ signals.
+
+The polyphase resampling operations now trim and validate results along the
+final array axis. This lets a batch share the same filter setup and resampling
+operation while preserving scalar-equivalent results, input geometry, and
+complex64 output dtype.
+
+## Changes
+
+- Extend polyphase slicing and length checks to the final array axis.
+- Add and export `doppler_batch`.
+- Support arrays shaped `(batch, samples)` with a shared velocity.
+- Preserve input batch shape and complex64 output dtype.
+- Validate batch dimensionality and physical parameters.
+- Test batch/scalar equivalence across approaching, stationary, and receding
+  velocities.
+
+## Test Plan
+
+Run:
+
+    pytest -q tests/transforms/test_functional.py tests/utils/test_dsp.py
+
+Coverage includes scalar equivalence, output shape and dtype, invalid input
+dimensionality, multiple velocities, and existing scalar/DSP regressions.
+
+## Scope
+
+This is Part 4 of the Doppler optimization MR split and is stacked on Part 3.
+It excludes Doppler performance benchmarks and the independent passband-ripple
+benchmark repair.

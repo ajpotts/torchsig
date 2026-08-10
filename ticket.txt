@@ -1,0 +1,37 @@
+Title: Add batched Doppler support
+
+Background
+
+Applying scalar Doppler independently to many equal-length signals repeats the
+same resampling setup and filter operations. SciPy's polyphase implementation
+already supports processing along the final array axis, but TorchSIG's trimming
+and output-length checks assume one-dimensional input. There is also no public
+API for applying one shared Doppler rate to a batch.
+
+Scope
+
+- Extend fractional, integer-interpolation, and decimation polyphase operations
+  to trim and validate output along the final array axis.
+- Add and export doppler_batch for two-dimensional arrays shaped
+  (batch, samples).
+- Apply one shared velocity and propagation speed to every batch member.
+- Preserve batch shape and complex64 output dtype.
+- Validate batch dimensionality and physical parameters.
+- Add batch/scalar equivalence and invalid-input tests.
+
+Acceptance criteria
+
+- Batched Doppler output matches independently processed scalar signals within
+  complex64 numerical tolerance.
+- Output has the same batch and sample dimensions as input.
+- Output dtype is complex64.
+- Fractional and integer polyphase trimming operates on the last axis.
+- One-dimensional or higher-dimensional batch input is rejected clearly.
+- Invalid velocity and propagation speed values are rejected.
+- Existing scalar Doppler behavior remains unchanged.
+
+Dependencies and exclusions
+
+This is Part 4 of the Doppler optimization split and follows the scalar Doppler
+correctness work in Part 3. It does not include performance benchmarks or the
+unrelated passband-ripple benchmark repair.
