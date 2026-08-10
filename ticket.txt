@@ -1,0 +1,37 @@
+Title: Add optional Doppler performance benchmarks
+
+Background
+
+The Doppler optimization series changes filter reuse, dtype handling, scalar
+resampling, and batched processing. Focused performance benchmarks are needed
+to measure these paths consistently without adding expensive cases to the
+routine test suite or relying on ad hoc timing scripts.
+
+Scope
+
+- Add an optional pytest-benchmark module for Doppler processing.
+- Measure scalar Doppler across representative signal lengths and approaching,
+  near-unity, and receding velocities.
+- Compare the batched Doppler API with independently processing each signal.
+- Measure deterministic dataset generation with and without Doppler enabled.
+- Warm each path before measurement so one-time setup is excluded.
+- Validate benchmark outputs for shape, dtype, and finite values.
+- Document commands and intended comparisons.
+
+Acceptance criteria
+
+- Benchmarks are located under benchmarks/optional and are not part of routine
+  unit-test execution.
+- Scalar cases cover short through long signals and multiple velocity regimes.
+- Batch cases cover multiple signal lengths and batch sizes.
+- Dataset cases expose the incremental cost of enabling Doppler.
+- Inputs and dataset generation are deterministic.
+- Every benchmark performs lightweight correctness checks on its output.
+- The module can be collected and run with pytest-benchmark.
+
+Dependencies and exclusions
+
+This is Part 5 of the Doppler optimization split and follows the batched Doppler
+API in Part 4. Recorded benchmark results belong in the MR discussion or CI
+artifacts; performance.txt is intentionally excluded. The unrelated
+passband-ripple benchmark repair is also excluded.
