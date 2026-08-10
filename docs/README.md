@@ -13,3 +13,7 @@ make html
 ```
 
 Navigate to `build/html/index.html` for the generated HTML documenation.
+
+## Contribution guides
+
+- [Transforms and Signal Builders](contributing_transforms_and_signal_builders.rst)
