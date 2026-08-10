@@ -1,0 +1,41 @@
+Title: Correct the HierarchicalMetadataObject.keys return type
+
+## Summary
+
+This MR corrects the type annotation and documentation for
+`HierarchicalMetadataObject.keys()` so they match its existing runtime
+behavior.
+
+The method returns the dynamic key view produced by the object's local metadata
+dictionary, not a materialized list. It is now annotated as `KeysView[str]`, and
+the docstring explains that a previously returned view reflects later metadata
+additions and removals.
+
+This is a typing and documentation correction only. The method continues to
+return the same `dict_keys` object as before, preserving its dynamic-view
+semantics and avoiding an unnecessary allocation.
+
+## Changes
+
+- Change the `keys()` return annotation from `list[str]` to `KeysView[str]`.
+- Document that the method returns a dynamic view of local metadata keys.
+- Add a test confirming the runtime result implements `KeysView`.
+- Add a test confirming an existing view reflects subsequent key additions and
+  removals.
+
+## Test Plan
+
+Run the focused abstraction tests:
+
+    pytest -q tests/utils/test_abstractions.py
+
+The new tests cover both the return type and dynamic-view behavior, while the
+existing tests cover metadata lookup, inheritance, mutation, copying,
+serialization, and debugging behavior.
+
+## Compatibility
+
+No API behavior changes. Code that iterates over `keys()`, performs membership
+checks, or explicitly converts the result with `list()` continues to work as
+before. The more accurate annotation may improve static type-checking results
+for callers that rely on mapping-view operations.
