@@ -1,0 +1,46 @@
+Title: Cache polyphase filters and preserve input precision
+
+## Summary
+
+This MR reduces repeated polyphase-filter setup work and prevents unnecessary
+promotion of float32 and complex64 signals to double precision.
+
+Base prototype filters are now cached in memory, while finalized interpolation
+and decimation filters are cached by their configuration and coefficient dtype.
+The public prototype-filter function still returns an independently mutable
+array, and finalized cached filters are read-only to protect shared cache state.
+
+Resampling selects float32 coefficients for float32 and complex64 inputs and
+float64 coefficients otherwise. As a result, complex64 is preserved through
+fractional resampling, integer interpolation, integer decimation, and
+multistage resampling without materially changing numerical or spectral
+behavior.
+
+## Changes
+
+- Cache loaded or designed base prototype filters.
+- Cache finalized interpolation and decimation filters.
+- Separate finalized filter cache entries by dtype.
+- Protect cached finalized coefficients from mutation.
+- Preserve the existing mutable public prototype-filter result.
+- Select coefficients based on input precision.
+- Add focused cache, mutability, dtype, numerical-precision, and spectral tests.
+
+## Test Plan
+
+Run:
+
+    pytest -q tests/utils/test_dsp.py
+
+Result during development:
+
+    34 passed, 1 warning
+
+The warning is the existing PyTorch CUDA/NVML initialization warning and is
+unrelated to these changes.
+
+## Scope
+
+This is Part 2 of the Doppler optimization MR split and depends on Part 1. It
+does not include scalar Doppler correctness changes, the batched Doppler API,
+performance benchmarks, or the passband-ripple benchmark repair.
