@@ -96,8 +96,9 @@ def build_zigbee_chip_stream(
 def _oqpsk_half_sine(chips: np.ndarray, osr: int) -> np.ndarray:
     """Modulates a chip stream as O-QPSK with half-sine pulse shaping.
 
-    I rail uses even-indexed chips; Q rail uses odd-indexed chips with a
-    half-chip (osr//2 sample) delay, matching the 802.15.4 O-QPSK definition.
+    Each rail's half-sine pulse spans two chip periods (2*osr samples) and the
+    Q rail is delayed by one full chip period (osr samples), per IEEE 802.15.4.
+    Output length is exactly len(chips) * osr.
 
     Args:
         chips: Binary chip stream, values in {0, 1}.
@@ -108,39 +109,28 @@ def _oqpsk_half_sine(chips: np.ndarray, osr: int) -> np.ndarray:
     """
     bipolar = 1.0 - 2.0 * chips.astype(np.float32)  # {0,1} → {+1,-1}
 
-    # Half-sine pulse: one lobe per chip
-    t = np.arange(osr)
-    half_sine = np.sin(np.pi * t / osr).astype(np.float32)
+    # Half-sine pulse
+    samples_per_rail_symbol = 2 * osr
+    t = np.arange(samples_per_rail_symbol)
+    half_sine = np.sin(np.pi * t / samples_per_rail_symbol).astype(np.float32)
 
     i_chips = bipolar[0::2]
     q_chips = bipolar[1::2]
+    n = len(i_chips)
+    out_len = n * samples_per_rail_symbol  # ie, len(chips) * osr
 
-    # Overlap-add with half-sine pulses (each chip spans exactly osr samples)
-    i_len = len(i_chips) * osr
-    q_len = len(q_chips) * osr
+    # Build upsampled (zero-stuffed) and convolve
+    i_up = np.zeros(out_len, dtype=np.float32)
+    i_up[::samples_per_rail_symbol] = i_chips
+    q_up = np.zeros(out_len, dtype=np.float32)
+    q_up[::samples_per_rail_symbol] = q_chips
 
-    i_samples = np.zeros(i_len, dtype=np.float32)
-    q_samples = np.zeros(q_len, dtype=np.float32)
+    i_samples = np.convolve(i_up, half_sine)[:out_len]
+    q_samples = np.convolve(q_up, half_sine)[:out_len]
 
-    # Vectorised overlap-add: build upsampled (zero-stuffed) and convolve
-    i_up = np.zeros(i_len, dtype=np.float32)
-    i_up[::osr] = i_chips
-    # Half-sine convolution — use np.convolve only on the pulse (short)
-    i_conv = np.convolve(i_up, half_sine, mode="full")[: i_len + osr - 1]
-    i_samples = i_conv[:i_len]
-
-    q_up = np.zeros(q_len, dtype=np.float32)
-    q_up[::osr] = q_chips
-    q_conv = np.convolve(q_up, half_sine, mode="full")[: q_len + osr - 1]
-    q_samples = q_conv[:q_len]
-
-    # Q lags I by half a chip (osr//2 samples)
-    offset = osr // 2
-    out_len = min(i_len, q_len + offset)
     iq = np.zeros(out_len, dtype=TorchSigComplexDataType)
-    iq.real[:out_len] = i_samples[:out_len]
-    q_end = min(q_len, out_len - offset)
-    iq.imag[offset : offset + q_end] = q_samples[:q_end]
+    iq.real[:] = i_samples
+    iq.imag[osr:] = q_samples[: out_len - osr]     # Q lags I by one chip period
     return iq
 
 
@@ -178,6 +168,11 @@ def zigbee_modulator_baseband(
     chips = build_zigbee_chip_stream(num_chips, rng)
     iq = _oqpsk_half_sine(chips, oversampling_rate_nominal)
 
+    if len(iq) < max_num_samples - oversampling_rate_nominal:
+        raise ValueError(
+            f"modulator produced {len(iq)} samples, expected >= {max_num_samples}"
+        )   
+
     if len(iq) > max_num_samples:
         iq = slice_tail_to_length(iq, max_num_samples)
     elif len(iq) < max_num_samples:
@@ -193,6 +188,9 @@ def zigbee_modulator(
     rng: np.random.Generator | None = None,
 ) -> np.ndarray:
     """ZigBee modulator: builds chip stream and resamples to target bandwidth.
+
+    Note: the chip rate maps to bandwidth here, but the occupied null-to-null 
+        bandwidth is about 1.5x that.
 
     Args:
         bandwidth: Desired signal bandwidth (Hz).

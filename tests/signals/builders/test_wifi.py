@@ -130,6 +130,6 @@ def test_wifi_in_signal_lists():
     assert CLASS_FAMILY_DICT["80211a"] == "wifi"
     assert "wifi" in TorchSigSignalLists.family_list
     lists = TorchSigSignalLists()
-    for name in ["80211a", "80211a_rts", "80211a_cts", "80211a_ack"]:
+    for name in ["80211a"]: # note "80211a_rts", "80211a_cts", "80211a_ack" removed
         assert name in lists.wifi_signals
 
