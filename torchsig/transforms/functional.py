@@ -642,20 +642,15 @@ def doppler(
     resample_rate = 1 / alpha
     actual_rate = multistage_polyphase_resampler_actual_rate(resample_rate)
 
-    # A requested near-unity rate may map to an exact 1:1 integer ratio. Avoid
-    # constructing and applying a large polyphase filter when no samples would
-    # be added or removed by the selected resampling plan.
     if actual_rate == 1.0:
         return data.astype(TorchSigComplexDataType, copy=False)
 
-    # If necessary, pad with zeros to maintain size. Use the effective rational
-    # rate selected by the resampler rather than the ideal Doppler rate.
+    # If necessary, pad with zeros to maintain size using the effective rate.
     if alpha > 1.0:
         num_zeros = int(np.ceil((n / actual_rate) - n) + 1)
         data = np.concatenate((data, np.zeros(num_zeros, dtype=data.dtype)))
 
     data = multistage_polyphase_resampler(data, resample_rate)
-
     return data[:n].astype(TorchSigComplexDataType, copy=False)
 
 
@@ -675,7 +670,7 @@ def doppler_batch(
         Doppler-shifted data with the same shape and complex64 dtype.
 
     Raises:
-        ValueError: If the data is not a two-dimensional NumPy array or the
+        ValueError: If data is not a two-dimensional NumPy array or the
             physical parameters are invalid.
     """
     if not np.isfinite(propagation_speed) or propagation_speed <= 0:
@@ -696,9 +691,7 @@ def doppler_batch(
         return data.astype(TorchSigComplexDataType, copy=False)
 
     if alpha > 1.0:
-        num_zeros = int(
-            np.ceil((num_samples / actual_rate) - num_samples) + 1
-        )
+        num_zeros = int(np.ceil((num_samples / actual_rate) - num_samples) + 1)
         padding = np.zeros((data.shape[0], num_zeros), dtype=data.dtype)
         data = np.concatenate((data, padding), axis=-1)
 
@@ -1974,6 +1967,7 @@ def time_varying_noise(
         data
         + (10.0 ** (noise_power / 20.0)) * (real_noise + 1j * imag_noise) / np.sqrt(2)
     ).astype(TorchSigComplexDataType)
+
 
 def _power_renorm_scale(
     input_power: float, output_power: float, rel_floor: float = 1e-9
