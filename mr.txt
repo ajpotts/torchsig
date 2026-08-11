@@ -1,0 +1,62 @@
+Title: Add per-signal dataset metadata customization
+
+## Summary
+
+This MR allows one `TorchSigIterableDataset` to use different SNR, duration,
+and bandwidth ranges for individual signal classes.
+
+The new `per_signal_metadata` constructor argument is a mapping from signal
+class names to metadata overrides. Overrides are stored locally on each signal
+generator, so TorchSig's existing hierarchical metadata behavior gives them
+precedence over dataset-wide values. Fields that are not overridden continue to
+inherit the dataset defaults.
+
+For example, QPSK can use an SNR range of 0–10 dB while AM-DSB-SC uses 15–30 dB:
+
+    dataset = TorchSigIterableDataset(
+        signal_generators=["qpsk", "am-dsb-sc"],
+        per_signal_metadata={
+            "qpsk": {"snr_db_min": 0, "snr_db_max": 10},
+            "am-dsb-sc": {"snr_db_min": 15, "snr_db_max": 30},
+        },
+        metadata=dataset_metadata,
+    )
+
+## Supported Overrides
+
+- `snr_db_min` and `snr_db_max`
+- `signal_duration_in_samples_min` and
+  `signal_duration_in_samples_max`
+- `bandwidth_min` and `bandwidth_max`
+
+## Validation
+
+The dataset rejects:
+
+- Non-dictionary configuration values.
+- Non-string class names.
+- Unsupported metadata fields.
+- Non-numeric or non-finite values.
+- Non-positive duration or bandwidth values.
+- Minimum values greater than their corresponding maximum values.
+- Overrides for classes not included in `signal_generators`.
+
+## Compatibility
+
+The new argument is optional. Existing datasets without `per_signal_metadata`
+retain their current dataset-wide metadata behavior. Both string-based signal
+generator configuration and directly supplied generator objects are supported.
+
+## Test Plan
+
+Run the focused per-signal tests:
+
+    pytest -q tests/datasets/test_datasets.py -k per_signal_metadata
+
+Run the complete dataset test module:
+
+    pytest -q tests/datasets/test_datasets.py
+
+The new tests cover distinct class ranges, fallback to dataset defaults,
+string-based generator lookup, malformed configuration, unsupported fields,
+invalid values, reversed ranges, and unknown classes.
