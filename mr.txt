@@ -1,0 +1,44 @@
+Title: Define subclass copy behavior for hierarchical metadata objects
+
+## Summary
+
+This MR adds an explicit extension mechanism for copying
+`HierarchicalMetadataObject` subclasses whose constructors require additional
+arguments.
+
+Subclasses can now override the protected `_copy_kwargs()` hook to provide only
+their required constructor state. The base `copy()` implementation remains
+responsible for reconstructing the runtime subclass, copying metadata,
+preserving the RNG seed, and honoring the `preserve_parent` option. This avoids
+requiring subclasses to duplicate the complete copy implementation.
+
+## Changes
+
+- Add a protected `_copy_kwargs()` hook that returns subclass-specific
+  constructor keyword arguments.
+- Pass those arguments through the existing `copy()` reconstruction path.
+- Document the supported constructor contract for subclasses.
+- Replace the required-constructor failure test with successful copy coverage.
+- Test required subclass state, runtime type, RNG seed, shallow nested values,
+  independent metadata dictionaries, and attached/detached parent behavior.
+
+## Compatibility
+
+The base hook returns an empty dictionary, so existing
+`HierarchicalMetadataObject` subclasses that already support the base
+constructor contract behave exactly as before. Copying remains shallow: the
+metadata dictionary is independent, while nested metadata values retain their
+existing object identity.
+
+## Test Plan
+
+Run:
+
+    pytest -q tests/utils/test_abstractions.py
+
+Result during development:
+
+    76 passed, 1 warning
+
+The warning is the existing PyTorch CUDA/NVML initialization warning and is
+unrelated to this change.
