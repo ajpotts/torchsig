@@ -1,5 +1,10 @@
 """Unit Tests for datamodules"""
+import os
 import random
+import signal
+import subprocess
+import sys
+import textwrap
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, call, patch
 
@@ -134,13 +139,8 @@ def test_datamodule_prepare_data_creates_dataset(
     assert sentinel.exists() is not overwrite
 
 
-@pytest.mark.filterwarnings(
-    r"ignore:.*fork\(\) may lead to deadlocks in the child:DeprecationWarning"
-)
-@pytest.mark.parametrize("num_workers", [0, 2])
 def test_datamodule_dataloaders_return_batches(
     tmp_path: Path,
-    num_workers: int,
 ) -> None:
     """Verify train, validation, and test dataloaders return batches."""
 
@@ -167,7 +167,7 @@ def test_datamodule_dataloaders_return_batches(
         overwrite=True,
         impairment_level=0,
         collate_fn=identity_collate_fn,
-        num_workers=num_workers,
+        num_workers=0,
         create_num_workers=0,
         seed=42,
     )
@@ -184,6 +184,88 @@ def test_datamodule_dataloaders_return_batches(
     ):
         batch = next(iter(loader))
         assert len(batch) > 0
+
+
+def test_datamodule_dataloaders_with_workers_return_batches(
+    tmp_path: Path,
+) -> None:
+    """Verify multiprocess loaders in an isolated, bounded process."""
+
+    fft_size = 16
+    metadata = TorchSigDefaults().default_dataset_metadata.copy()
+    metadata.update(
+        {
+            "num_iq_samples_dataset": fft_size**2,
+            "fft_size": fft_size,
+            "fft_stride": fft_size,
+            "num_signals_min": 1,
+            "num_signals_max": 1,
+            "signal_duration_in_samples_min": fft_size,
+            "signal_duration_in_samples_max": fft_size**2,
+        }
+    )
+    datamodule = TorchSigDataModule(
+        root=tmp_path,
+        metadata=metadata,
+        dataset_size=6,
+        dataset_splits=[0.5, 0.25, 0.25],
+        overwrite=True,
+        impairment_level=0,
+        collate_fn=identity_collate_fn,
+        num_workers=0,
+        create_num_workers=0,
+        seed=42,
+    )
+    datamodule.prepare_data()
+
+    script = textwrap.dedent(
+        """
+        import sys
+
+        from torchsig.datasets.datamodules import TorchSigDataModule
+        from torchsig.utils.writer import identity_collate_fn
+
+        datamodule = TorchSigDataModule(
+            root=sys.argv[1],
+            metadata={},
+            dataset_size=6,
+            dataset_splits=[0.5, 0.25, 0.25],
+            batch_size=1,
+            collate_fn=identity_collate_fn,
+            num_workers=2,
+            seed=42,
+        )
+        datamodule.setup()
+        for loader_factory in (
+            datamodule.train_dataloader,
+            datamodule.val_dataloader,
+            datamodule.test_dataloader,
+        ):
+            loader = loader_factory()
+            assert len(next(iter(loader))) > 0
+            del loader
+        """
+    )
+    process = subprocess.Popen(
+        [sys.executable, "-c", script, str(tmp_path)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+
+    try:
+        stdout, stderr = process.communicate(timeout=30)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        stdout, stderr = process.communicate()
+        pytest.fail(
+            "multiprocess DataLoaders did not finish within 30 seconds\n"
+            + stdout
+            + stderr
+        )
+
+    assert process.returncode == 0, stdout + stderr
 
 
 def _first_n_batches(loader, n: int):
