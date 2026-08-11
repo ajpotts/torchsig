@@ -1,0 +1,96 @@
+Summary
+Add an optional debug mode to TorchSig that provides detailed logging of metadata generation and signal creation. This mode should make it easier to understand why a particular sample was generated, trace metadata inheritance and random choices, and diagnose invalid or unexpected datasets.
+Motivation
+Debugging dataset generation can be difficult because metadata is produced through multiple layers of defaults, inheritance, random sampling, transforms, and signal generators. When a generated sample looks incorrect, there is currently no easy way to determine how each field was chosen or modified.
+A structured debug mode would improve developer productivity and simplify debugging of new generators, metadata changes, and transforms.
+Proposed Features
+
+
+        
+      Add a configurable debug mode (e.g. debug=True or configurable logging level).
+
+        
+      Emit structured logs during metadata generation, including:
+
+
+        
+      Default metadata values
+
+        
+      User overrides
+
+        
+      Randomly sampled values
+
+        
+      Derived/computed metadata
+
+        
+      Parent/child metadata inheritance
+
+        
+      Metadata modifications performed by transforms
+
+
+
+        
+      Log signal generation events, including:
+
+
+        
+      Generator class used
+
+        
+      Signal parameters selected
+
+        
+      Number of attempts (if retries occur)
+
+        
+      Warnings when values are clipped or adjusted
+
+
+
+        
+      Optionally assign a unique sample ID so all log messages for a generated sample can be correlated.
+
+        
+      Support multiple verbosity levels, for example:
+
+
+        
+      Basic: one-line summary per sample
+
+        
+      Verbose: metadata decisions and generator execution
+
+        
+      Trace: every metadata read/write and transform application
+
+
+
+        
+      Ensure debug logging is disabled by default with negligible overhead when not enabled.
+
+Possible Implementation
+
+
+        
+      
+Use Python's standard logging module instead of print.
+
+
+        
+      
+Introduce a dedicated logger (e.g. torchsig.debug or torchsig.generation).
+
+
+        
+      
+Add helper utilities for formatting metadata changes, such as:
+signal_duration_in_samples: default=1024 sampled=768 transformed=512
+
+
+        
+      
+Include optional indentation or tree formatting to visualize parent/child metadata relationships.
