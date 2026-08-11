@@ -189,6 +189,7 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         transforms: list[Transform | callable] | None = None,
         component_transforms: list[Transform | callable] | None = None,
         target_labels: list | None = None,
+        per_signal_metadata: dict[str, dict[str, int | float]] | None = None,
         # will try to validate required metadata in this dataset; can be turned off if a dataset needs to be initialized before it's metadata is known
         validate_init: bool = True,
         **kwargs,
@@ -200,8 +201,23 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
             transforms: List of transforms to apply to the entire signal.
             component_transforms: List of transforms to apply to individual signal components.
             target_labels: Labels to extract from the signal.
+            per_signal_metadata: Optional metadata overrides keyed by signal
+                class name. Supported overrides are the minimum and maximum
+                values for SNR, signal duration in samples, and bandwidth.
             validate_init: Whether to validate metadata during initialization.
             **kwargs: Additional keyword arguments passed to the parent class.
+
+        Example:
+            Configure different SNR ranges for two signal classes::
+
+                dataset = TorchSigIterableDataset(
+                    signal_generators=["qpsk", "am-dsb-sc"],
+                    per_signal_metadata={
+                        "qpsk": {"snr_db_min": 0, "snr_db_max": 10},
+                        "am-dsb-sc": {"snr_db_min": 15, "snr_db_max": 30},
+                    },
+                    metadata=dataset_metadata,
+                )
         """
         HierarchicalMetadataObject.__init__(self, **kwargs)
         self.validate_init = validate_init
@@ -210,6 +226,9 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         self.signal_probabilities = np.array([], dtype=float)
         self._signal_probability_mode = "likelihood"
         self.target_labels = target_labels
+        self.per_signal_metadata = self._validate_per_signal_metadata(
+            per_signal_metadata
+        )
         self.transforms = [] if transforms is None else transforms
         self.component_transforms = [] if component_transforms is None else component_transforms
         self._metadata_logging_sample_index = 0
@@ -231,8 +250,84 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
             signal_generators = signal_generators.signal_generators
         for generator in signal_generators:
             self.init_signal_generator(generator)
+        unmatched_classes = set(self.per_signal_metadata).difference(
+            generator.class_name
+            for generator in self.signal_generators
+            if hasattr(generator, "class_name")
+        )
+        if unmatched_classes:
+            raise ValueError(
+                "per_signal_metadata contains classes not configured in "
+                f"signal_generators: {sorted(unmatched_classes)}"
+            )
         if self.validate_init:
             self.validate_metadata_fields()
+
+    @staticmethod
+    def _validate_per_signal_metadata(
+        per_signal_metadata: dict[str, dict[str, int | float]] | None,
+    ) -> dict[str, dict[str, int | float]]:
+        """Validate and copy per-signal metadata overrides."""
+        if per_signal_metadata is None:
+            return {}
+        if not isinstance(per_signal_metadata, dict):
+            raise TypeError("per_signal_metadata must be a dictionary")
+
+        supported_fields = {
+            "snr_db_min",
+            "snr_db_max",
+            "signal_duration_in_samples_min",
+            "signal_duration_in_samples_max",
+            "bandwidth_min",
+            "bandwidth_max",
+        }
+        validated: dict[str, dict[str, int | float]] = {}
+        for class_name, overrides in per_signal_metadata.items():
+            if not isinstance(class_name, str):
+                raise TypeError("per_signal_metadata class names must be strings")
+            if not isinstance(overrides, dict):
+                raise TypeError(
+                    f"per_signal_metadata[{class_name!r}] must be a dictionary"
+                )
+
+            unknown_fields = set(overrides).difference(supported_fields)
+            if unknown_fields:
+                raise ValueError(
+                    f"unsupported per-signal metadata fields for {class_name!r}: "
+                    f"{sorted(unknown_fields)}"
+                )
+
+            validated_overrides: dict[str, int | float] = {}
+            for metadata_field, value in overrides.items():
+                if not isinstance(value, (int, float, np.integer, np.floating)):
+                    raise TypeError(
+                        f"per_signal_metadata[{class_name!r}][{metadata_field!r}] "
+                        "must be a real number"
+                    )
+                if not np.isfinite(value):
+                    raise ValueError(
+                        f"per_signal_metadata[{class_name!r}][{metadata_field!r}] "
+                        "must be finite"
+                    )
+                if metadata_field.startswith(
+                    ("bandwidth_", "signal_duration_")
+                ) and value <= 0:
+                    raise ValueError(
+                        f"per_signal_metadata[{class_name!r}][{metadata_field!r}] "
+                        "must be positive"
+                    )
+                validated_overrides[metadata_field] = value
+            validated[class_name] = validated_overrides
+
+        return validated
+
+    def _apply_per_signal_metadata(self, signal_generator: callable) -> None:
+        """Apply local metadata overrides for a configured signal class."""
+        if not hasattr(signal_generator, "class_name"):
+            return
+        overrides = self.per_signal_metadata.get(signal_generator.class_name, {})
+        for metadata_field, value in overrides.items():
+            signal_generator[metadata_field] = value
 
     @staticmethod
     def _validate_positive_weight(value: float, parameter_name: str) -> float:
@@ -395,8 +490,31 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
                 "likelihood",
             )
 
+        if class_name is not None:
+            signal_generator["class_name"] = class_name
+
+        self._apply_per_signal_metadata(signal_generator)
+
         if isinstance(signal_generator, Seedable):
             signal_generator.add_parent(self)
+
+        for minimum_field, maximum_field in (
+            ("snr_db_min", "snr_db_max"),
+            (
+                "signal_duration_in_samples_min",
+                "signal_duration_in_samples_max",
+            ),
+            ("bandwidth_min", "bandwidth_max"),
+        ):
+            if (
+                hasattr(signal_generator, minimum_field)
+                and hasattr(signal_generator, maximum_field)
+                and signal_generator[minimum_field] > signal_generator[maximum_field]
+            ):
+                raise ValueError(
+                    f"{minimum_field} must be less than or equal to {maximum_field} "
+                    f"for signal class {signal_generator.class_name!r}"
+                )
 
         try:
             if self.validate_init:
@@ -410,9 +528,6 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
             else class_index
         )
         signal_generator["class_index"] = resolved_class_index
-
-        if class_name is not None:
-            signal_generator["class_name"] = class_name
 
         self.signal_generators.append(signal_generator)
 

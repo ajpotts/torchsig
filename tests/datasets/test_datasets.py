@@ -81,6 +81,17 @@ class NonValidatingGenerator(BaseSignalGenerator):
         return Signal()
 
 
+class MetadataSignalGenerator(BaseSignalGenerator):
+    """Generate a signal that inherits metadata from this generator."""
+
+    def __init__(self, class_name, **kwargs):
+        super().__init__(**kwargs)
+        self.set_default_class_name(class_name)
+
+    def generate(self):
+        return Signal(data=np.ones(8, dtype=np.complex64))
+
+
 def _dataset_with_empty_generators():
     return TorchSigIterableDataset(
         metadata=TorchSigDefaults().default_dataset_metadata.copy(),
@@ -116,6 +127,120 @@ def _small_metadata():
         }
     )
     return metadata
+
+
+def test_per_signal_metadata_overrides_dataset_ranges():
+    metadata = _small_metadata()
+    metadata.update(
+        {
+            "snr_db_min": -5,
+            "snr_db_max": 40,
+            "signal_duration_in_samples_min": 2,
+            "signal_duration_in_samples_max": 16,
+            "bandwidth_min": 1,
+            "bandwidth_max": 8,
+        }
+    )
+    qpsk = MetadataSignalGenerator("qpsk")
+    am_dsb_sc = MetadataSignalGenerator("am-dsb-sc")
+    dataset = TorchSigIterableDataset(
+        metadata=metadata,
+        signal_generators=[qpsk, am_dsb_sc],
+        per_signal_metadata={
+            "qpsk": {
+                "snr_db_min": 0,
+                "snr_db_max": 10,
+                "signal_duration_in_samples_min": 4,
+                "signal_duration_in_samples_max": 6,
+                "bandwidth_min": 2,
+                "bandwidth_max": 3,
+            },
+            "am-dsb-sc": {"snr_db_min": 15, "snr_db_max": 30},
+        },
+        validate_init=False,
+    )
+
+    qpsk_signal = dataset.signal_generators[0]()
+    am_signal = dataset.signal_generators[1]()
+
+    assert (qpsk_signal.snr_db_min, qpsk_signal.snr_db_max) == (0, 10)
+    assert (
+        qpsk_signal.signal_duration_in_samples_min,
+        qpsk_signal.signal_duration_in_samples_max,
+    ) == (4, 6)
+    assert (qpsk_signal.bandwidth_min, qpsk_signal.bandwidth_max) == (2, 3)
+    assert (am_signal.snr_db_min, am_signal.snr_db_max) == (15, 30)
+    assert (
+        am_signal.signal_duration_in_samples_min,
+        am_signal.signal_duration_in_samples_max,
+    ) == (2, 16)
+    assert (am_signal.bandwidth_min, am_signal.bandwidth_max) == (1, 8)
+
+
+def test_per_signal_metadata_supports_string_generator_configuration():
+    dataset = TorchSigIterableDataset(
+        metadata=_small_metadata(),
+        signal_generators=["qpsk", "am-dsb-sc"],
+        per_signal_metadata={
+            "qpsk": {"snr_db_min": 0, "snr_db_max": 10},
+            "am-dsb-sc": {"snr_db_min": 15, "snr_db_max": 30},
+        },
+        validate_init=False,
+    )
+
+    generators = {
+        generator.class_name: generator for generator in dataset.signal_generators
+    }
+    assert (generators["qpsk"].snr_db_min, generators["qpsk"].snr_db_max) == (
+        0,
+        10,
+    )
+    assert (
+        generators["am-dsb-sc"].snr_db_min,
+        generators["am-dsb-sc"].snr_db_max,
+    ) == (15, 30)
+
+
+@pytest.mark.parametrize(
+    ("per_signal_metadata", "error", "message"),
+    [
+        ([], TypeError, "must be a dictionary"),
+        ({"qpsk": []}, TypeError, "must be a dictionary"),
+        ({"qpsk": {"center_freq": 1}}, ValueError, "unsupported"),
+        ({"qpsk": {"bandwidth_min": 0}}, ValueError, "must be positive"),
+        ({"qpsk": {"snr_db_min": np.nan}}, ValueError, "must be finite"),
+    ],
+)
+def test_per_signal_metadata_rejects_invalid_configuration(
+    per_signal_metadata, error, message
+):
+    with pytest.raises(error, match=message):
+        TorchSigIterableDataset(
+            metadata=_small_metadata(),
+            signal_generators=[MetadataSignalGenerator("qpsk")],
+            per_signal_metadata=per_signal_metadata,
+            validate_init=False,
+        )
+
+
+def test_per_signal_metadata_rejects_unknown_class_and_reversed_range():
+    with pytest.raises(ValueError, match="classes not configured"):
+        TorchSigIterableDataset(
+            metadata=_small_metadata(),
+            signal_generators=[MetadataSignalGenerator("qpsk")],
+            per_signal_metadata={"am-dsb-sc": {"snr_db_min": 15}},
+            validate_init=False,
+        )
+
+    with pytest.raises(ValueError, match="snr_db_min must be less than"):
+        TorchSigIterableDataset(
+            metadata=_small_metadata(),
+            signal_generators=[MetadataSignalGenerator("qpsk")],
+            per_signal_metadata={
+                "qpsk": {"snr_db_min": 20, "snr_db_max": 10}
+            },
+            validate_init=False,
+        )
 
 
 def _parent_with_components(num_signals_max=2):
