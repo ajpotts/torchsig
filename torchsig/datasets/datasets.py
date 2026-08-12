@@ -15,6 +15,7 @@ from torch.utils.data import Dataset, IterableDataset, get_worker_info
 from torchsig.datasets.dataset_utils import frequency_shift_signal
 from torchsig.signals.builder import BaseSignalGenerator, ConcatSignalGenerator
 from torchsig.signals.signal_types import Signal
+from torchsig.transforms.metadata_transforms import GroupingLabel
 from torchsig.utils.abstractions import HierarchicalMetadataObject
 from torchsig.utils.coordinate_system import Coordinate, Rectangle, is_rectangle_overlap
 from torchsig.utils.dsp import compute_spectrogram, update_signal_snr_bandwidth
@@ -33,7 +34,7 @@ log = logging.getLogger(__name__)
 
 # Type checking imports
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Iterator, Mapping
 
     from torchsig.transforms.base_transforms import Transform
 
@@ -189,6 +190,9 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         transforms: list[Transform | callable] | None = None,
         component_transforms: list[Transform | callable] | None = None,
         target_labels: list | None = None,
+        sampling_grouping: (
+            GroupingLabel | str | Path | Mapping[str, Any] | None
+        ) = None,
         # will try to validate required metadata in this dataset; can be turned off if a dataset needs to be initialized before it's metadata is known
         validate_init: bool = True,
         **kwargs,
@@ -200,6 +204,11 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
             transforms: List of transforms to apply to the entire signal.
             component_transforms: List of transforms to apply to individual signal components.
             target_labels: Labels to extract from the signal.
+            sampling_grouping: A GroupingLabel, grouping YAML path, or
+                grouping configuration mapping. When provided, signal
+                generators use each group's configured ``probability`` or
+                normalized ``likelihood``. Without weights, represented
+                groups are equiprobable. Classes within a group are uniform.
             validate_init: Whether to validate metadata during initialization.
             **kwargs: Additional keyword arguments passed to the parent class.
         """
@@ -231,6 +240,8 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
             signal_generators = signal_generators.signal_generators
         for generator in signal_generators:
             self.init_signal_generator(generator)
+        if sampling_grouping is not None:
+            self.balance_signal_generators_by_group(sampling_grouping)
         if self.validate_init:
             self.validate_metadata_fields()
 
@@ -261,8 +272,10 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
                 raise ValueError(
                     "signal probability count does not match number of generators"
                 )
-            if np.any(probabilities <= 0.0):
-                raise ValueError("all signal probabilities must be > 0")
+            if np.any(probabilities < 0.0):
+                raise ValueError("all signal probabilities must be >= 0")
+            if not np.any(probabilities > 0.0):
+                raise ValueError("at least one signal probability must be > 0")
 
             probability_sum = float(np.sum(probabilities))
             if probability_sum > 1.0 + 1e-8:
@@ -304,6 +317,119 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
 
         likelihoods = np.asarray(self.signal_likelihoods, dtype=float)
         self.signal_probabilities = likelihoods / np.sum(likelihoods)
+
+    def balance_signal_generators_by_group(
+        self,
+        grouping: GroupingLabel | str | Path | Mapping[str, Any],
+    ) -> None:
+        """Weight generators using the configured group sampling weights.
+
+        Groups are resolved from metadata already available on each signal
+        generator. A grouping based on generated metadata, such as a realized
+        bandwidth, cannot be balanced before generation and raises an error.
+        Group probabilities are used directly and must sum to one. Group
+        likelihoods are normalized over represented groups. When neither is
+        configured, represented groups receive equal probability.
+
+        Args:
+            grouping: A GroupingLabel instance, YAML path, or configuration
+                mapping.
+
+        Raises:
+            ValueError: If there are no generators, a generator lacks the
+                grouping source field, or a generator value matches no group.
+        """
+        if not isinstance(grouping, GroupingLabel):
+            grouping = GroupingLabel(grouping)
+        if not self.signal_generators:
+            raise ValueError(
+                "cannot balance groups without signal generators"
+            )
+
+        generator_groups = []
+        for generator in self.signal_generators:
+            if not hasattr(generator, grouping.source):
+                class_name = getattr(generator, "class_name", "<unlabeled>")
+                raise ValueError(
+                    f"cannot balance class {class_name!r}: grouping source "
+                    f"{grouping.source!r} is not available before generation"
+                )
+            source_value = getattr(generator, grouping.source)
+            try:
+                group_name, _ = grouping.match(source_value)
+            except ValueError as error:
+                raise ValueError(
+                    f"cannot balance generator value {source_value!r} from "
+                    f"source {grouping.source!r}: no group matched"
+                ) from error
+            generator_groups.append(group_name)
+
+        group_counts = {
+            group_name: generator_groups.count(group_name)
+            for group_name in set(generator_groups)
+        }
+        configured_groups = {
+            group["name"]: group for group in grouping.groups
+        }
+        uses_probabilities = any(
+            "probability" in group for group in grouping.groups
+        )
+        uses_likelihoods = any(
+            "likelihood" in group for group in grouping.groups
+        )
+
+        if uses_probabilities:
+            unrepresented_probability_groups = [
+                group_name
+                for group_name, group in configured_groups.items()
+                if group_name not in group_counts
+                and group.get("probability", 0.0) > 0.0
+            ]
+            if unrepresented_probability_groups:
+                raise ValueError(
+                    "cannot assign positive probability to groups without "
+                    "signal generators: "
+                    f"{unrepresented_probability_groups}"
+                )
+            group_probabilities = {
+                group_name: configured_groups[group_name].get(
+                    "probability",
+                    0.0,
+                )
+                for group_name in group_counts
+            }
+        elif uses_likelihoods:
+            group_likelihoods = {
+                group_name: configured_groups[group_name].get(
+                    "likelihood",
+                    1.0,
+                )
+                for group_name in group_counts
+            }
+            likelihood_sum = float(sum(group_likelihoods.values()))
+            group_probabilities = {
+                group_name: likelihood / likelihood_sum
+                for group_name, likelihood in group_likelihoods.items()
+            }
+        else:
+            equal_group_probability = 1.0 / len(group_counts)
+            group_probabilities = dict.fromkeys(
+                group_counts,
+                equal_group_probability,
+            )
+
+        self._signal_probability_mode = "probability"
+        self.signal_probabilities = np.asarray(
+            [
+                group_probabilities[group_name] / group_counts[group_name]
+                for group_name in generator_groups
+            ],
+            dtype=float,
+        )
+        self.signal_likelihoods = []
+        self.sampling_grouping = grouping
+        self._sampling_generator_groups = generator_groups
+        self._validate_signal_sampling_configuration(require_complete=True)
 
 
     def init_signal_generator(self, signal_generator: str | callable) -> None:
@@ -643,12 +769,28 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
             )
         )
         max_attempts = 10 * num_signals_to_generate
+        retry_group = None
 
         for _ in range(max_attempts):
             if len(component_signals) >= num_signals_to_generate:
                 break
 
-            new_signal = self._generate_component_signal()
+            generator = (
+                self._random_signal_generator(group_name=retry_group)
+                if hasattr(self, "sampling_grouping")
+                else None
+            )
+            if retry_group is None and generator is not None:
+                source_value = getattr(
+                    generator,
+                    self.sampling_grouping.source,
+                )
+                retry_group, _ = self.sampling_grouping.match(source_value)
+            new_signal = (
+                self._generate_component_signal()
+                if generator is None
+                else self._generate_component_signal(generator)
+            )
             start_sample = self._choose_start_sample(
                 iq_samples,
                 new_signal,
@@ -661,7 +803,6 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
                 new_signal,
                 start_sample,
             )
-
             new_rectangle = self._map_to_coordinates(
                 new_signal,
                 start_sample,
@@ -681,6 +822,7 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
             )
             signal_rectangles.append(new_rectangle)
             component_signals.append(new_signal)
+            retry_group = None
 
         sample = Signal(
             data=iq_samples,
@@ -702,9 +844,13 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         return sample
 
 
-    def _generate_component_signal(self) -> Signal:
+    def _generate_component_signal(
+        self,
+        generator: BaseSignalGenerator | None = None,
+    ) -> Signal:
         """Generate and prepare one component signal."""
-        generator = self._random_signal_generator()
+        if generator is None:
+            generator = self._random_signal_generator()
         signal = generator()
 
         for component_transform in self.component_transforms:
@@ -867,10 +1013,29 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
                 has_overlap = has_overlap or individual_overlap
         return has_overlap
 
-    def _random_signal_generator(self) -> BaseSignalGenerator:
-        """Randomly selects which signal generator to use next."""
+    def _random_signal_generator(
+        self,
+        group_name: str | None = None,
+    ) -> BaseSignalGenerator:
+        """Randomly select a generator, optionally within one sampling group."""
         if len(self.signal_generators) == 0:
             raise ValueError("cannot sample from a dataset with no signal generators")
+
+        if group_name is not None:
+            matching_generators = [
+                generator
+                for generator, generator_group in zip(
+                    self.signal_generators,
+                    self._sampling_generator_groups,
+                    strict=True,
+                )
+                if generator_group == group_name
+            ]
+            if not matching_generators:
+                raise ValueError(
+                    f"sampling group {group_name!r} has no signal generators"
+                )
+            return self.random_generator.choice(matching_generators)
 
         self._validate_signal_sampling_configuration(require_complete=True)
         self._refresh_signal_probabilities()

@@ -525,6 +525,13 @@ def multistage_polyphase_interpolator(
     return interpolate_integer_out
 
 
+def _polyphase_fractional_integer_rates(fractional_rate: float) -> tuple[int, int]:
+    """Map a requested fractional rate to the resampler's integer ratio."""
+    up_rate = 10000
+    down_rate = max(1, int(np.round(up_rate / fractional_rate)))
+    return up_rate, down_rate
+
+
 def polyphase_fractional_resampler(
     input_signal: np.ndarray, fractional_rate: float
 ) -> np.ndarray:
@@ -543,9 +550,8 @@ def polyphase_fractional_resampler(
         np.ndarray: Resampled signal
     """
     # map the fractional part to an up and down rate
-    base_rate = 10000
-    up_rate = base_rate
-    down_rate = int(np.ceil(base_rate / fractional_rate))
+    up_rate, down_rate = _polyphase_fractional_integer_rates(fractional_rate)
+    base_rate = up_rate
 
     # design the prototype filter
     prototype_filter = prototype_polyphase_filter_interpolation(base_rate)

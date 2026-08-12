@@ -70,6 +70,7 @@ def build_dataloader(seed: int) -> tuple[WorkerSeedingDataLoader, GroupingLabel]
             grouping,
         ],
         target_labels=[grouping.index_label],
+        sampling_grouping=grouping,
     )
     dataloader = WorkerSeedingDataLoader(
         dataset,

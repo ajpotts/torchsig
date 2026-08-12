@@ -4,8 +4,11 @@ labels:
   index: modulation_group_index
 groups:
   - name: linear
+    probability: 0.5
     values: [bpsk, qpsk, 16qam, 64qam]
   - name: frequency_shift
+    probability: 0.3
     regex: '^[248](g?fsk|g?msk)$'
   - name: all
+    probability: 0.2
     default: true

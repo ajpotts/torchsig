@@ -1054,14 +1054,23 @@ def test_validate_signal_sampling_configuration_rejects_probability_count_mismat
         dataset._validate_signal_sampling_configuration()
 
 
-def test_validate_signal_sampling_configuration_rejects_nonpositive_probabilities():
+def test_validate_signal_sampling_configuration_rejects_negative_probabilities():
     dataset = _dataset_with_empty_generators()
     dataset._signal_probability_mode = "probability"
     dataset.signal_generators = [DummyGenerator(class_name="a"), DummyGenerator(class_name="b")]
-    dataset.signal_probabilities = np.array([0.5, 0.0])
+    dataset.signal_probabilities = np.array([1.5, -0.5])
 
-    with pytest.raises(ValueError, match="all signal probabilities must be > 0"):
+    with pytest.raises(ValueError, match="all signal probabilities must be >= 0"):
         dataset._validate_signal_sampling_configuration()
+
+
+def test_validate_signal_sampling_configuration_accepts_zero_probability():
+    dataset = _dataset_with_empty_generators()
+    dataset._signal_probability_mode = "probability"
+    dataset.signal_generators = [DummyGenerator(class_name="a"), DummyGenerator(class_name="b")]
+    dataset.signal_probabilities = np.array([1.0, 0.0])
+
+    dataset._validate_signal_sampling_configuration()
 
 
 def test_refresh_signal_probabilities_empty():
