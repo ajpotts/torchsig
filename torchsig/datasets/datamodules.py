@@ -7,9 +7,9 @@ If dataset does exist, simply loaded it back in
 from __future__ import annotations
 
 import random
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pytorch_lightning as pl
@@ -107,6 +107,38 @@ def _config_transforms(cfg: TorchSigDatasetConfig) -> list[Any]:
     return [Spectrogram(fft_size=int(fft_size))]
 
 
+def _metadata_debug_options(
+    metadata_debug: bool | Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Normalize DataModule metadata-debug configuration.
+
+    Args:
+        metadata_debug: ``False`` to disable debugging, ``True`` to use the
+            default metadata-debug configuration, or a mapping of keyword
+            arguments accepted by ``enable_metadata_debug``.
+
+    Returns:
+        Debug keyword arguments, or ``None`` when debugging is disabled.
+
+    Raises:
+        TypeError: If ``metadata_debug`` is not a boolean or mapping.
+    """
+    if isinstance(metadata_debug, bool):
+        return {} if metadata_debug else None
+    if isinstance(metadata_debug, Mapping):
+        return dict(metadata_debug)
+    raise TypeError("metadata_debug must be a boolean or mapping")
+
+
+def _enable_dataset_metadata_debug(
+    dataset: TorchSigIterableDataset,
+    options: dict[str, Any] | None,
+) -> None:
+    """Enable metadata debugging on an iterable dataset when requested."""
+    if options is not None:
+        dataset.enable_metadata_debug(**options)
+
+
 def _seed_worker(worker_id: int) -> None:
     """Initialise deterministic NumPy / Python RNGs **inside a DataLoader worker**.
 
@@ -175,6 +207,8 @@ class TorchSigDataModule(pl.LightningDataModule):
         file_reader: FileReader class for disk I/O.
         overwrite: If True, existing on-disk data will be overwritten.
         seed: Optional random seed for reproducibility.
+        metadata_debug_options: Normalized options used to enable metadata
+            debugging during dataset creation, or ``None`` when disabled.
         train: Initialized training dataset (set in `setup()`).
         val: Initialized validation dataset (set in `setup()`).
         test: Initialized test dataset (set in `setup()`).
@@ -202,6 +236,7 @@ class TorchSigDataModule(pl.LightningDataModule):
         transforms: list | None = None,
         target_labels: list[str] | None = None,
         seed: int | None = None,
+        metadata_debug: bool | Mapping[str, Any] = False,
     ):
         """Initialize the TorchSigDataModule.
 
@@ -222,6 +257,9 @@ class TorchSigDataModule(pl.LightningDataModule):
             transforms: List of transforms applied to each sample's input. Defaults to [].
             target_labels: Names of metadata fields to include. Defaults to None.
             seed: Seed for randomness and reproducibility. Defaults to None.
+            metadata_debug: Enable metadata debugging with default settings,
+                or provide keyword arguments for ``enable_metadata_debug``.
+                Defaults to ``False``.
 
         Raises:
             ValueError: If dataset_splits don't sum to 1.0 (when using fractions).
@@ -243,6 +281,7 @@ class TorchSigDataModule(pl.LightningDataModule):
         self.transforms = [self.whole_signal_impairments, *(transforms or [])]
 
         self.target_labels = target_labels
+        self.metadata_debug_options = _metadata_debug_options(metadata_debug)
 
         # ---- dataloader configuration ------------------------------------
         self.batch_size = batch_size
@@ -379,6 +418,7 @@ class TorchSigDataModule(pl.LightningDataModule):
             target_labels=self.target_labels,
             seed=self.seed,
         )
+        _enable_dataset_metadata_debug(dataset, self.metadata_debug_options)
         loader = WorkerSeedingDataLoader(
             dataset=dataset,
             batch_size=self.create_batch_size,
@@ -507,6 +547,8 @@ class SplitTorchSigDataModule(pl.LightningDataModule):
         shuffle: Whether the training DataLoader should shuffle samples.
         collate_fn: Function used to collate model-facing batches.
         target_labels: Metadata fields returned as targets.
+        metadata_debug: Enable metadata debugging with default settings, or
+            provide keyword arguments for ``enable_metadata_debug``.
     """
 
     def __init__(
@@ -527,6 +569,7 @@ class SplitTorchSigDataModule(pl.LightningDataModule):
         shuffle: bool = True,
         collate_fn: Callable | None = None,
         target_labels: list[str] | None = None,
+        metadata_debug: bool | Mapping[str, Any] = False,
     ) -> None:
         """Initialize the split-based TorchSig DataModule."""
         super().__init__()
@@ -550,6 +593,7 @@ class SplitTorchSigDataModule(pl.LightningDataModule):
         self.shuffle = shuffle
         self.collate_fn = collate_fn or default_collate
         self.target_labels = target_labels or ["class_index"]
+        self.metadata_debug_options = _metadata_debug_options(metadata_debug)
 
         self.train: StaticTorchSigDataset | None = None
         self.val: StaticTorchSigDataset | None = None
@@ -584,6 +628,7 @@ class SplitTorchSigDataModule(pl.LightningDataModule):
             signal_generators=self.signal_generators,
             seed=cfg.seed,
         )
+        _enable_dataset_metadata_debug(dataset, self.metadata_debug_options)
 
         loader = WorkerSeedingDataLoader(
             dataset=dataset,

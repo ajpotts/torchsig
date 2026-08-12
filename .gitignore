@@ -54,6 +54,11 @@ examples/datasets/
 !examples/transforms/*.ipynb
 !examples/*.py
 !examples/*.yaml
+!examples/scripts/
+examples/scripts/*
+!examples/scripts/dev/
+examples/scripts/dev/*
+!examples/scripts/dev/debug_datamodule_pipeline.py
 
 # Pytest Files
 *.coverage

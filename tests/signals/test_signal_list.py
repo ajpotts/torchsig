@@ -8,13 +8,19 @@ CONTROL_FRAME_GENERATORS = {"80211a_ack", "80211a_cts", "80211a_rts"}
 
 def _grouped_signals(signal_lists: TorchSigSignalLists) -> list[str]:
     """Collect every per-category signal list declared on TorchSigSignalLists."""
-    return [signal_name for field in fields(signal_lists) for signal_name in getattr(signal_lists, field.name)]
+    return [
+        signal_name
+        for field in fields(signal_lists)
+        for signal_name in getattr(signal_lists, field.name)
+    ]
 
 
 def test_all_generators_match_public_signal_classes_exactly():
     """The aggregate generator contains exactly the public signal classes."""
     all_generator = lookup_signal_generator_by_string("all")
-    generated_class_names = [generator.class_name for generator in all_generator.signal_generators]
+    generated_class_names = [
+        generator.class_name for generator in all_generator.signal_generators
+    ]
 
     assert len(generated_class_names) == len(set(generated_class_names))
     assert set(generated_class_names) == set(CLASS_FAMILY_DICT)
@@ -35,8 +41,14 @@ def test_torchsig_signal_lists_groups_expected_signal_families():
     assert "chirpss" in signal_lists.chirpss_signals
 
     assert all("ofdm" in name for name in signal_lists.ofdm_signals)
-    assert all(any(key in name for key in ["fsk", "msk"]) for name in signal_lists.fsk_signals)
-    assert all(any(key in name for key in ["ask", "qam", "psk", "ook"]) for name in signal_lists.constellation_signals)
+    assert all(
+        any(key in name for key in ["fsk", "msk"])
+        for name in signal_lists.fsk_signals
+    )
+    assert all(
+        any(key in name for key in ["ask", "qam", "psk", "ook"])
+        for name in signal_lists.constellation_signals
+    )
     assert all("am-" in name for name in signal_lists.am_signals)
     assert all("lfm-" in name for name in signal_lists.lfm_signals)
 
