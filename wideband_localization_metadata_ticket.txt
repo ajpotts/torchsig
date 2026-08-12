@@ -1,0 +1,55 @@
+Title: Validate wideband boundary placement and localization labels after bandwidth measurement
+
+Summary
+-------
+Wideband component placement and YOLO labels consume the final component
+``center_freq`` and ``bandwidth``. Once bandwidth measurement semantics are
+corrected, the full pipeline needs deterministic integration coverage proving
+that boundary clipping leaves consistent metadata and that localization labels
+describe the final visible component extent.
+
+This ticket follows ``wideband_frequency_metadata_ticket.txt``. It should use
+the bandwidth behavior established there rather than defining a second
+bandwidth policy.
+
+Current state
+-------------
+- ``lower_freq`` and ``upper_freq`` are derived from canonical ``center_freq``
+  and ``bandwidth`` values.
+- Updating either canonical field invalidates legacy cached edge values.
+- ``frequency_shift_signal`` updates center frequency and bandwidth after its
+  anti-aliasing filter.
+- ``YOLOLabel`` derives vertical center and height from ``center_freq`` and
+  ``bandwidth``.
+
+These units have focused tests, but the reported wideband failure does not yet
+have an end-to-end regression covering measurement, placement at both dataset
+boundaries, and the resulting localization label.
+
+Requested work
+--------------
+1. Add deterministic integration tests that pass protocol and constellation
+   components through bandwidth measurement and wideband frequency placement.
+2. Exercise clipping at both the lower and upper dataset frequency limits.
+3. Verify final ``lower_freq`` and ``upper_freq`` equal
+   ``center_freq - bandwidth / 2`` and ``center_freq + bandwidth / 2``.
+4. Verify final edges remain within the configured dataset frequency range.
+5. Apply ``YOLOLabel`` and verify its vertical center and height match the final
+   canonical frequency metadata.
+
+Acceptance criteria
+-------------------
+- Tests cover an 802.11a waveform and a constellation waveform.
+- Lower-bound and upper-bound clipping are both covered deterministically.
+- Final frequency edges remain within dataset bounds within numerical
+  tolerance.
+- No ``_lower_frequency`` or ``_upper_frequency`` value can override final
+  canonical metadata.
+- YOLO vertical geometry matches the final visible frequency interval and
+  remains within normalized image bounds.
+
+Out of scope
+------------
+- Choosing or implementing the bandwidth estimator; that work belongs to
+  ``wideband_frequency_metadata_ticket.txt``.
+- Changes to the metadata debug logger.

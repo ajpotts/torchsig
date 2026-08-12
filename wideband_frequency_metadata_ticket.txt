@@ -1,0 +1,62 @@
+Title: Keep measured wideband component bandwidths within documented configuration semantics
+
+Summary
+-------
+The clean wideband pipeline replaces each builder-selected bandwidth in
+``update_signal_snr_bandwidth`` with a spectrogram-derived estimate. That
+estimate can be much larger than the configured component bandwidth range,
+causing generated training data to violate the dataset configuration.
+
+The previously reported stale ``_lower_frequency`` and ``_upper_frequency``
+behavior has already been fixed and is not part of this ticket.
+
+Observed configuration
+----------------------
+- Config: ``wideband_clean_train_all.yaml``
+- Sample rate: 10,000,000 Hz
+- Configured component bandwidth range: 62,500 to 1,000,000 Hz
+- FFT size and stride: 512 samples
+
+Current behavior
+----------------
+``update_signal_snr_bandwidth`` finds every FFT bin whose max-hold power is
+more than 3 dB above ``noise_power_db`` and replaces the signal's bandwidth
+with the span from the first matching bin to the last. The result is not
+constrained by ``bandwidth_min`` or ``bandwidth_max``.
+
+A deterministic reproduction selected an initial bandwidth of 659,652 Hz for
+both signals, then produced these estimates:
+
+- 802.11a RTS: 9,990,234.375 Hz
+- BPSK: 2,558,593.75 Hz
+
+Both exceed the configured maximum of 1,000,000 Hz.
+
+Requested work
+--------------
+1. Define whether dataset ``bandwidth_min`` and ``bandwidth_max`` constrain the
+   requested generator bandwidth, the final measured occupied bandwidth, or
+   both.
+2. Replace or constrain the current absolute-threshold/max-hold estimator so
+   distant spectral leakage and transient bins cannot expand a component box
+   across most of the dataset bandwidth.
+3. Keep the meaning of ``bandwidth`` as a full, two-sided occupied bandwidth
+   consistent across builders, measurement, and placement.
+4. Document any protocol-specific exception instead of silently exceeding the
+   configured range.
+
+Acceptance criteria
+-------------------
+- Final component bandwidths follow the documented configuration semantics.
+- The estimator cannot expand a component to unrelated, distant FFT bins.
+- Deterministic tests reproduce and prevent the oversized estimate for at
+  least one protocol waveform and one constellation waveform.
+- Tests cover low and high SNR values and FFT-resolution boundary cases.
+- Existing bandwidth and SNR behavior for unaffected signals remains covered.
+
+Out of scope
+------------
+- Cached frequency-edge invalidation, which is already fixed.
+- Boundary placement and YOLO-label validation, tracked separately in
+  ``wideband_localization_metadata_ticket.txt``.
+- Changes to the metadata debug logger.
