@@ -127,9 +127,9 @@ def test_wifi_registered_in_lookup_table():
 
 def test_wifi_in_signal_lists():
     """802.11a signals are grouped into the 'wifi' family."""
-    assert CLASS_FAMILY_DICT["80211a"] == "wifi"
+    wifi_names = {"80211a", "80211a_rts", "80211a_cts", "80211a_ack"}
+
+    assert all(CLASS_FAMILY_DICT[name] == "wifi" for name in wifi_names)
     assert "wifi" in TorchSigSignalLists.family_list
     lists = TorchSigSignalLists()
-    for name in ["80211a"]: # note "80211a_rts", "80211a_cts", "80211a_ack" removed
-        assert name in lists.wifi_signals
-
+    assert wifi_names.issubset(lists.wifi_signals)
