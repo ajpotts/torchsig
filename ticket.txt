@@ -1,0 +1,4 @@
+Remove 802.11a control-frame signal lists, consitantly across torchsig, while keeping the generators.
+"80211a_ack": "wifi", 
+"80211a_cts": "wifi", 
+"80211a_rts": "wifi", 

@@ -79,9 +79,6 @@ CLASS_FAMILY_DICT: Final[dict[str, str]] = {
     "p25": "lmr",
     "lora": "lora",
     "80211a": "wifi",  # data
-    "80211a_ack": "wifi",
-    "80211a_cts": "wifi",
-    "80211a_rts": "wifi",
     "zigbee": "zigbee",
 }
 
