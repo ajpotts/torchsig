@@ -130,10 +130,14 @@ _add_signal_generator("zigbee", ZigBeeSignalGenerator, {})
 
 # convert to list
 concrete_generator_names = list(signal_generator_lookup_table)
+non_public_generator_names = {"80211a_ack", "80211a_cts", "80211a_rts"}
+public_generator_names = [
+    name for name in concrete_generator_names if name not in non_public_generator_names
+]
 
 signal_generator_lookup_table["all"] = (
     ConcatSignalGenerator,
-    [signal_generator_lookup_table[name] for name in concrete_generator_names],
+    [signal_generator_lookup_table[name] for name in public_generator_names],
     {},
 )
 
