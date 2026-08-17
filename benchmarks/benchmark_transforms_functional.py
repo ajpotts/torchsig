@@ -45,6 +45,7 @@ SAMPLE_SIZE = 1024
 SAMPLE_SIZE_LONG = 10240
 SEED = 42
 
+
 # Fixtures for test data
 @pytest.fixture
 def sample_data():
@@ -52,11 +53,13 @@ def sample_data():
     np.random.seed(SEED)
     return (np.random.randn(SAMPLE_SIZE) + 1j * np.random.randn(SAMPLE_SIZE)).astype(np.complex64)
 
+
 @pytest.fixture
 def real_sample_data():
     """Generate sample real data for benchmarking."""
     np.random.seed(SEED)
     return np.random.randn(SAMPLE_SIZE).astype(np.float32)
+
 
 @pytest.fixture
 def long_sample_data():
@@ -64,19 +67,22 @@ def long_sample_data():
     np.random.seed(SEED)
     return (np.random.randn(SAMPLE_SIZE_LONG) + 1j * np.random.randn(SAMPLE_SIZE_LONG)).astype(np.complex64)
 
+
 @pytest.fixture
 def spectrogram_data():
     """Generate sample data for spectrogram drop functions.
-    The function spectrogram_drop_samples expects the 1st dimension to be 2 
+    The function spectrogram_drop_samples expects the 1st dimension to be 2
     (Real and Imaginary channels).
     """
     np.random.seed(SEED)
     return (np.random.randn(2, 128, 128) + 1j * np.random.randn(2, 128, 128)).astype(np.complex64)
 
+
 @pytest.fixture
 def rng():
     """Create a random number generator for benchmarking."""
     return np.random.default_rng(SEED)
+
 
 class TestTransformBenchmarks:
     """Benchmark tests for all transform functions."""
@@ -91,17 +97,7 @@ class TestTransformBenchmarks:
 
     def test_benchmark_adjacent_channel_interference(self, benchmark, sample_data, rng):
         filter_weights = sp.firwin(101, 0.25).astype(np.float32)
-        result = benchmark(
-            adjacent_channel_interference,
-            sample_data,
-            4.0,
-            1.0,
-            0.2,
-            filter_weights,
-            1.0,
-            0.0,
-            rng
-        )
+        result = benchmark(adjacent_channel_interference, sample_data, 4.0, 1.0, 0.2, filter_weights, 1.0, 0.0, rng)
         assert result.dtype == np.complex64
 
     def test_benchmark_awgn(self, benchmark, sample_data, rng):
@@ -134,15 +130,7 @@ class TestTransformBenchmarks:
 
     def test_benchmark_cochannel_interference(self, benchmark, sample_data, rng):
         filter_weights = sp.firwin(101, 0.25).astype(np.float32)
-        result = benchmark(
-            cochannel_interference,
-            sample_data,
-            1.0,
-            filter_weights,
-            "white",
-            True,
-            rng
-        )
+        result = benchmark(cochannel_interference, sample_data, 1.0, filter_weights, "white", True, rng)
         assert result.dtype == np.complex64
 
     def test_benchmark_complex_to_2d(self, benchmark, sample_data):
@@ -181,11 +169,7 @@ class TestTransformBenchmarks:
         assert result.dtype == np.complex64
 
     def test_benchmark_iq_imbalance(self, benchmark, sample_data):
-        result = benchmark(
-            iq_imbalance,
-            sample_data,
-            1.0, 0.1, -40, 0.0, -50
-        )
+        result = benchmark(iq_imbalance, sample_data, 1.0, 0.1, -40, 0.0, -50)
         assert result.dtype == np.complex64
 
     def test_benchmark_nonlinear_amplifier(self, benchmark, sample_data):
@@ -211,7 +195,7 @@ class TestTransformBenchmarks:
         assert result.dtype == np.complex64
 
     def test_benchmark_phase_offset(self, benchmark, sample_data):
-        result = benchmark(phase_offset, sample_data, np.pi/4)
+        result = benchmark(phase_offset, sample_data, np.pi / 4)
         assert result.dtype == np.complex64
 
     def test_benchmark_quantize(self, benchmark, sample_data):
@@ -251,12 +235,9 @@ class TestTransformBenchmarks:
         assert result.dtype == np.complex64
 
     def test_benchmark_time_varying_noise(self, benchmark, long_sample_data, rng):
-        result = benchmark(
-            time_varying_noise,
-            long_sample_data,
-            -20.0, -10.0, 5, True, rng
-        )
+        result = benchmark(time_varying_noise, long_sample_data, -20.0, -10.0, 5, True, rng)
         assert result.dtype == np.complex64
+
 
 class TestTransformBenchmarksWithSizes:
     """Benchmark transforms with different input sizes."""

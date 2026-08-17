@@ -8,7 +8,6 @@ import pytest
 from torchsig.signals.builders.am import AMSignalGenerator, am_modulator
 from torchsig.utils.dsp import TorchSigComplexDataType
 
-
 MODULE_PATH = "torchsig.signals.builders.am"
 
 
@@ -66,9 +65,7 @@ def test_am_modulator_creates_default_rng_when_none_is_given():
     rng.normal.return_value = np.ones(8)
     rng.uniform.return_value = 0.1
 
-    shaped_message = np.arange(8, dtype=np.float32).astype(
-        TorchSigComplexDataType
-    )
+    shaped_message = np.arange(8, dtype=np.float32).astype(TorchSigComplexDataType)
 
     with (
         patch(f"{MODULE_PATH}.np.random.default_rng", return_value=rng) as default_rng,
@@ -402,8 +399,8 @@ def test_am_signal_generator_generate_uses_sampled_parameters():
 
     rng = MagicMock(spec=np.random.Generator)
     rng.integers.side_effect = [
-        150,   # Number of samples
-        1_000, # Bandwidth
+        150,  # Number of samples
+        1_000,  # Bandwidth
     ]
 
     class GeneratorStub:

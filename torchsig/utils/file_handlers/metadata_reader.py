@@ -13,6 +13,7 @@ Both helpers accept either a plain ``str`` or a :class:`Path` as the
 dataset root, raise explicit, custom exceptions on error, and use
 ``itertools.islice`` so that only the requested line is read from disk.
 """
+
 from __future__ import annotations
 
 import csv
@@ -87,22 +88,17 @@ class MetadataReader(FileReader):
         advertised ``dataset_size`` (taken from ``info.json`` if present,
         otherwise ``0``).  This is useful for debugging and logging.
         """
-        return (
-            f"{self.__class__.__name__}"
-            f"(root={self.root!s}, size={self.dataset_size})"
-        )
-
+        return f"{self.__class__.__name__}(root={self.root!s}, size={self.dataset_size})"
 
     # ------------------------------------------------------------------
     # Private helper -- turn the JSON payload into public attributes
     # ------------------------------------------------------------------
     def _populate_from_json(self) -> None:
         """Populate attributes from ``self.dataset_metadata``."""
+
         def _try_get_int(name: str) -> int:
             try:
-                return int(self.dataset_metadata.get(
-                    name, 0
-                ))
+                return int(self.dataset_metadata.get(name, 0))
             except (TypeError, ValueError):
                 return 0
 
@@ -118,7 +114,6 @@ class MetadataReader(FileReader):
             self.class_list = raw
         else:
             self.class_list = _default
-
 
     def load_row(
         self,
@@ -173,19 +168,14 @@ class MetadataReader(FileReader):
         # 2️⃣  Guard against an out-of-range request.
         # --------------------------------------------------------------
         if row is None:
-            raise MetadataIndexError(
-                f"Metadata idx {idx} is out of bounds (file has fewer rows) - {csv_path}"
-            )
+            raise MetadataIndexError(f"Metadata idx {idx} is out of bounds (file has fewer rows) - {csv_path}")
 
         # --------------------------------------------------------------
         # 3️⃣  Verify that every required column is present and non-empty.
         # --------------------------------------------------------------
         required = {"index", "label", "modcod", "sample_rate"}
         if any(row[col] in (None, "") for col in required):
-            raise ValueError(
-                f"Row {idx} of {csv_path} is missing required columns: "
-                f"{[col for col in required if row[col] in (None, '')]!r}"
-            )
+            raise ValueError(f"Row {idx} of {csv_path} is missing required columns: {[col for col in required if row[col] in (None, '')]!r}")
 
         # --------------------------------------------------------------
         # 4️⃣  Convert the raw strings to their proper Python types,
@@ -194,25 +184,19 @@ class MetadataReader(FileReader):
         try:
             index = int(row["index"])
         except ValueError as exc:
-            raise ValueError(
-                f"Cannot convert 'index'='{row['index']}' to int"
-            ) from exc
+            raise ValueError(f"Cannot convert 'index'='{row['index']}' to int") from exc
 
         label = row["label"]
 
         try:
             modcod = int(row["modcod"])
         except ValueError as exc:
-            raise ValueError(
-                f"Cannot convert 'modcod'='{row['modcod']}' to int"
-            ) from exc
+            raise ValueError(f"Cannot convert 'modcod'='{row['modcod']}' to int") from exc
 
         try:
             sample_rate = float(row["sample_rate"])
         except ValueError as exc:
-            raise ValueError(
-                f"Cannot convert 'sample_rate'='{row['sample_rate']}' to float"
-            ) from exc
+            raise ValueError(f"Cannot convert 'sample_rate'='{row['sample_rate']}' to float") from exc
 
         # --------------------------------------------------------------
         # 5️⃣  Build the result dictionary and add the derived helper fields.
@@ -235,7 +219,6 @@ class MetadataReader(FileReader):
             record["class_index"] = -1
 
         return record
-
 
     def load_json(self) -> dict[str, object]:
         """Load the optional ``info.json`` file that lives next to ``metadata.csv``.

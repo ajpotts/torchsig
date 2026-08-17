@@ -14,7 +14,7 @@ from pathlib import Path
 # ----------------------------------------------------------------------
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:               # pragma: no cover
+if TYPE_CHECKING:  # pragma: no cover
     from pathlib import Path  # used only for type annotations
 
 # ----------------------------------------------------------------------
@@ -63,9 +63,7 @@ def _make_one_sample_dataset(root: Path) -> Path:
     #     platform-independent line endings (important on Windows).
     # ------------------------------------------------------------------
     csv_path = root / "metadata.csv"
-    csv_path.write_text(
-        f"0,BPSK,0,{DEFAULT_SR}\n", encoding="utf-8", newline=""
-    )
+    csv_path.write_text(f"0,BPSK,0,{DEFAULT_SR}\n", encoding="utf-8", newline="")
     return csv_path
 
 
@@ -186,8 +184,8 @@ def npy_dataset(tmp_path: Path):
     #     The imaginary part encodes a per-file offset (10·i) so that each
     #     waveform can be distinguished unambiguously.
     # ------------------------------------------------------------------
-    shapes = [2, 3, 1]               # number of samples per file
-    total = sum(shapes)              # total number of samples across all files
+    shapes = [2, 3, 1]  # number of samples per file
+    total = sum(shapes)  # total number of samples across all files
     npy_paths: list[Path] = []
 
     for i, length in enumerate(shapes):
@@ -233,9 +231,7 @@ def test_npy_reader_initialisation(npy_dataset):
 
     # ---- file discovery -------------------------------------------------
     assert len(reader.npy_files) == len(npy_paths)
-    assert [
-        p.name for p in reader.npy_files
-    ] == sorted(p.name for p in npy_paths)
+    assert [p.name for p in reader.npy_files] == sorted(p.name for p in npy_paths)
 
     # ---- cumulative start indices ---------------------------------------
     expected_starts = [0]
@@ -259,9 +255,7 @@ def test_npy_reader_no_files(tmp_path: Path):
     ``metadata.csv`` and ``info.json`` exist.
     """
     write_info_json(tmp_path, size=0)
-    (tmp_path / "metadata.csv").write_text(
-        f"0,BPSK,0,{DEFAULT_SR}\n", encoding="utf-8"
-    )
+    (tmp_path / "metadata.csv").write_text(f"0,BPSK,0,{DEFAULT_SR}\n", encoding="utf-8")
     with pytest.raises(FileNotFoundError, match=r"No \.npy files"):
         NPYReader(str(tmp_path))
 
@@ -335,10 +329,10 @@ def test_read_index_out_of_range(npy_dataset):
     reader = NPYReader(str(root))
 
     with pytest.raises(IndexError, match="out of range"):
-        reader.read(-1)               # negative index
+        reader.read(-1)  # negative index
 
     with pytest.raises(IndexError, match="out of range"):
-        reader.read(total)            # exactly one past the last element
+        reader.read(total)  # exactly one past the last element
 
 
 # ----------------------------------------------------------------------
@@ -353,7 +347,7 @@ def test_read_raises_index_error_when_csv_is_too_short(tmp_path: Path):
     dataset = create_dataset(
         tmp_path,
         npy_shapes=[2, 3],
-        csv_rows=[                         # only three rows (indices 0-2)
+        csv_rows=[  # only three rows (indices 0-2)
             (0, "BPSK", 0, 192_000),
             (1, "QPSK", 1, 192_000),
             (2, "Noise", 2, 192_000),

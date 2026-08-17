@@ -14,15 +14,19 @@ def temp_dir(tmp_path):
     yield
     os.chdir(original_dir)
 
+
 def test_successful_transform():
     """Test that a successful transform returns the correct result and passes RNG."""
+
     def mock_transform(data, rng, **kwargs):
         assert isinstance(rng, np.random.Generator)
         assert "extra_param" in kwargs
         return data * 2
+
     data = np.array([1.0, 2.0, 3.0])
     result = transform_crash_logger(mock_transform, data, extra_param=42)
     assert np.array_equal(result, np.array([2.0, 4.0, 6.0]))
+
 
 @patch("time.time")
 def test_failed_transform_saves_state(mock_time, temp_dir):
@@ -45,6 +49,7 @@ def test_failed_transform_saves_state(mock_time, temp_dir):
         saved_kwargs = f["kwargs"].item()
         assert saved_kwargs["param"] == 42
         assert "rng" not in saved_kwargs  # Verify rng was excluded
+
 
 @patch("time.time")
 def test_reproduce_failure_from_saved_state(mock_time, temp_dir):
@@ -72,9 +77,11 @@ def test_reproduce_failure_from_saved_state(mock_time, temp_dir):
     with pytest.raises(RuntimeError):
         failing_transform(saved_data, rng=rng, **saved_kwargs)
 
+
 @patch("time.time")
 def test_unique_filenames_rapid_failures(mock_time, temp_dir):
     """Test that rapid failures generate unique filenames."""
+
     def failing_transform(data, **kwargs):
         raise ValueError("Error")
 

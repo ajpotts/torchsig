@@ -7,7 +7,7 @@ from collections import Counter
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, List
+from typing import Any
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -1285,9 +1285,7 @@ def test_iterable_dataset_logs_completed_metadata_snapshot(monkeypatch, caplog):
 
     next(dataset)
 
-    snapshots = [
-        record for record in caplog.records if record.metadata_event == "snapshot"
-    ]
+    snapshots = [record for record in caplog.records if record.metadata_event == "snapshot"]
     assert len(snapshots) == 1
     snapshot = snapshots[0]
     assert snapshot.metadata_snapshot == {"complete": "True"}

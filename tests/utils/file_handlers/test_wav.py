@@ -39,19 +39,15 @@ def create_mock_dataset(root: Path, num_files: int, elements_per_file: int, num_
         f.writelines(f"{i},label_{i},0,48000\n" for i in range(total_elements))
 
     # 3. Create info.json
-    info = {
-        "num_iq_samples": num_samples,
-        "elements_per_file": elements_per_file,
-        "size": total_elements,
-        "class_list": ["mod_0", "mod_1"],
-        "sample_rate": 48000
-    }
+    info = {"num_iq_samples": num_samples, "elements_per_file": elements_per_file, "size": total_elements, "class_list": ["mod_0", "mod_1"], "sample_rate": 48000}
     with open(root / "info.json", "w") as f:
         json.dump(info, f)
+
 
 # ==============================================================================
 # TESTS
 # ==============================================================================
+
 
 def test_init_inference(tmp_path):
     """Test that num_iq_samples is inferred correctly when JSON is missing.
@@ -67,7 +63,7 @@ def test_init_inference(tmp_path):
     # VERIFICATION: Ensure CSV actually has the right number of lines before initializing
     with open(tmp_path / "metadata.csv") as f:
         lines = f.readlines()
-        assert len(lines) == (num_files * elements), f"CSV should have {num_files*elements} lines, found {len(lines)}"
+        assert len(lines) == (num_files * elements), f"CSV should have {num_files * elements} lines, found {len(lines)}"
 
     reader = WAVReader(tmp_path)
 
@@ -77,6 +73,7 @@ def test_init_inference(tmp_path):
     print(f"Elements Per File: {reader.elements_per_file}")
 
     assert reader.num_iq_samples == samples, f"Expected {samples}, got {reader.num_iq_samples}"
+
 
 def test_read_single_element(tmp_path):
     """Verify that read(idx) retrieves the correct complex sample from the correct file."""
@@ -91,6 +88,7 @@ def test_read_single_element(tmp_path):
     assert sig.data.shape == (samples,)
     # File 1 has I=1.1, Q=1.2
     np.testing.assert_allclose(sig.data, 1.1 + 1.2j)
+
 
 def test_recursive_rglob(tmp_path):
     """Test that files in subdirectories are found."""

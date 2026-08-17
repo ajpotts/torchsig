@@ -11,7 +11,6 @@ from torchsig.signals.builders.zigbee import (
     zigbee_modulator,
     zigbee_modulator_baseband,
 )
-from torchsig.signals.builders.constellation_maps import all_symbol_maps
 from torchsig.signals.signal_lists import CLASS_FAMILY_DICT, TorchSigSignalLists
 from torchsig.utils.dsp import TorchSigComplexDataType
 from torchsig.utils.signal_building import lookup_signal_generator_by_string
@@ -83,16 +82,16 @@ def test_zigbee_registered_and_in_signal_lists():
 
 def _burst_support(iq, live_threshold=0.1):
     """Locates the samples that carry signal energy.
- 
+
     ZigBee O-QPSK has a nominally constant envelope, so the median magnitude is
     a robust reference level and samples far below it are dead air introduced
     by padding rather than by the modulation.
- 
+
     Args:
         iq: Complex baseband samples.
         live_threshold: Fraction of the median magnitude below which a sample
             counts as dead.
- 
+
     Returns:
         tuple: (span_fraction, dead_fraction, longest_dead_run)
     """
@@ -101,7 +100,7 @@ def _burst_support(iq, live_threshold=0.1):
     idx = np.flatnonzero(live)
     if idx.size == 0:
         return 0.0, 1.0, len(iq)
- 
+
     span_fraction = (idx[-1] - idx[0] + 1) / len(iq)
     dead = ~live
     padded = np.concatenate(([False], dead, [False]))
@@ -112,7 +111,7 @@ def _burst_support(iq, live_threshold=0.1):
 
 def _edge_to_centre_power_ratio(iq, edge_fraction=0.1):
     """Compares mean power in the outer edges of the window against its centre.
- 
+
     Head/tail padding drives this to zero while a burst that fills the window
     keeps it near one, independent of any absolute threshold.
     """
@@ -121,13 +120,13 @@ def _edge_to_centre_power_ratio(iq, edge_fraction=0.1):
     edge = max(1, int(n * edge_fraction))
     outer = np.concatenate([mag[:edge], mag[-edge:]])
     centre = mag[n // 4 : 3 * n // 4]
-    return float(np.mean(outer**2) / np.mean(centre**2))    
+    return float(np.mean(outer**2) / np.mean(centre**2))
 
 
 @pytest.mark.parametrize("osr", [2, 4, 8, 16])
 def test_zigbee_shaper_emits_osr_samples_per_chip(osr):
     """The O-QPSK shaper emits exactly osr samples for every input chip.
- 
+
     In 802.15.4 each rail's half-sine pulse spans two chip periods and the Q
     rail lags I by one full chip period. A shaper that instead uses a one-chip
     pulse with a half-chip offset produces osr/2 samples per chip, halving
@@ -137,30 +136,24 @@ def test_zigbee_shaper_emits_osr_samples_per_chip(osr):
     num_chips = 200
     chips = rng.integers(0, 2, num_chips).astype(np.int8)
     iq = _oqpsk_half_sine(chips, osr)
-    assert len(iq) == num_chips * osr, (
-        f"shaper produced {len(iq)} samples for {num_chips} chips at osr={osr}, "
-        f"i.e. {len(iq) / num_chips} samples/chip instead of {osr}"
-    )
+    assert len(iq) == num_chips * osr, f"shaper produced {len(iq)} samples for {num_chips} chips at osr={osr}, i.e. {len(iq) / num_chips} samples/chip instead of {osr}"
 
 
 @pytest.mark.parametrize("max_num_samples", [256, 1024, 3276, 8192])
 def test_zigbee_baseband_is_not_zero_padded(max_num_samples):
     """Baseband output is filled with signal, not padded out to length.
- 
+
     Isolated zeros at pulse boundaries are expected; a run of them is not, and
     means pad_head_tail_to_length made up the shortfall.
     """
     rng = np.random.default_rng(1)
     iq = zigbee_modulator_baseband(max_num_samples, NOMINAL_OSR, rng)
     assert len(iq) == max_num_samples
- 
+
     span, dead_fraction, longest_dead_run = _burst_support(iq)
     assert span > 0.95, f"burst spans only {span:.1%} of the baseband window"
     assert dead_fraction < 0.05, f"{dead_fraction:.1%} of baseband samples are dead"
-    assert longest_dead_run <= 2 * NOMINAL_OSR, (
-        f"found {longest_dead_run} consecutive dead samples, which indicates "
-        "head/tail zero padding rather than pulse-boundary zeros"
-    )
+    assert longest_dead_run <= 2 * NOMINAL_OSR, f"found {longest_dead_run} consecutive dead samples, which indicates head/tail zero padding rather than pulse-boundary zeros"
 
 
 @pytest.mark.parametrize(
@@ -173,11 +166,9 @@ def test_zigbee_baseband_is_not_zero_padded(max_num_samples):
         (2_250_000, 20_000_000, 12345),
     ],
 )
-def test_zigbee_modulator_burst_fills_requested_duration(
-    bandwidth, sample_rate, num_samples
-):
+def test_zigbee_modulator_burst_fills_requested_duration(bandwidth, sample_rate, num_samples):
     """The burst occupies the whole requested window, not just its centre.
- 
+
     Thresholds are loose on purpose: a correct build measures above 0.99 span
     and above 0.9 edge-to-centre power.
     """
@@ -185,40 +176,29 @@ def test_zigbee_modulator_burst_fills_requested_duration(
     iq = zigbee_modulator(bandwidth, sample_rate, num_samples, rng)
     assert len(iq) == num_samples
     assert np.all(np.isfinite(iq))
- 
+
     span, dead_fraction, longest_dead_run = _burst_support(iq)
-    assert span > 0.90, (
-        f"burst spans only {span:.1%} of the {num_samples}-sample window"
-    )
+    assert span > 0.90, f"burst spans only {span:.1%} of the {num_samples}-sample window"
     assert dead_fraction < 0.10, f"{dead_fraction:.1%} of samples carry no energy"
-    assert longest_dead_run <= max(16, num_samples // 50), (
-        f"found {longest_dead_run} consecutive dead samples in a "
-        f"{num_samples}-sample burst"
-    )
- 
+    assert longest_dead_run <= max(16, num_samples // 50), f"found {longest_dead_run} consecutive dead samples in a {num_samples}-sample burst"
+
     edge_ratio = _edge_to_centre_power_ratio(iq)
-    assert edge_ratio > 0.25, (
-        f"edge power is only {edge_ratio:.1%} of centre power, so the burst is "
-        "narrower than the window it will be annotated with"
-    )
+    assert edge_ratio > 0.25, f"edge power is only {edge_ratio:.1%} of centre power, so the burst is narrower than the window it will be annotated with"
 
 
 @pytest.mark.parametrize("seed", [0, 1, 2, 3])
 def test_zigbee_generator_burst_fills_annotated_duration(seed):
     """Energy fills the duration the Signal metadata reports.
- 
+
     The dataset derives duration_in_samples from len(signal.data), so dead air
     inside signal.data becomes a time bounding box that is too wide.
     """
     expected = ZIGBEE_METADATA["signal_duration_in_samples_min"]
     signal = ZigBeeSignalGenerator(metadata=ZIGBEE_METADATA, seed=seed)()
     assert len(signal.data) == expected
- 
+
     span, dead_fraction, _ = _burst_support(signal.data)
-    assert span > 0.90, (
-        f"metadata claims {expected} samples but energy spans only {span:.1%} "
-        "of them"
-    )
+    assert span > 0.90, f"metadata claims {expected} samples but energy spans only {span:.1%} of them"
     assert dead_fraction < 0.10
     assert _edge_to_centre_power_ratio(signal.data) > 0.25
 
@@ -229,7 +209,7 @@ def test_zigbee_generator_burst_fills_annotated_duration(seed):
 )
 def test_zigbee_occupied_bandwidth_matches_annotation(bandwidth, sample_rate):
     """Occupied bandwidth tracks the annotated bandwidth.
- 
+
     Compressing the waveform in time expands it in frequency, so the same
     samples-per-chip error that halves the burst also doubles the chip rate and
     invalidates the frequency bounding box. Half-sine O-QPSK holds about 99% of
@@ -237,22 +217,16 @@ def test_zigbee_occupied_bandwidth_matches_annotation(bandwidth, sample_rate):
     1.25 and the regression pushes it past 2.5.
     """
     from scipy.signal import welch
- 
+
     rng = np.random.default_rng(11)
     iq = zigbee_modulator(bandwidth, sample_rate, 8192, rng)
- 
-    freqs, psd = welch(
-        iq, fs=sample_rate, nperseg=2048, return_onesided=False, detrend=False
-    )
+
+    freqs, psd = welch(iq, fs=sample_rate, nperseg=2048, return_onesided=False, detrend=False)
     order = np.argsort(freqs)
     freqs, psd = freqs[order], psd[order]
     cumulative = np.cumsum(psd) / np.sum(psd)
     low = freqs[np.searchsorted(cumulative, 0.005)]
     high = freqs[np.searchsorted(cumulative, 0.995)]
     ratio = (high - low) / bandwidth
- 
-    assert 0.8 < ratio < 1.8, (
-        f"99% occupied bandwidth is {ratio:.2f}x the annotated bandwidth "
-        f"({(high - low) / 1e6:.2f} MHz vs {bandwidth / 1e6:.2f} MHz)"
-    )
 
+    assert 0.8 < ratio < 1.8, f"99% occupied bandwidth is {ratio:.2f}x the annotated bandwidth ({(high - low) / 1e6:.2f} MHz vs {bandwidth / 1e6:.2f} MHz)"

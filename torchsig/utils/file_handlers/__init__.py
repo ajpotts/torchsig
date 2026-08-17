@@ -20,7 +20,7 @@ __all__ = [
     "MetadataReader",
     "NPYReader",
     "OGGReader",
-    "SigMFReader"
+    "SigMFReader",
     "WAVReader",
     "base_handler",
     "hdf5",

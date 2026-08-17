@@ -36,6 +36,7 @@ from .metadata_reader import MetadataReader
 
 __all__ = ["NPYReader"]
 
+
 class NPYReader(MetadataReader):
     """Read a directory that contains ``*.npy`` files, a ``metadata.csv`` and an
     ``info.json``.
@@ -61,6 +62,7 @@ class NPYReader(MetadataReader):
         dataset_size: int - sample size advertised by ``info.json`` (returned by
             ``len(reader)``).
     """
+
     # ------------------------------------------------------------------
     # Construction
     # ------------------------------------------------------------------
@@ -85,12 +87,11 @@ class NPYReader(MetadataReader):
         for file_path in self.npy_files:
             # Memory-map the file only to read its shape; the data stays on disk.
             arr = np.load(file_path, mmap_mode="r")
-            length = arr.shape[0]          # number of waveforms in this file
+            length = arr.shape[0]  # number of waveforms in this file
             self.file_start_indices.append(total)
             total += length
 
         self.total_elements: int = total
-
 
     def read(self, idx: int) -> Signal:
         """Return the waveform and its metadata for the *global* index ``idx``.
@@ -111,9 +112,7 @@ class NPYReader(MetadataReader):
         # 0️⃣ Guard against out-of-range accesses
         # --------------------------------------------------------------
         if idx < 0 or idx >= self.total_elements:
-            raise IndexError(
-                f"Index {idx} out of range (0 ≤ idx < {self.total_elements})"
-            )
+            raise IndexError(f"Index {idx} out of range (0 ≤ idx < {self.total_elements})")
 
         # --------------------------------------------------------------
         # 1️⃣ Identify the file that contains this global index (binary search)
@@ -125,9 +124,9 @@ class NPYReader(MetadataReader):
         # 2️⃣  Load the required .npy file (memory-mapped) and fetch the sample
         # --------------------------------------------------------------
         file_path = self.npy_files[file_idx]
-        arr = np.load(file_path, mmap_mode="r")        # memmap view
-        raw_sample = arr[in_file_idx]                  # scalar (real-only in fixtures)
-        data = np.atleast_1d(raw_sample)               # ensure ``len(data)`` works
+        arr = np.load(file_path, mmap_mode="r")  # memmap view
+        raw_sample = arr[in_file_idx]  # scalar (real-only in fixtures)
+        data = np.atleast_1d(raw_sample)  # ensure ``len(data)`` works
 
         # --------------------------------------------------------------
         # 3️⃣ Pull the associated CSV row (metadata) and apply the deterministic
@@ -139,7 +138,6 @@ class NPYReader(MetadataReader):
         # 4️⃣ Build the Signal object and hand it back to the caller
         # --------------------------------------------------------------
         return Signal(data=data, component_signals=[], metadata=metadata)
-
 
     # ----------------------------------------------------------------------
     # Length protocol -- reports the *advertised* dataset size from info.json

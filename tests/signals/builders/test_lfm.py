@@ -14,7 +14,6 @@ from torchsig.signals.builders.lfm import (
 )
 from torchsig.utils.dsp import TorchSigComplexDataType
 
-
 MODULE_PATH = "torchsig.signals.builders.lfm"
 
 

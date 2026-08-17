@@ -3,6 +3,7 @@ Learn More: https://lightning.ai/docs/pytorch/stable/data/datamodule.html
 If dataset does not exist at root, creates new dataset and writes to disk
 If dataset does exist, simply loaded it back in
 """
+
 from __future__ import annotations
 
 import random
@@ -26,23 +27,24 @@ from torchsig.transforms.impairments import Impairments
 from torchsig.transforms.metadata_transforms import YOLOLabel
 from torchsig.transforms.transforms import ComplexTo2D, Spectrogram
 from torchsig.utils.data_loading import WorkerSeedingDataLoader
+from torchsig.utils.defaults import TorchSigDefaults
 from torchsig.utils.file_handlers.hdf5 import HDF5Reader, HDF5Writer
 from torchsig.utils.writer import DatasetCreator, identity_collate_fn
-from torchsig.utils.defaults import TorchSigDefaults
 from torchsig.utils.yaml import load_config_from_yaml
 
 if TYPE_CHECKING:
     from torchsig.utils.file_handlers import BaseFileHandler
 
 __all__ = [
-    "set_global_seed",
-    "TorchSigDataModule",
     "SplitTorchSigDataModule",
+    "TorchSigDataModule",
+    "set_global_seed",
 ]
 
 # --------------------------------------------------------------
 #  GLOBAL REPRODUCIBILITY HELPERS
 # --------------------------------------------------------------
+
 
 def set_global_seed(seed: int) -> None:
     """Set *all* relevant RNGs to the same seed."""
@@ -177,6 +179,7 @@ class TorchSigDataModule(pl.LightningDataModule):
         val: Initialized validation dataset (set in `setup()`).
         test: Initialized test dataset (set in `setup()`).
     """
+
     def __init__(
         self,
         root: str,
@@ -185,7 +188,7 @@ class TorchSigDataModule(pl.LightningDataModule):
         dataset_splits: list[float] | list[int] = [0.70, 0.20, 0.10],
         # dataloader params
         batch_size: int = 1,
-        num_workers: int | None = None,          # ← can be None → default to 0
+        num_workers: int | None = None,  # ← can be None → default to 0
         collate_fn: Callable | None = None,
         shuffle: bool = True,
         # dataset creator params
@@ -256,12 +259,11 @@ class TorchSigDataModule(pl.LightningDataModule):
 
         # ---- placeholders ------------------------------------------------
         self.train: StaticTorchSigDataset | None = None
-        self.val:   StaticTorchSigDataset | None = None
-        self.test:  StaticTorchSigDataset | None = None
+        self.val: StaticTorchSigDataset | None = None
+        self.test: StaticTorchSigDataset | None = None
 
         # ---- reproducibility ---------------------------------------------
         self.seed = seed if seed is not None else 42
-
 
     @classmethod
     def from_config(
@@ -281,7 +283,7 @@ class TorchSigDataModule(pl.LightningDataModule):
         shuffle: bool = True,
         collate_fn: Callable | None = None,
         target_labels: list[str] | None = None,
-        **kwargs
+        **kwargs,
     ) -> TorchSigDataModule:
         """Create a TorchSigDataModule from a TorchSigDatasetConfig or YAML path.
 
@@ -330,10 +332,7 @@ class TorchSigDataModule(pl.LightningDataModule):
         if cfg.output_representation == "spectrogram":
             fft_size = cfg.output_spectrogram_fft or dataset_metadata.get("fft_size")
             if fft_size is None:
-                raise ValueError(
-                    "For spectrogram output, either `output_spectrogram_fft` must be set "
-                    "in the config or `fft_size` must be present in dataset_metadata"
-                )
+                raise ValueError("For spectrogram output, either `output_spectrogram_fft` must be set in the config or `fft_size` must be present in dataset_metadata")
             additional_transforms.append(Spectrogram(fft_size=int(fft_size)))
             # Only add YOLOLabel if explicitly requested via target_labels
             if "yolo_label" in target_labels or use_default_target_labels:
@@ -360,9 +359,8 @@ class TorchSigDataModule(pl.LightningDataModule):
             transforms=additional_transforms,
             target_labels=target_labels or None,
             seed=cfg.seed,
-            **kwargs
+            **kwargs,
         )
-
 
     def prepare_data(self) -> None:
         """Prepares the dataset by creating new datasets if they do not exist on disk.
@@ -394,10 +392,8 @@ class TorchSigDataModule(pl.LightningDataModule):
             overwrite=self.overwrite,
             file_writer=self.file_writer,
         )
-        print(f"Full Dataset: Impairment Level {self.impairment_level}, "
-              f"{self.dataset_size} samples")
+        print(f"Full Dataset: Impairment Level {self.impairment_level}, {self.dataset_size} samples")
         creator.create()
-
 
     def setup(self, stage: str = "fit") -> None:
         """Sets up the train and validation datasets for the given stage.
@@ -420,13 +416,12 @@ class TorchSigDataModule(pl.LightningDataModule):
             generator=Generator().manual_seed(self.seed),
         )
 
-
-    #-----------------------------------------------------------------
+    # -----------------------------------------------------------------
     # Helper that builds a *deterministic* DataLoader
-    #-----------------------------------------------------------------
+    # -----------------------------------------------------------------
     def _build_dataloader(self, dataset, shuffle: bool) -> DataLoader:
         gen = torch.Generator()
-        gen.manual_seed(self.seed)          # same seed for every epoch
+        gen.manual_seed(self.seed)  # same seed for every epoch
 
         # ``persistent_workers`` must be a bool; we evaluate it safely.
         persistent = bool(self.num_workers) and (self.num_workers > 0)
@@ -442,7 +437,6 @@ class TorchSigDataModule(pl.LightningDataModule):
             worker_init_fn=_seed_worker,
             persistent_workers=persistent,
         )
-
 
     # -----------------------------------------------------------------
     #  Lightning-specific hooks
@@ -574,11 +568,7 @@ class SplitTorchSigDataModule(pl.LightningDataModule):
             representation = cfg.output_representation.lower()
 
             if representation != train_representation:
-                raise ValueError(
-                    "All split configs must use the same output representation. "
-                    f"Training uses {train_representation!r}, but "
-                    f"{split_name} uses {representation!r}."
-                )
+                raise ValueError(f"All split configs must use the same output representation. Training uses {train_representation!r}, but {split_name} uses {representation!r}.")
 
     def _create_split(
         self,
@@ -652,10 +642,7 @@ class SplitTorchSigDataModule(pl.LightningDataModule):
     ) -> DataLoader:
         """Build a deterministic model-facing DataLoader."""
         if dataset is None:
-            raise RuntimeError(
-                "Dataset has not been initialized. Call setup() before "
-                "requesting its DataLoader."
-            )
+            raise RuntimeError("Dataset has not been initialized. Call setup() before requesting its DataLoader.")
 
         generator = Generator().manual_seed(seed)
         persistent_workers = self.num_workers > 0

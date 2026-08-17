@@ -27,9 +27,7 @@ class SeedableToyDataset(Dataset):
         return self.length
 
     def __getitem__(self, idx):
-        return torch.tensor([idx], dtype=torch.float32), [
-            {"value": float(self.rng.integers(0, 1000))}
-        ]
+        return torch.tensor([idx], dtype=torch.float32), [{"value": float(self.rng.integers(0, 1000))}]
 
 
 def test_metadata_padding_collate_fn_pads_variable_length_metadata():

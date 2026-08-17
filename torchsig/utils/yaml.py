@@ -5,8 +5,8 @@ from typing import Any
 
 import yaml
 
+__all__ = ["custom_representer", "dataset_from_yaml_dict", "dataset_metadata_to_yaml_dict", "load_config_from_yaml", "load_dataset_yaml", "save_dataset_yaml", "write_dict_to_yaml"]
 
-__all__ = ["custom_representer", "load_config_from_yaml", "dataset_from_yaml_dict", "load_dataset_yaml", "save_dataset_yaml", "dataset_metadata_to_yaml_dict", "write_dict_to_yaml"]
 
 def _require(cond: bool, msg: str) -> None:
     # Error helper function
@@ -45,8 +45,7 @@ def load_config_from_yaml(path: Path) -> "TorchSigDatasetConfig":
     # load configuration from yaml file
     cfg = yaml.safe_load(path.read_text()) or {}
     _require(isinstance(cfg, dict), "YAML root must be a mapping/dict")
-    _require("dataset_metadata" in cfg and isinstance(cfg["dataset_metadata"], dict),
-                                                    "dataset_metadata must be a dict")
+    _require("dataset_metadata" in cfg and isinstance(cfg["dataset_metadata"], dict), "dataset_metadata must be a dict")
     # data format
     output = cfg.get("output") or {}
     _require(isinstance(output, dict), "output must be a dict")
@@ -145,7 +144,6 @@ def dataset_metadata_to_yaml_dict(dataset_metadata: Any) -> dict[str, Any]:
         dictionary containing the metadata for YAML storage.
     """
     return dataset_metadata.get_full_metadata()
-
 
 
 def write_dict_to_yaml(filename: str, info_dict: dict[str, Any]) -> None:

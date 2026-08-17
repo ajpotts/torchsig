@@ -8,7 +8,6 @@ import pytest
 from torchsig.signals.builders.fm import FMSignalGenerator, fm_modulator
 from torchsig.utils.dsp import TorchSigComplexDataType
 
-
 MODULE_PATH = "torchsig.signals.builders.fm"
 
 
@@ -201,12 +200,8 @@ def test_fm_modulator_uses_carsons_rule(
 
     filter_design.assert_called_once()
 
-    assert filter_design.call_args.kwargs["cutoff"] == pytest.approx(
-        expected_fmax
-    )
-    assert filter_design.call_args.kwargs[
-        "transition_bandwidth"
-    ] == pytest.approx(expected_fmax)
+    assert filter_design.call_args.kwargs["cutoff"] == pytest.approx(expected_fmax)
+    assert filter_design.call_args.kwargs["transition_bandwidth"] == pytest.approx(expected_fmax)
     assert filter_design.call_args.kwargs["sample_rate"] == 10_000
 
 
@@ -235,9 +230,7 @@ def test_fm_modulator_accepts_bandwidth_above_half_sample_rate():
 
     assert result.shape == (8,)
     assert filter_design.call_args.kwargs["cutoff"] == pytest.approx(1_875)
-    assert filter_design.call_args.kwargs[
-        "transition_bandwidth"
-    ] == pytest.approx(1_875)
+    assert filter_design.call_args.kwargs["transition_bandwidth"] == pytest.approx(1_875)
 
 
 def test_fm_modulator_passes_normalized_message_and_filter_to_convolve():
@@ -303,13 +296,7 @@ def test_fm_modulator_matches_phase_accumulation_formula():
     mod_index = 2.0
     fdev = (1_000 / 2) / (1 + 1 / mod_index)
 
-    expected = np.exp(
-        2j
-        * np.pi
-        * np.cumsum(filtered_source)
-        * fdev
-        / 10_000
-    ).astype(TorchSigComplexDataType)
+    expected = np.exp(2j * np.pi * np.cumsum(filtered_source) * fdev / 10_000).astype(TorchSigComplexDataType)
 
     np.testing.assert_allclose(
         result,

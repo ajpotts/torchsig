@@ -22,7 +22,8 @@ if TYPE_CHECKING:
     from torchsig.utils.file_handlers.base_handler import FileWriter
 
 
-__all__ = ["default_collate_fn", "identity_collate_fn", "DatasetCreator"]
+__all__ = ["DatasetCreator", "default_collate_fn", "identity_collate_fn"]
+
 
 def default_collate_fn(batch):
     """Collates a batch by zipping its elements together. Note: not pickle-safe for complex
@@ -45,6 +46,7 @@ def identity_collate_fn(batch):
 @dataclass(frozen=True)
 class _DatasetExistenceProbe:
     """Configurable notion of 'dataset exists' without entering FileWriter.__enter__()."""
+
     root: Path
     maybe_data_file: Path | None
 
@@ -55,6 +57,7 @@ class _DatasetExistenceProbe:
             return self.maybe_data_file.exists()
         # fallback: any content
         return any(self.root.iterdir())
+
 
 def _deep_equal(a: Any, b: Any, *, float_rtol: float = 1e-9, float_atol: float = 0.0) -> bool:
     """Recursive equality for YAML-loaded structures (dict/list/scalars)."""
@@ -169,10 +172,7 @@ class DatasetCreator:
         try:
             inferred_length = len(self.dataloader.dataset)
         except Exception as e:  # pylint: disable=broad-except
-            raise ValueError(
-                "dataset_length must be provided when writing from an IterableDataset "
-                "(e.g., TorchSigIterableDataset), because length cannot be inferred."
-            ) from e
+            raise ValueError("dataset_length must be provided when writing from an IterableDataset (e.g., TorchSigIterableDataset), because length cannot be inferred.") from e
         return int(inferred_length)
 
     def _existence_probe(self) -> _DatasetExistenceProbe:
@@ -314,10 +314,7 @@ class DatasetCreator:
                 print(f"Dataset already exists in {self.root}. Not regenerating.")
                 return
             if not complete:
-                raise RuntimeError(
-                    f"Dataset only partially exists in {self.root}. "
-                    "Regenerate by setting overwrite=True."
-                )
+                raise RuntimeError(f"Dataset only partially exists in {self.root}. Regenerate by setting overwrite=True.")
             print(f"Dataset exists at {self.root} but differs from current dataset config. Using dataset on disk.")
             for k, disk_v, cur_v in diffs:
                 print(f"\t{k}: disk={disk_v} current={cur_v}")
@@ -331,9 +328,13 @@ class DatasetCreator:
 
             with self.file_handler(root=self.root) as writer:
                 # Write initial YAMLs
-                write_dict_to_yaml(self.dataset_info_filepath, self.get_dataset_info_dict(
-                    dataset_length=0, original_target_labels=orig_target_labels,
-                ))
+                write_dict_to_yaml(
+                    self.dataset_info_filepath,
+                    self.get_dataset_info_dict(
+                        dataset_length=0,
+                        original_target_labels=orig_target_labels,
+                    ),
+                )
                 write_dict_to_yaml(self.writer_info_filepath, self.get_writer_info_dict(complete=False))
 
                 remaining = self.dataset_length_requested
@@ -378,7 +379,7 @@ class DatasetCreator:
                             self.items_written += fut.result()
                             pbar.update(1)
 
-                else: # single-threaded writing
+                else:  # single-threaded writing
                     batch_idx = 0
                     for batch in self.dataloader:
                         if remaining <= 0:
@@ -399,16 +400,16 @@ class DatasetCreator:
 
             # Validate after successful context close
             if self.items_written != self.dataset_length_requested:
-                raise RuntimeError(
-                    f"DatasetCreator wrote {self.items_written} samples, "
-                    f"expected {self.dataset_length_requested}."
-                )
+                raise RuntimeError(f"DatasetCreator wrote {self.items_written} samples, expected {self.dataset_length_requested}.")
 
             # Final YAML update
-            write_dict_to_yaml(self.dataset_info_filepath, self.get_dataset_info_dict(
-                dataset_length=self.items_written,
-                original_target_labels=orig_target_labels,
-            ))
+            write_dict_to_yaml(
+                self.dataset_info_filepath,
+                self.get_dataset_info_dict(
+                    dataset_length=self.items_written,
+                    original_target_labels=orig_target_labels,
+                ),
+            )
             write_dict_to_yaml(self.writer_info_filepath, self.get_writer_info_dict(complete=True))
 
         finally:

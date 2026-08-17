@@ -10,7 +10,6 @@ from torchsig.signals.builders.fsk import FSKSignalGenerator
 from torchsig.signals.builders.lfm import LFMSignalGenerator
 from torchsig.signals.builders.ofdm import OFDMSignalGenerator
 from torchsig.signals.builders.tone import ToneSignalGenerator
-
 from torchsig.utils import signal_building
 from torchsig.utils.signal_building import signal_generator_lookup_table
 
@@ -103,25 +102,16 @@ def test_all_generator_contains_only_concrete_generators():
     assert generator_cls is ConcatSignalGenerator
     assert metadata == {}
 
-    concrete_names = [
-        name
-        for name in signal_building.signal_generator_lookup_table
-        if name not in {"all", *signal_building.family_names}
-    ]
+    concrete_names = [name for name in signal_building.signal_generator_lookup_table if name not in {"all", *signal_building.family_names}]
 
-    expected_generator_list = [
-        signal_building.signal_generator_lookup_table[name]
-        for name in concrete_names
-    ]
+    expected_generator_list = [signal_building.signal_generator_lookup_table[name] for name in concrete_names]
 
     assert generator_list == expected_generator_list
 
 
 @pytest.mark.parametrize("family_name", signal_building.family_names)
 def test_family_entries_are_concat_generators(family_name):
-    generator_cls, generator_list, metadata = signal_building.signal_generator_lookup_table[
-        family_name
-    ]
+    generator_cls, generator_list, metadata = signal_building.signal_generator_lookup_table[family_name]
 
     assert generator_cls is ConcatSignalGenerator
     assert metadata == {"family_name": family_name}
@@ -132,17 +122,9 @@ def test_family_entries_are_concat_generators(family_name):
 def test_family_entries_are_selected_by_exact_family_name(family_name):
     _, generator_list, _ = signal_building.signal_generator_lookup_table[family_name]
 
-    concrete_names = [
-        name
-        for name in signal_building.signal_generator_lookup_table
-        if name not in {"all", *signal_building.family_names}
-    ]
+    concrete_names = [name for name in signal_building.signal_generator_lookup_table if name not in {"all", *signal_building.family_names}]
 
-    expected_generator_list = [
-        signal_building.signal_generator_lookup_table[name]
-        for name in concrete_names
-        if signal_building._family_name(name) == family_name
-    ]
+    expected_generator_list = [signal_building.signal_generator_lookup_table[name] for name in concrete_names if signal_building._family_name(name) == family_name]
 
     assert generator_list == expected_generator_list
 
@@ -150,11 +132,7 @@ def test_family_entries_are_selected_by_exact_family_name(family_name):
 def test_am_family_does_not_include_qam_generators_regression():
     _, am_generators, _ = signal_building.signal_generator_lookup_table["am"]
 
-    constellation_names = [
-        metadata["constellation_name"]
-        for _, metadata in am_generators
-        if "constellation_name" in metadata
-    ]
+    constellation_names = [metadata["constellation_name"] for _, metadata in am_generators if "constellation_name" in metadata]
 
     assert not any("qam" in name for name in constellation_names)
 
@@ -274,10 +252,6 @@ def test_am_family_does_not_include_qam_generators():
     assert metadata == {"family_name": "am"}
     assert len(am_generators) > 0
 
-    am_constellation_names = [
-        generator_metadata["constellation_name"]
-        for _, generator_metadata in am_generators
-        if "constellation_name" in generator_metadata
-    ]
+    am_constellation_names = [generator_metadata["constellation_name"] for _, generator_metadata in am_generators if "constellation_name" in generator_metadata]
 
     assert not any("qam" in name for name in am_constellation_names)

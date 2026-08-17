@@ -3,18 +3,15 @@
 import numpy as np
 import pytest
 
-from torchsig.signals.builders.constellation_maps import all_symbol_maps
-from torchsig.signals.signal_lists import CLASS_FAMILY_DICT, TorchSigSignalLists
-from torchsig.utils.dsp import TorchSigComplexDataType
-from torchsig.utils.signal_building import lookup_signal_generator_by_string
-
-
 from torchsig.signals.builders.adsb import (
     ADSB_PREAMBLE_CHIPS,
     AdsBSignalGenerator,
     adsb_modulator,
     build_adsb_chip_stream,
 )
+from torchsig.signals.signal_lists import CLASS_FAMILY_DICT, TorchSigSignalLists
+from torchsig.utils.dsp import TorchSigComplexDataType
+from torchsig.utils.signal_building import lookup_signal_generator_by_string
 
 ADSB_METADATA = {
     "sample_rate": 10_000_000,
@@ -45,8 +42,8 @@ def test_adsb_chip_stream_starts_with_preamble():
 def test_adsb_chip_stream_frame_sizes():
     """Long and short streams have different frame periods."""
     rng = np.random.default_rng(1)
-    long_chips = 16 + 112 * 2   # 240
-    short_chips = 16 + 56 * 2   # 128
+    long_chips = 16 + 112 * 2  # 240
+    short_chips = 16 + 56 * 2  # 128
     l = build_adsb_chip_stream(long_chips, "long", rng)
     s = build_adsb_chip_stream(short_chips, "short", rng)
     assert len(l) == long_chips

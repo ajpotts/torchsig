@@ -50,6 +50,7 @@ _BUILTIN_GROUPING_CONFIGS = {
     "family": _build_family_grouping_config(),
 }
 
+
 ## Base/Helper Classes
 class MetadataTransform(Transform):
     """Base class for metadata transforms.
@@ -441,39 +442,27 @@ class GroupingLabel(MetadataTransform):
                 "default",
             } & group.keys()
             if len(rule_names) != 1:
-                raise ValueError(
-                    f"group {name!r} must define exactly one of values, "
-                    "regex, formula, or default"
-                )
+                raise ValueError(f"group {name!r} must define exactly one of values, regex, formula, or default")
             if "default" in group:
                 if group["default"] is not True:
-                    raise ValueError(
-                        f"group {name!r} default rule must be true"
-                    )
+                    raise ValueError(f"group {name!r} default rule must be true")
                 if group_index != len(self.groups) - 1:
                     raise ValueError("the default group must be last")
 
         if len(names) != len(set(names)):
             raise ValueError("group names must be unique")
 
-        probability_groups = [
-            group for group in self.groups if "probability" in group
-        ]
-        likelihood_groups = [
-            group for group in self.groups if "likelihood" in group
-        ]
+        probability_groups = [group for group in self.groups if "probability" in group]
+        likelihood_groups = [group for group in self.groups if "likelihood" in group]
         if probability_groups and likelihood_groups:
-            raise ValueError(
-                "grouping config cannot mix probability and likelihood"
-            )
+            raise ValueError("grouping config cannot mix probability and likelihood")
 
         if probability_groups:
             probabilities = []
             for group in self.groups:
                 if "probability" not in group:
                     warnings.warn(
-                        f"probability is missing for group {group['name']!r}; "
-                        "defaulting to 0.0",
+                        f"probability is missing for group {group['name']!r}; defaulting to 0.0",
                         UserWarning,
                         stacklevel=3,
                     )
@@ -489,10 +478,7 @@ class GroupingLabel(MetadataTransform):
                 )
             probability_sum = float(np.sum(probabilities))
             if not np.isclose(probability_sum, 1.0, atol=1e-8):
-                raise ValueError(
-                    "group probabilities must sum to 1.0, "
-                    f"found {probability_sum}"
-                )
+                raise ValueError(f"group probabilities must sum to 1.0, found {probability_sum}")
         elif likelihood_groups:
             for group in likelihood_groups:
                 self._validate_sampling_weight(
@@ -515,19 +501,13 @@ class GroupingLabel(MetadataTransform):
             value,
             (int, float, np.integer, np.floating),
         ):
-            raise TypeError(
-                f"group {group_name!r} {weight_name} must be a real number"
-            )
+            raise TypeError(f"group {group_name!r} {weight_name} must be a real number")
         value = float(value)
         if not np.isfinite(value):
-            raise ValueError(
-                f"group {group_name!r} {weight_name} must be finite"
-            )
+            raise ValueError(f"group {group_name!r} {weight_name} must be finite")
         if value < 0.0 or (value == 0.0 and not allow_zero):
             comparator = ">= 0" if allow_zero else "> 0"
-            raise ValueError(
-                f"group {group_name!r} {weight_name} must be {comparator}"
-            )
+            raise ValueError(f"group {group_name!r} {weight_name} must be {comparator}")
         return value
 
     def _compile_rule(self, group: dict[str, Any]) -> tuple[str, Any]:
@@ -689,16 +669,12 @@ class GroupingLabel(MetadataTransform):
         Raises:
             ValueError: If no configured group matches the value.
         """
-        for group_index, (group, compiled_rule) in enumerate(
-            zip(self.groups, self._compiled_rules, strict=True)
-        ):
+        for group_index, (group, compiled_rule) in enumerate(zip(self.groups, self._compiled_rules, strict=True)):
             rule_type, rule = compiled_rule
             if self._rule_matches(rule_type, rule, value):
                 return group["name"], group_index
 
-        raise ValueError(
-            f"value {value!r} did not match any configured group"
-        )
+        raise ValueError(f"value {value!r} did not match any configured group")
 
     def __apply__(self, signal: Signal) -> Signal:
         """Assign the first matching group to a signal.
@@ -713,10 +689,7 @@ class GroupingLabel(MetadataTransform):
         try:
             group_name, group_index = self.match(value)
         except ValueError as error:
-            raise ValueError(
-                f"value {value!r} from metadata field {self.source!r} did "
-                "not match any configured group"
-            ) from error
+            raise ValueError(f"value {value!r} from metadata field {self.source!r} did not match any configured group") from error
 
         signal[self.name_label] = group_name
         signal[self.index_label] = group_index

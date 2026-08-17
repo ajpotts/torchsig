@@ -8,7 +8,6 @@ import pytest
 from torchsig.signals.builders.tone import ToneSignalGenerator, tone_modulator
 from torchsig.utils.dsp import TorchSigComplexDataType
 
-
 MODULE_PATH = "torchsig.signals.builders.tone"
 
 

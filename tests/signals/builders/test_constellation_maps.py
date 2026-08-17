@@ -8,7 +8,6 @@ from torchsig.signals.builders.constellation_maps import (
     remove_corners,
 )
 
-
 EXPECTED_MAP_SIZES = {
     "ook": 2,
     "bpsk": 2,
@@ -137,9 +136,7 @@ def test_psk_symbol_angles_are_evenly_spaced(modulation, order):
     angles = np.mod(np.angle(symbol_map), 2 * np.pi)
     sorted_angles = np.sort(angles)
 
-    angular_differences = np.diff(
-        np.concatenate((sorted_angles, [sorted_angles[0] + 2 * np.pi]))
-    )
+    angular_differences = np.diff(np.concatenate((sorted_angles, [sorted_angles[0] + 2 * np.pi])))
 
     expected_difference = 2 * np.pi / order
 
@@ -376,20 +373,7 @@ def test_cross_qam_maps_retain_axis_arms(modulation):
     assert np.min(symbol_map.imag) == pytest.approx(-1.0)
 
     # At each extreme, at least one point should remain that is not a corner.
-    assert np.any(
-        np.isclose(symbol_map.real, 1.0)
-        & (np.abs(symbol_map.imag) < 1.0)
-    )
-    assert np.any(
-        np.isclose(symbol_map.real, -1.0)
-        & (np.abs(symbol_map.imag) < 1.0)
-    )
-    assert np.any(
-        np.isclose(symbol_map.imag, 1.0)
-        & (np.abs(symbol_map.real) < 1.0)
-    )
-    assert np.any(
-        np.isclose(symbol_map.imag, -1.0)
-        & (np.abs(symbol_map.real) < 1.0)
-    )
-
+    assert np.any(np.isclose(symbol_map.real, 1.0) & (np.abs(symbol_map.imag) < 1.0))
+    assert np.any(np.isclose(symbol_map.real, -1.0) & (np.abs(symbol_map.imag) < 1.0))
+    assert np.any(np.isclose(symbol_map.imag, 1.0) & (np.abs(symbol_map.real) < 1.0))
+    assert np.any(np.isclose(symbol_map.imag, -1.0) & (np.abs(symbol_map.real) < 1.0))

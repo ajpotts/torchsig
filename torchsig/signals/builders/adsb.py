@@ -32,12 +32,10 @@ from torchsig.utils.dsp import (
 )
 
 # Preamble: pulses at 0, 1.0, 3.5, 4.5 µs → chips at indices 0, 2, 7, 9
-ADSB_PREAMBLE_CHIPS: np.ndarray = np.array(
-    [1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0], dtype=np.float32
-)
+ADSB_PREAMBLE_CHIPS: np.ndarray = np.array([1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0], dtype=np.float32)
 
-ADSB_LONG_FRAME_BITS: int = 112   # ADS-B / Mode S Long
-ADSB_SHORT_FRAME_BITS: int = 56   # Mode S Short
+ADSB_LONG_FRAME_BITS: int = 112  # ADS-B / Mode S Long
+ADSB_SHORT_FRAME_BITS: int = 56  # Mode S Short
 
 _PPM_ONE: np.ndarray = np.array([1.0, 0.0], dtype=np.float32)
 _PPM_ZERO: np.ndarray = np.array([0.0, 1.0], dtype=np.float32)
@@ -51,9 +49,7 @@ def _bits_to_ppm_chips(bits: np.ndarray) -> np.ndarray:
     return chips
 
 
-def build_adsb_chip_stream(
-    num_chips: int, frame_type: str, rng: np.random.Generator
-) -> np.ndarray:
+def build_adsb_chip_stream(num_chips: int, frame_type: str, rng: np.random.Generator) -> np.ndarray:
     """Builds a chip stream of repeated ADS-B frames (preamble + PPM data).
 
     Args:
@@ -64,9 +60,7 @@ def build_adsb_chip_stream(
     Returns:
         np.ndarray: Float chip stream of length num_chips, values in {0, 1}.
     """
-    data_bits_per_frame = (
-        ADSB_LONG_FRAME_BITS if frame_type == "long" else ADSB_SHORT_FRAME_BITS
-    )
+    data_bits_per_frame = ADSB_LONG_FRAME_BITS if frame_type == "long" else ADSB_SHORT_FRAME_BITS
     data_chips = _bits_to_ppm_chips(rng.integers(0, 2, data_bits_per_frame).astype(np.float32))
     frame = np.concatenate([ADSB_PREAMBLE_CHIPS, data_chips])
     frame_len = len(frame)
@@ -162,21 +156,13 @@ def adsb_modulator(
     oversampling_rate_nominal = 4
     oversampling_rate = sample_rate / bandwidth
     resample_rate_ideal = oversampling_rate / oversampling_rate_nominal
-    max_num_samples = max(
-        oversampling_rate_nominal, int(np.floor(num_samples / resample_rate_ideal))
-    )
+    max_num_samples = max(oversampling_rate_nominal, int(np.floor(num_samples / resample_rate_ideal)))
 
-    baseband = adsb_modulator_baseband(
-        frame_type, max_num_samples, oversampling_rate_nominal, rng
-    )
+    baseband = adsb_modulator_baseband(frame_type, max_num_samples, oversampling_rate_nominal, rng)
     correct_bw = multistage_polyphase_resampler(baseband, resample_rate_ideal)
     correct_bw *= 1 / resample_rate_ideal
 
-    correct_bw = (
-        slice_head_tail_to_length(correct_bw, num_samples)
-        if len(correct_bw) > num_samples
-        else pad_head_tail_to_length(correct_bw, num_samples)
-    )
+    correct_bw = slice_head_tail_to_length(correct_bw, num_samples) if len(correct_bw) > num_samples else pad_head_tail_to_length(correct_bw, num_samples)
     return correct_bw.astype(TorchSigComplexDataType)
 
 
@@ -226,15 +212,11 @@ class AdsBSignalGenerator(BaseSignalGenerator):
             low=self["signal_duration_in_samples_min"],
             high=self["signal_duration_in_samples_max"] + 1,
         )
-        bandwidth = self.random_generator.integers(
-            low=self["bandwidth_min"], high=self["bandwidth_max"] + 1
-        )
+        bandwidth = self.random_generator.integers(low=self["bandwidth_min"], high=self["bandwidth_max"] + 1)
         try:
             frame_type = self["frame_type"]
         except AttributeError:
             frame_type = "long"
 
-        signal_data = adsb_modulator(
-            frame_type, bandwidth, sample_rate, num_iq_samples_signal, self.random_generator
-        )
+        signal_data = adsb_modulator(frame_type, bandwidth, sample_rate, num_iq_samples_signal, self.random_generator)
         return Signal(data=signal_data, center_freq=0, bandwidth=bandwidth)

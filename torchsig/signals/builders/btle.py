@@ -34,17 +34,12 @@ from torchsig.utils.dsp import (
     slice_tail_to_length,
 )
 
-
 # Advertising channel access address (Bluetooth Core Spec 5.x, §2.1.2)
 BTLE_ACCESS_ADDRESS: int = 0x8E89BED6
 
-_PREAMBLE_BITS: np.ndarray = np.array(
-    [1, 0, 1, 0, 1, 0, 1, 0], dtype=np.float64
-)  # 0xAA, MSB first
+_PREAMBLE_BITS: np.ndarray = np.array([1, 0, 1, 0, 1, 0, 1, 0], dtype=np.float64)  # 0xAA, MSB first
 
-_AA_BITS: np.ndarray = np.unpackbits(
-    np.array([0x8E, 0x89, 0xBE, 0xD6], dtype=np.uint8)
-).astype(np.float64)
+_AA_BITS: np.ndarray = np.unpackbits(np.array([0x8E, 0x89, 0xBE, 0xD6], dtype=np.uint8)).astype(np.float64)
 
 _BLE_GFSK_BT: float = 0.5
 _BLE_MOD_INDEX: float = 0.5
@@ -79,12 +74,8 @@ def build_btle_bit_stream(num_bits: int, rng: np.random.Generator) -> np.ndarray
         # PDU: 2-byte header + random 0–37 byte payload
         pdu_payload_bytes = int(rng.integers(0, 38))
         pdu_bytes = 2 + pdu_payload_bytes
-        pdu_bits = np.unpackbits(
-            rng.integers(0, 256, pdu_bytes, dtype=np.uint8)
-        ).astype(np.float64)
-        crc_bits = np.unpackbits(
-            rng.integers(0, 256, 3, dtype=np.uint8)
-        ).astype(np.float64)
+        pdu_bits = np.unpackbits(rng.integers(0, 256, pdu_bytes, dtype=np.uint8)).astype(np.float64)
+        crc_bits = np.unpackbits(rng.integers(0, 256, 3, dtype=np.uint8)).astype(np.float64)
         packet = np.concatenate([_PREAMBLE_BITS, _AA_BITS, pdu_bits, crc_bits])
         bits.append(packet)
 
@@ -175,19 +166,13 @@ def btle_modulator(
     oversampling_rate_nominal = 4
     oversampling_rate = sample_rate / bandwidth
     resample_rate_ideal = oversampling_rate / oversampling_rate_nominal
-    max_num_samples = max(
-        oversampling_rate_nominal, int(np.floor(num_samples / resample_rate_ideal))
-    )
+    max_num_samples = max(oversampling_rate_nominal, int(np.floor(num_samples / resample_rate_ideal)))
 
     baseband = btle_modulator_baseband(max_num_samples, oversampling_rate_nominal, rng)
     correct_bw = multistage_polyphase_resampler(baseband, resample_rate_ideal)
     correct_bw *= 1 / resample_rate_ideal
 
-    correct_bw = (
-        slice_head_tail_to_length(correct_bw, num_samples)
-        if len(correct_bw) > num_samples
-        else pad_head_tail_to_length(correct_bw, num_samples)
-    )
+    correct_bw = slice_head_tail_to_length(correct_bw, num_samples) if len(correct_bw) > num_samples else pad_head_tail_to_length(correct_bw, num_samples)
     return correct_bw.astype(TorchSigComplexDataType)
 
 
@@ -230,10 +215,6 @@ class BTLESignalGenerator(BaseSignalGenerator):
             low=self["signal_duration_in_samples_min"],
             high=self["signal_duration_in_samples_max"] + 1,
         )
-        bandwidth = self.random_generator.integers(
-            low=self["bandwidth_min"], high=self["bandwidth_max"] + 1
-        )
-        signal_data = btle_modulator(
-            bandwidth, sample_rate, num_iq_samples_signal, self.random_generator
-        )
+        bandwidth = self.random_generator.integers(low=self["bandwidth_min"], high=self["bandwidth_max"] + 1)
+        signal_data = btle_modulator(bandwidth, sample_rate, num_iq_samples_signal, self.random_generator)
         return Signal(data=signal_data, center_freq=0, bandwidth=bandwidth)

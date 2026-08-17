@@ -15,7 +15,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 
-
 __all__ = ["DEF_N_BINS", "DatasetSummary", "summarize_dataset"]
 
 DEF_N_BINS = 50
@@ -58,13 +57,14 @@ class DatasetSummary:
                 Defaults to 50.
         """
         from torchsig.datasets.datasets import StaticTorchSigDataset
+
         dataset = StaticTorchSigDataset(root=root, target_labels=None)
         self._build(dataset, n_bins)
 
     @classmethod
     def from_dataset(
         cls,
-        dataset: "StaticTorchSigDataset",
+        dataset: StaticTorchSigDataset,
         n_bins: int | dict[str, int] = DEF_N_BINS,
     ) -> DatasetSummary:
         """Create a summary from an already-loaded dataset.
@@ -84,7 +84,7 @@ class DatasetSummary:
 
     def _build(
         self,
-        dataset: "StaticTorchSigDataset",
+        dataset: StaticTorchSigDataset,
         n_bins: int | dict[str, int],
     ) -> None:
         """Single-pass collection and histogramming."""

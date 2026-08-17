@@ -831,12 +831,6 @@ def test_Doppler_recurses_component_metadata() -> None:
         assert comp.bandwidth == pytest.approx(pre_bw * alpha, rel=1e-6)
 
 
-
-
-
-
-
-
 @pytest.mark.parametrize(
     "signal, params, is_error",
     [
@@ -1015,15 +1009,17 @@ def test_NonlinearAmplifier(signal: Signal, params: dict, is_error: bool) -> Non
 
         assert signal.data.dtype == TorchSigComplexDataType
 
+
 @pytest.fixture
 def test_signal():
     return new_test_signal()
 
+
 @pytest.mark.parametrize("max_ripple_db", [(1, 2)])
 @pytest.mark.parametrize("ripple_freq", [(2, 10)])
 @pytest.mark.parametrize("num_taps", [[65, 1025]])
-@pytest.mark.parametrize("passband_fuzz", ["smooth","random"])
-@pytest.mark.parametrize("stopband_fuzz", ["smooth","random"])
+@pytest.mark.parametrize("passband_fuzz", ["smooth", "random"])
+@pytest.mark.parametrize("stopband_fuzz", ["smooth", "random"])
 def test_PassbandRipple(
     test_signal: Signal,
     max_ripple_db: tuple,
@@ -1034,13 +1030,7 @@ def test_PassbandRipple(
 ) -> None:
     """Test PassbandRipple transform with pytest."""
     signal_test = test_signal.copy()
-    T = PassbandRipple(
-        max_ripple_db=max_ripple_db,
-        ripple_freq=ripple_freq,
-        num_taps=num_taps,
-        passband_fuzz=passband_fuzz,
-        stopband_fuzz=stopband_fuzz
-    )
+    T = PassbandRipple(max_ripple_db=max_ripple_db, ripple_freq=ripple_freq, num_taps=num_taps, passband_fuzz=passband_fuzz, stopband_fuzz=stopband_fuzz)
     signal_out = T(test_signal)
 
     assert isinstance(T, PassbandRipple)
@@ -1252,9 +1242,7 @@ def test_SpectralInversion_recurses_component_metadata() -> None:
     T = SpectralInversion()
     signal = T(signal)
 
-    for pre_cf, pre_start, pre_stop, comp in zip(
-        pre_cfs, pre_starts, pre_stops, signal.component_signals
-    ):
+    for pre_cf, pre_start, pre_stop, comp in zip(pre_cfs, pre_starts, pre_stops, signal.component_signals):
         assert comp.center_freq == pytest.approx(-pre_cf, rel=RTOL)
         assert comp.start_in_samples == pre_start
         assert comp.stop_in_samples == pre_stop

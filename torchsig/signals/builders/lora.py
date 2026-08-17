@@ -33,10 +33,9 @@ from torchsig.utils.dsp import (
     slice_tail_to_length,
 )
 
-
 LORA_SF_VALUES: tuple[int, ...] = (7, 8, 9, 10, 11, 12)
 LORA_PREAMBLE_UPCHIRPS: int = 8
-LORA_SYNC_CHIRPS: int = 2   # encode network sync word
+LORA_SYNC_CHIRPS: int = 2  # encode network sync word
 LORA_SFD_DOWNCHIRPS: int = 2
 LORA_SFD_QUARTER_CHIPS: int = 1  # +0.25 up-chirp after down-chirps
 
@@ -177,19 +176,13 @@ def lora_modulator(
     oversampling_rate_nominal = 4
     oversampling_rate = sample_rate / bandwidth
     resample_rate_ideal = oversampling_rate / oversampling_rate_nominal
-    max_num_samples = max(
-        oversampling_rate_nominal, int(np.floor(num_samples / resample_rate_ideal))
-    )
+    max_num_samples = max(oversampling_rate_nominal, int(np.floor(num_samples / resample_rate_ideal)))
 
     baseband = lora_modulator_baseband(sf, max_num_samples, oversampling_rate_nominal, rng)
     correct_bw = multistage_polyphase_resampler(baseband, resample_rate_ideal)
     correct_bw *= 1 / resample_rate_ideal
 
-    correct_bw = (
-        slice_head_tail_to_length(correct_bw, num_samples)
-        if len(correct_bw) > num_samples
-        else pad_head_tail_to_length(correct_bw, num_samples)
-    )
+    correct_bw = slice_head_tail_to_length(correct_bw, num_samples) if len(correct_bw) > num_samples else pad_head_tail_to_length(correct_bw, num_samples)
     return correct_bw.astype(TorchSigComplexDataType)
 
 
@@ -235,15 +228,11 @@ class LoraSignalGenerator(BaseSignalGenerator):
             low=self["signal_duration_in_samples_min"],
             high=self["signal_duration_in_samples_max"] + 1,
         )
-        bandwidth = self.random_generator.integers(
-            low=self["bandwidth_min"], high=self["bandwidth_max"] + 1
-        )
+        bandwidth = self.random_generator.integers(low=self["bandwidth_min"], high=self["bandwidth_max"] + 1)
         try:
             sf = int(self["sf"])
         except AttributeError:
             sf = int(self.random_generator.choice(LORA_SF_VALUES))
 
-        signal_data = lora_modulator(
-            sf, bandwidth, sample_rate, num_iq_samples_signal, self.random_generator
-        )
+        signal_data = lora_modulator(sf, bandwidth, sample_rate, num_iq_samples_signal, self.random_generator)
         return Signal(data=signal_data, center_freq=0, bandwidth=bandwidth)

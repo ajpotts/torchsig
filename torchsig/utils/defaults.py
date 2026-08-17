@@ -4,8 +4,8 @@ from torchsig.transforms.impairments import Impairments
 from torchsig.utils.data_loading import WorkerSeedingDataLoader
 from torchsig.utils.writer import default_collate_fn
 
+__all__ = ["TorchSigDefaults", "default_dataloader", "default_dataset"]
 
-__all__ = ["TorchSigDefaults", "default_dataset", "default_dataloader"]
 
 class TorchSigDefaults:
     """A class for managing default values used in TorchSig.
@@ -47,9 +47,7 @@ class TorchSigDefaults:
         return self._default_dataset_metadata.copy()
 
 
-def default_dataset(
-    impairment_level=None, transforms=[], component_transforms=[], **kwargs
-):
+def default_dataset(impairment_level=None, transforms=[], component_transforms=[], **kwargs):
     """Create a default TorchSigIterableDataset with optional impairments.
 
     This function creates a dataset with default metadata and applies any specified
@@ -79,9 +77,7 @@ def default_dataset(
     else:
         new_transforms = transforms
         new_component_transforms = component_transforms
-    new_dataset = TorchSigIterableDataset(
-        metadata=dataset_metadata, transforms=new_transforms, **kwargs
-    )
+    new_dataset = TorchSigIterableDataset(metadata=dataset_metadata, transforms=new_transforms, **kwargs)
     for signal_gen in new_dataset.signal_generators:
         try:
             signal_gen["transforms"] = new_component_transforms
@@ -90,9 +86,7 @@ def default_dataset(
     return new_dataset
 
 
-def default_dataloader(
-    seed=False, collate_fn=default_collate_fn, batch_size=1, num_workers=1, **kwargs
-) -> WorkerSeedingDataLoader:
+def default_dataloader(seed=False, collate_fn=default_collate_fn, batch_size=1, num_workers=1, **kwargs) -> WorkerSeedingDataLoader:
     """Create a default WorkerSeedingDataLoader with optional seeding.
 
     This function creates a data loader with default settings and applies any
@@ -113,9 +107,7 @@ def default_dataloader(
         WorkerSeedingDataLoader: Configured data loader instance.
     """
     dataset = default_dataset(**kwargs)
-    dataloader = WorkerSeedingDataLoader(
-        dataset, collate_fn=collate_fn, batch_size=batch_size, num_workers=num_workers
-    )
+    dataloader = WorkerSeedingDataLoader(dataset, collate_fn=collate_fn, batch_size=batch_size, num_workers=num_workers)
     if seed:
         dataloader.seed(seed)
     return dataloader

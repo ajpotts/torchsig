@@ -47,8 +47,8 @@ CLASS_FAMILY_DICT: Final[dict[str, str]] = {
     "256qam": "qam",
     "512qam_cross": "qam",
     "1024qam": "qam",
-    "16apsk" : "apsk",
-    "32apsk" : "apsk",
+    "16apsk": "apsk",
+    "32apsk": "apsk",
     "ofdm-64": "ofdm",
     "ofdm-72": "ofdm",
     "ofdm-128": "ofdm",
@@ -78,8 +78,11 @@ CLASS_FAMILY_DICT: Final[dict[str, str]] = {
     "dmr": "lmr",
     "p25": "lmr",
     "lora": "lora",
-    "80211a": "wifi", # note: data only, no control frames ack, cts, rts 
-    "zigbee": "zigbee",    
+    "80211a": "wifi",  # data
+    "80211a_ack": "wifi",
+    "80211a_cts": "wifi",
+    "80211a_rts": "wifi",
+    "zigbee": "zigbee",
 }
 
 # Derived lists
@@ -117,6 +120,7 @@ class TorchSigSignalLists:
         wifi_signals: WiFi signals, such as IEEE 802.11a (structured OFDM) signals, incl. RTS/CTS/ACK.
         zigbee_signals: IEEE 802.15.4 ZigBee (O-QPSK DSSS).
     """
+
     all_signals: ClassVar[list[str]] = SIGNALS_SHARED_LIST
     family_dict: ClassVar[dict[str, str]] = CLASS_FAMILY_DICT
     family_list: ClassVar[list[str]] = FAMILY_SHARED_LIST
@@ -137,7 +141,6 @@ class TorchSigSignalLists:
     lora_signals: list[str] = field(default_factory=list)
     wifi_signals: list[str] = field(default_factory=list)
     zigbee_signals: list[str] = field(default_factory=list)
-
 
     fsk_names: ClassVar[list[str]] = ["fsk", "msk"]
     ofdm_names: ClassVar[list[str]] = ["ofdm"]
@@ -178,9 +181,9 @@ class TorchSigSignalLists:
             elif name == "btle":
                 self.bluetooth_signals.append(name)
             elif name == "gsm":
-                self.cellular_signals.append(name)  
+                self.cellular_signals.append(name)
             elif name == "dvbs2":
-                self.dvb_signals.append(name)                
+                self.dvb_signals.append(name)
             elif check_signal_class(name, ["dmr", "p25"]):
                 self.lmr_signals.append(name)
             elif name == "lora":

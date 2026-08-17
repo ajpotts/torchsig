@@ -92,9 +92,7 @@ def hex_sync_to_levels(sync_hex: str) -> np.ndarray:
     num_bits = len(sync_hex) * 4
     if num_bits % 2 != 0:
         raise ValueError("SYNC pattern must contain an even number of bits")
-    bits = np.unpackbits(
-        np.frombuffer(bytes.fromhex(sync_hex), dtype=np.uint8)
-    )
+    bits = np.unpackbits(np.frombuffer(bytes.fromhex(sync_hex), dtype=np.uint8))
     dibits = bits.reshape(-1, 2)
     dibit_values = dibits[:, 0] * 2 + dibits[:, 1]
     return DMR_LEVEL_BY_DIBIT[dibit_values]
@@ -180,9 +178,7 @@ def dmr_modulator_baseband(
 
     # Number of symbols that fit within max_num_samples after pulse shaping.
     max_num_samples_minus_pulse_shape = max_num_samples - len(pulse_shape) + 1
-    num_symbols = max(
-        1, int(np.floor(max_num_samples_minus_pulse_shape / samples_per_symbol))
-    )
+    num_symbols = max(1, int(np.floor(max_num_samples_minus_pulse_shape / samples_per_symbol)))
 
     # Build the structured level stream and pulse-shape the frequency deviation.
     levels = build_dmr_symbol_stream(num_symbols, sync_levels, rng)
@@ -246,24 +242,16 @@ def dmr_modulator(
     resample_rate_ideal = oversampling_rate / oversampling_rate_nominal
 
     # Calculate baseband samples
-    max_num_samples = max(
-        oversampling_rate_nominal, int(np.floor(num_samples / resample_rate_ideal))
-    )
+    max_num_samples = max(oversampling_rate_nominal, int(np.floor(num_samples / resample_rate_ideal)))
 
     # Generate and resample signal
-    baseband_signal = dmr_modulator_baseband(
-        max_num_samples, oversampling_rate_nominal, sync_levels, rng
-    )
+    baseband_signal = dmr_modulator_baseband(max_num_samples, oversampling_rate_nominal, sync_levels, rng)
 
     dmr_correct_bw = multistage_polyphase_resampler(baseband_signal, resample_rate_ideal)
     dmr_correct_bw *= 1 / resample_rate_ideal
 
     # Adjust signal length
-    dmr_correct_bw = (
-        slice_head_tail_to_length(dmr_correct_bw, num_samples)
-        if len(dmr_correct_bw) > num_samples
-        else pad_head_tail_to_length(dmr_correct_bw, num_samples)
-    )
+    dmr_correct_bw = slice_head_tail_to_length(dmr_correct_bw, num_samples) if len(dmr_correct_bw) > num_samples else pad_head_tail_to_length(dmr_correct_bw, num_samples)
 
     return dmr_correct_bw.astype(TorchSigComplexDataType)
 
@@ -317,9 +305,7 @@ class DMRSignalGenerator(BaseSignalGenerator):
             low=self["signal_duration_in_samples_min"],
             high=self["signal_duration_in_samples_max"] + 1,
         )
-        bandwidth = self.random_generator.integers(
-            low=self["bandwidth_min"], high=self["bandwidth_max"] + 1
-        )
+        bandwidth = self.random_generator.integers(low=self["bandwidth_min"], high=self["bandwidth_max"] + 1)
 
         # Resolve the SYNC pattern (default if not specified in metadata).
         try:
@@ -327,10 +313,7 @@ class DMRSignalGenerator(BaseSignalGenerator):
         except AttributeError:
             sync_pattern = DEFAULT_DMR_SYNC_PATTERN
         if sync_pattern not in DMR_SYNC_PATTERNS:
-            raise ValueError(
-                f"unknown DMR sync_pattern '{sync_pattern}'; "
-                f"expected one of {list(DMR_SYNC_PATTERNS)}"
-            )
+            raise ValueError(f"unknown DMR sync_pattern '{sync_pattern}'; expected one of {list(DMR_SYNC_PATTERNS)}")
         sync_levels = hex_sync_to_levels(DMR_SYNC_PATTERNS[sync_pattern])
 
         # Generate signal
@@ -517,19 +500,13 @@ def p25_modulator(
     oversampling_rate_nominal = 4
     oversampling_rate = sample_rate / bandwidth
     resample_rate_ideal = oversampling_rate / oversampling_rate_nominal
-    max_num_samples = max(
-        oversampling_rate_nominal, int(np.floor(num_samples / resample_rate_ideal))
-    )
+    max_num_samples = max(oversampling_rate_nominal, int(np.floor(num_samples / resample_rate_ideal)))
 
     baseband = p25_modulator_baseband(max_num_samples, oversampling_rate_nominal, rng)
     correct_bw = multistage_polyphase_resampler(baseband, resample_rate_ideal)
     correct_bw *= 1 / resample_rate_ideal
 
-    correct_bw = (
-        slice_head_tail_to_length(correct_bw, num_samples)
-        if len(correct_bw) > num_samples
-        else pad_head_tail_to_length(correct_bw, num_samples)
-    )
+    correct_bw = slice_head_tail_to_length(correct_bw, num_samples) if len(correct_bw) > num_samples else pad_head_tail_to_length(correct_bw, num_samples)
     return correct_bw.astype(TorchSigComplexDataType)
 
 
@@ -572,10 +549,6 @@ class P25SignalGenerator(BaseSignalGenerator):
             low=self["signal_duration_in_samples_min"],
             high=self["signal_duration_in_samples_max"] + 1,
         )
-        bandwidth = self.random_generator.integers(
-            low=self["bandwidth_min"], high=self["bandwidth_max"] + 1
-        )
-        signal_data = p25_modulator(
-            bandwidth, sample_rate, num_iq_samples_signal, self.random_generator
-        )
+        bandwidth = self.random_generator.integers(low=self["bandwidth_min"], high=self["bandwidth_max"] + 1)
+        signal_data = p25_modulator(bandwidth, sample_rate, num_iq_samples_signal, self.random_generator)
         return Signal(data=signal_data, center_freq=0, bandwidth=bandwidth)

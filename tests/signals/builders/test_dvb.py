@@ -4,10 +4,6 @@ import numpy as np
 import pytest
 
 from torchsig.signals.builders.constellation_maps import all_symbol_maps
-from torchsig.signals.signal_lists import CLASS_FAMILY_DICT, TorchSigSignalLists
-from torchsig.utils.dsp import TorchSigComplexDataType
-from torchsig.utils.signal_building import lookup_signal_generator_by_string
-
 from torchsig.signals.builders.dvb import (
     DVBS2_CONSTELLATIONS,
     DVBS2_PLHEADER_SYMBOLS,
@@ -18,6 +14,9 @@ from torchsig.signals.builders.dvb import (
     pi2_bpsk,
     xfecframe_symbols,
 )
+from torchsig.signals.signal_lists import CLASS_FAMILY_DICT, TorchSigSignalLists
+from torchsig.utils.dsp import TorchSigComplexDataType
+from torchsig.utils.signal_building import lookup_signal_generator_by_string
 
 DVBS2_METADATA = {
     "sample_rate": 10_000_000,

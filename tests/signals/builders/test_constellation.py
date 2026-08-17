@@ -12,7 +12,6 @@ from torchsig.signals.builders.constellation import (
 )
 from torchsig.utils.dsp import TorchSigComplexDataType
 
-
 MODULE_PATH = "torchsig.signals.builders.constellation"
 
 
@@ -382,9 +381,7 @@ def test_constellation_modulator_baseband_retries_all_zero_ook_symbols():
 
     assert rng.integers.call_count == 2
 
-    expected_symbol_map = raw_symbol_map / np.sqrt(
-        np.mean(np.abs(raw_symbol_map) ** 2)
-    )
+    expected_symbol_map = raw_symbol_map / np.sqrt(np.mean(np.abs(raw_symbol_map) ** 2))
 
     np.testing.assert_allclose(
         upfirdn.call_args.args[1],
@@ -780,23 +777,19 @@ def test_constellation_modulator_rejects_incorrect_final_length():
         patch(
             f"{MODULE_PATH}.pad_head_tail_to_length",
             return_value=incorrectly_padded,
-        ),
+        ),pytest.raises(
+        ValueError,
+        match=("constellation mod producing incorrect number of samples: 99 but requested: 100"),
+    )
     ):
-        with pytest.raises(
-            ValueError,
-            match=(
-                "constellation mod producing incorrect number of samples: "
-                "99 but requested: 100"
-            ),
-        ):
-            constellation_modulator(
-                constellation_name="qpsk",
-                pulse_shape_name="rectangular",
-                bandwidth=1_000,
-                sample_rate=10_000,
-                num_samples=100,
-                rng=rng,
-            )
+        constellation_modulator(
+            constellation_name="qpsk",
+            pulse_shape_name="rectangular",
+            bandwidth=1_000,
+            sample_rate=10_000,
+            num_samples=100,
+            rng=rng,
+        )
 
 
 def test_constellation_signal_generator_initialization():

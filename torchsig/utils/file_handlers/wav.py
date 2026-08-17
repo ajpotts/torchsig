@@ -2,6 +2,7 @@
 Each WAV file stores *elements_per_file* whole IQ records; every record
 contains *num_iq_samples* complex samples (I/Q pairs).
 """
+
 import bisect
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from torchsig.signals.signal_types import Signal
 from .metadata_reader import MetadataReader
 
 __all__ = ["WAVReader"]
+
 
 class WAVReader(MetadataReader):
     """Read a directory that contains a TorchSig-compatible WAV dataset.
@@ -40,6 +42,7 @@ class WAVReader(MetadataReader):
     ``complex64`` array of shape ``(num_iq_samples,)``.  The associated
     metadata row is attached to ``Signal.metadata``.
     """
+
     def __init__(self, root: str | Path) -> None:
         # 1. Initialise base class
         super().__init__(root)

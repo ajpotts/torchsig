@@ -15,7 +15,6 @@ from torchsig.utils.dsp import (
     slice_tail_to_length,
 )
 
-
 # --------------------------------------------------------------------------- #
 # GSM (Global System for Mobile)
 # --------------------------------------------------------------------------- #
@@ -71,9 +70,7 @@ def build_gsm_burst(tsc_idx: int, rng: np.random.Generator) -> np.ndarray:
     steal_post = rng.integers(0, 2, 1).astype(np.float64)
     tsc = np.array(GSM_TSC[tsc_idx], dtype=np.float64)
 
-    bits = np.concatenate([
-        _GSM_TAIL, data_pre, steal_pre, tsc, steal_post, data_post, _GSM_TAIL, _GSM_GUARD
-    ])
+    bits = np.concatenate([_GSM_TAIL, data_pre, steal_pre, tsc, steal_post, data_post, _GSM_TAIL, _GSM_GUARD])
     return 2.0 * bits - 1.0  # {0,1} → {-1,+1}
 
 
@@ -191,19 +188,13 @@ def gsm_modulator(
     oversampling_rate_nominal = 4
     oversampling_rate = sample_rate / bandwidth
     resample_rate_ideal = oversampling_rate / oversampling_rate_nominal
-    max_num_samples = max(
-        oversampling_rate_nominal, int(np.floor(num_samples / resample_rate_ideal))
-    )
+    max_num_samples = max(oversampling_rate_nominal, int(np.floor(num_samples / resample_rate_ideal)))
 
     baseband = gsm_modulator_baseband(max_num_samples, oversampling_rate_nominal, rng)
     correct_bw = multistage_polyphase_resampler(baseband, resample_rate_ideal)
     correct_bw *= 1 / resample_rate_ideal
 
-    correct_bw = (
-        slice_head_tail_to_length(correct_bw, num_samples)
-        if len(correct_bw) > num_samples
-        else pad_head_tail_to_length(correct_bw, num_samples)
-    )
+    correct_bw = slice_head_tail_to_length(correct_bw, num_samples) if len(correct_bw) > num_samples else pad_head_tail_to_length(correct_bw, num_samples)
     return correct_bw.astype(TorchSigComplexDataType)
 
 
@@ -246,10 +237,6 @@ class GSMSignalGenerator(BaseSignalGenerator):
             low=self["signal_duration_in_samples_min"],
             high=self["signal_duration_in_samples_max"] + 1,
         )
-        bandwidth = self.random_generator.integers(
-            low=self["bandwidth_min"], high=self["bandwidth_max"] + 1
-        )
-        signal_data = gsm_modulator(
-            bandwidth, sample_rate, num_iq_samples_signal, self.random_generator
-        )
+        bandwidth = self.random_generator.integers(low=self["bandwidth_min"], high=self["bandwidth_max"] + 1)
+        signal_data = gsm_modulator(bandwidth, sample_rate, num_iq_samples_signal, self.random_generator)
         return Signal(data=signal_data, center_freq=0, bandwidth=bandwidth)

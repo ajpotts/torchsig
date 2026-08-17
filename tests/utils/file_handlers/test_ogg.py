@@ -56,10 +56,10 @@ def dataset_dir(tmp_path: Path) -> Path:
     # --------------------------------------------------------------
     # 0️⃣  Configuration -- keep everything tiny but *consistent*.
     # --------------------------------------------------------------
-    fs = 192_000                     # sample-rate (Hz)
-    num_iq_samples = 1               # one complex sample per element
-    elements_per_file = 1            # one element per OGG file
-    dataset_size = 2                 # total number of elements (two files)
+    fs = 192_000  # sample-rate (Hz)
+    num_iq_samples = 1  # one complex sample per element
+    elements_per_file = 1  # one element per OGG file
+    dataset_size = 2  # total number of elements (two files)
 
     # --------------------------------------------------------------
     # 1️⃣  Generate deterministic IQ samples -- this makes the
@@ -67,15 +67,19 @@ def dataset_dir(tmp_path: Path) -> Path:
     # --------------------------------------------------------------
     # element 0 →  +1.0 + 0.0j   (I=+1, Q=0)
     # element 1 →   0.0 + 1.0j   (I=0, Q=+1)
-    signals = np.array([[1.0 + 0j],      # shape (1, 1) → 1 element, 1 sample
-                        [0.0 + 1j]],     # shape (1, 1)
-                       dtype=np.complex64)
+    signals = np.array(
+        [
+            [1.0 + 0j],  # shape (1, 1) → 1 element, 1 sample
+            [0.0 + 1j],
+        ],  # shape (1, 1)
+        dtype=np.complex64,
+    )
 
     # --------------------------------------------------------------
     # 2️⃣  Write the two OGG files -- one element per file.
     # --------------------------------------------------------------
     for i, sig in enumerate(signals):
-        ogg_path = tmp_path / f"{chr(ord('a') + i)}.ogg"   # a.ogg, b.ogg
+        ogg_path = tmp_path / f"{chr(ord('a') + i)}.ogg"  # a.ogg, b.ogg
         # ``write_ogg_vorbis_batch`` expects a 2-D array (n_elements, n_iq_samples)
         # Even though we have a single element we keep the 2-D shape.
         write_ogg_vorbis_batch(str(ogg_path), sig[None, :], fs, compression_level=0.8)
@@ -84,8 +88,8 @@ def dataset_dir(tmp_path: Path) -> Path:
     # 3️⃣  Write the CSV -- no header, one row per element.
     # --------------------------------------------------------------
     csv_rows = [
-        (0, "BPSK", 0, float(fs)),   # element 0 → file a.ogg
-        (1, "QPSK", 1, float(fs)),   # element 1 → file b.ogg
+        (0, "BPSK", 0, float(fs)),  # element 0 → file a.ogg
+        (1, "QPSK", 1, float(fs)),  # element 1 → file b.ogg
     ]
     write_csv(tmp_path, csv_rows)
 
@@ -96,7 +100,7 @@ def dataset_dir(tmp_path: Path) -> Path:
     write_json(
         tmp_path,
         {
-            "size": dataset_size,          # total number of elements
+            "size": dataset_size,  # total number of elements
             "class_list": ["BPSK", "QPSK"],
             "num_iq_samples": num_iq_samples,
             "elements_per_file": elements_per_file,
@@ -139,16 +143,13 @@ def dataset_dir2(tmp_path: Path) -> tuple[Path, list[np.ndarray]]:
             bits = rng.integers(0, 4, num_iq_samples)
             tbl = {0: 1 + 1j, 1: 1 - 1j, 2: -1 + 1j, 3: -1 - 1j}
             sig = np.vectorize(tbl.get)(bits)
-        else:   # Noise
-            sig = (rng.normal(size=num_iq_samples) +
-                   1j * rng.normal(size=num_iq_samples)) * 0.1
+        else:  # Noise
+            sig = (rng.normal(size=num_iq_samples) + 1j * rng.normal(size=num_iq_samples)) * 0.1
 
-        sig /= np.sqrt((np.abs(sig) ** 2).mean())   # unit-power normalisation
+        sig /= np.sqrt((np.abs(sig) ** 2).mean())  # unit-power normalisation
         signals.append(sig.astype(np.complex64))
 
-        meta.append(
-            {"index": idx, "label": label, "modcod": mc, "sample_rate": fs}
-        )
+        meta.append({"index": idx, "label": label, "modcod": mc, "sample_rate": fs})
 
     # -----------------------------------------------------------------
     # 2️⃣  Write info.json (with the required keys)
@@ -165,13 +166,13 @@ def dataset_dir2(tmp_path: Path) -> tuple[Path, list[np.ndarray]]:
     # -----------------------------------------------------------------
     # 3️⃣  Write the OGG files -- use the *exact* signals list we just built.
     # -----------------------------------------------------------------
-    signals_array = np.stack(signals)                # shape (4, 16)
+    signals_array = np.stack(signals)  # shape (4, 16)
     num_files = math.ceil(dataset_size / elements_per_file)
 
     for i in range(num_files):
         start = i * elements_per_file
-        end   = min(dataset_size, (i + 1) * elements_per_file)
-        chunk = signals_array[start:end]             # shape (≤2, 16)
+        end = min(dataset_size, (i + 1) * elements_per_file)
+        chunk = signals_array[start:end]  # shape (≤2, 16)
 
         ogg_path = tmp_path / f"data_{i}.ogg"
         write_ogg_vorbis_batch(str(ogg_path), chunk, fs, compression_level=0.8)
@@ -196,6 +197,7 @@ def fake_info(frames: int):
     """Return a minimal ``sf.info``-like object that reports ``frames`` audio
     frames in the file.
     """
+
     class _Info:
         def __init__(self, frames):
             self.frames = frames
@@ -209,6 +211,7 @@ def fake_read_factory(pairs: list[tuple[float, float]], frames_per_file: int):
     * ``pairs`` -- flat list of I/Q tuples for the *global* frame index.
     * ``frames_per_file`` -- how many frames each OGG file contains.
     """
+
     def fake_read(path, start=0, frames=1, dtype=None, always_2d=False):
         # --------------------------------------------------------------
         # 0️⃣  Translate the *local* ``start`` inside this file into a
@@ -228,9 +231,9 @@ def fake_read_factory(pairs: list[tuple[float, float]], frames_per_file: int):
         # 2️⃣  Flatten to a 1-D ``float32`` array: [I0, Q0, I1, Q1, …].
         # --------------------------------------------------------------
         flat = np.array(slice_pairs, dtype="float32").ravel()
-        return flat, 48_000                # second return value is the sample-rate
-    return fake_read
+        return flat, 48_000  # second return value is the sample-rate
 
+    return fake_read
 
 
 def write_ogg_vorbis_batch(
@@ -259,21 +262,19 @@ def write_ogg_vorbis_batch(
     # --------------------------------------------------------------
     # Ensure a 2-D view so we can flatten uniformly.
     # --------------------------------------------------------------
-    if complex_signals.ndim == 1:                     # a single element
+    if complex_signals.ndim == 1:  # a single element
         complex_signals = complex_signals[None, :]
 
     # --------------------------------------------------------------
     # Flatten to a 1-D complex vector: [elem0[0], …, elem0[N-1],
     #                                  elem1[0], …, elem1[N-1], …]
     # --------------------------------------------------------------
-    flat_complex = complex_signals.ravel()            # shape (n_elements * n_iq_samples,)
+    flat_complex = complex_signals.ravel()  # shape (n_elements * n_iq_samples,)
 
     # --------------------------------------------------------------
     # Convert to a (num_frames, 2) float-32 matrix: left = I, right = Q
     # --------------------------------------------------------------
-    stereo = np.column_stack((np.real(flat_complex), np.imag(flat_complex))).astype(
-        np.float32
-    )
+    stereo = np.column_stack((np.real(flat_complex), np.imag(flat_complex))).astype(np.float32)
 
     # --------------------------------------------------------------
     # Write the file **losslessly**.  Using WAV with 32-bit float keeps the
@@ -285,15 +286,16 @@ def write_ogg_vorbis_batch(
         out_path,
         stereo,
         samplerate=sr,
-        format="WAV",          # lossless container
-        subtype="FLOAT",       # 32-bit float PCM
+        format="WAV",  # lossless container
+        subtype="FLOAT",  # 32-bit float PCM
     )
+
 
 def test_read_happy_path(dataset_dir2, monkeypatch):
     """Verify that ``OGGReader.read`` returns the exact complex data that was
     written to the OGG files and that the metadata matches the CSV rows.
     """
-    dataset_path, signals = dataset_dir2          # ``signals`` is a list[ndarray]
+    dataset_path, signals = dataset_dir2  # ``signals`` is a list[ndarray]
 
     # -----------------------------------------------------------------
     # No need to monkey-patch soundfile here -- we are reading the real OGG
@@ -309,7 +311,7 @@ def test_read_happy_path(dataset_dir2, monkeypatch):
     np.testing.assert_array_equal(sig0.data, signals[0])
     expected_meta0 = {
         "index": 0,
-        "label": "BPSK",          # the first generated label (seed guarantees order)
+        "label": "BPSK",  # the first generated label (seed guarantees order)
         "modcod": 2,
         "sample_rate": 192_000.0,
         "class_name": "bpsk",
@@ -356,7 +358,6 @@ def test_read_happy_path(dataset_dir2, monkeypatch):
     assert sig3.metadata == expected_meta3
 
 
-
 def test_global_index_to_file_mapping(dataset_dir: Path, monkeypatch):
     """The reader must consult the start-index table to pick the right file."""
     frames_per_file = 1
@@ -364,9 +365,7 @@ def test_global_index_to_file_mapping(dataset_dir: Path, monkeypatch):
 
     # The actual PCM values are irrelevant for this test.
     dummy_pairs = [(0, 0)] * (frames_per_file * 2)
-    monkeypatch.setattr(
-        "soundfile.read", fake_read_factory(dummy_pairs, frames_per_file)
-    )
+    monkeypatch.setattr("soundfile.read", fake_read_factory(dummy_pairs, frames_per_file))
 
     # Capture every ``sf.read`` call so we can inspect which file was accessed.
     called_paths: list[Path] = []
@@ -378,8 +377,8 @@ def test_global_index_to_file_mapping(dataset_dir: Path, monkeypatch):
     monkeypatch.setattr("soundfile.read", capture_read)
 
     reader = OGGReader(dataset_dir)
-    _ = reader.read(0)   # should hit a.ogg
-    _ = reader.read(1)   # should hit b.ogg (global index 1)
+    _ = reader.read(0)  # should hit a.ogg
+    _ = reader.read(1)  # should hit b.ogg (global index 1)
     assert called_paths[0].name == "a.ogg"
     assert called_paths[1].name == "b.ogg"
 
@@ -413,8 +412,6 @@ def test_read_out_of_range(dataset_dir: Path, bad_idx, monkeypatch):
     assert f"index {bad_idx}" in str(excinfo.value)
 
 
-
-
 def test_read_row_out_of_range(dataset_dir: Path, monkeypatch):
     """When the global frame index points to a valid audio frame but there is no
     matching CSV row, ``load_row`` must raise ``MetadataIndexError``.
@@ -434,9 +431,7 @@ def test_read_row_out_of_range(dataset_dir: Path, monkeypatch):
     # 3️⃣  Provide enough I/Q pairs for the four global frames.
     # --------------------------------------------------------------
     pcm_data = [(0.0, 1.0), (0.5, 1.5), (2.0, 3.0), (2.5, 3.5)]
-    monkeypatch.setattr(
-        "soundfile.read", fake_read_factory(pcm_data, frames_per_file)
-    )
+    monkeypatch.setattr("soundfile.read", fake_read_factory(pcm_data, frames_per_file))
 
     # --------------------------------------------------------------
     # 4️⃣  Write a JSON that tells the reader **2 elements per file**
@@ -444,10 +439,10 @@ def test_read_row_out_of_range(dataset_dir: Path, monkeypatch):
     write_json(
         dataset_dir,
         {
-            "size": 4,                     # we will pretend there are 4 elements
+            "size": 4,  # we will pretend there are 4 elements
             "class_list": ["BPSK"],
-            "num_iq_samples": 1,           # one complex sample per element
-            "elements_per_file": 2,        # <-- critical change
+            "num_iq_samples": 1,  # one complex sample per element
+            "elements_per_file": 2,  # <-- critical change
             "sample_rate": 192_000,
         },
     )
@@ -457,7 +452,7 @@ def test_read_row_out_of_range(dataset_dir: Path, monkeypatch):
     #     not need a real info.json at construction time).
     # --------------------------------------------------------------
     reader = OGGReader(dataset_dir)
-    reader.dataset_size = 4                # override -- we already know the size
+    reader.dataset_size = 4  # override -- we already know the size
 
     # --------------------------------------------------------------
     # 6️⃣  The first element (index 0) works because a CSV row exists.
@@ -482,8 +477,8 @@ def test_root_accepts_str_and_path(dataset_dir: Path, monkeypatch):
         "soundfile.read",
         fake_read_factory([(0, 0)] * (frames_per_file * 2), frames_per_file),
     )
-    reader_path = OGGReader(dataset_dir)          # Path object
-    reader_str = OGGReader(str(dataset_dir))      # string
+    reader_path = OGGReader(dataset_dir)  # Path object
+    reader_str = OGGReader(str(dataset_dir))  # string
 
     #   Set dataset_size to avoid creating a info.json
     reader_str.dataset_size = 2
@@ -546,9 +541,9 @@ def test_infer_both_missing(empty_ogg_dir: Path, monkeypatch):
     # 1️⃣  Write a minimal ``info.json`` that omits the two fields.
     # --------------------------------------------------------------
     info = {
-        "size": 6,                 # total number of elements in the dataset
-        "class_list": ["FOO"],     # placeholder -- not used in the inference
-        "sample_rate": 48_000,     # required by the base class
+        "size": 6,  # total number of elements in the dataset
+        "class_list": ["FOO"],  # placeholder -- not used in the inference
+        "sample_rate": 48_000,  # required by the base class
         # NOTE: *no* ``num_iq_samples`` and *no* ``elements_per_file``
     }
     (empty_ogg_dir / "info.json").write_text(json.dumps(info), encoding="utf-8")
@@ -606,7 +601,7 @@ def test_infer_num_iq_samples_only(empty_ogg_dir: Path, monkeypatch):
         "size": 4,
         "class_list": ["FOO"],
         "sample_rate": 48_000,
-        "elements_per_file": 2,   # explicit -- we *do not* give ``num_iq_samples``
+        "elements_per_file": 2,  # explicit -- we *do not* give ``num_iq_samples``
     }
     (empty_ogg_dir / "info.json").write_text(json.dumps(info), encoding="utf-8")
 
@@ -624,12 +619,13 @@ def test_infer_num_iq_samples_only(empty_ogg_dir: Path, monkeypatch):
     # --------------------------------------------------------------
     # 4️⃣  Verify the inference.
     # --------------------------------------------------------------
-    assert reader.elements_per_file == 2                      # taken directly from JSON
-    assert reader.num_iq_samples == 4                         # 8 frames // 2 elements
+    assert reader.elements_per_file == 2  # taken directly from JSON
+    assert reader.num_iq_samples == 4  # 8 frames // 2 elements
     # Start-index table for two files with two elements each → [0, 2]
     assert reader.file_start_indices == [0, 2]
     # Length protocol still reflects the JSON size.
     assert len(reader) == info["size"]
+
 
 def test_init_raises_when_csv_size_mismatches_ogg_files(
     tmp_path: Path,
@@ -652,7 +648,7 @@ def test_init_raises_when_csv_size_mismatches_ogg_files(
     csv_rows = [
         (0, "BPSK", 0, 48_000.0),
         (1, "BPSK", 0, 48_000.0),
-        (2, "BPSK", 0, 48_000.0),   # three rows → dataset size = 3
+        (2, "BPSK", 0, 48_000.0),  # three rows → dataset size = 3
     ]
     write_csv(tmp_path, csv_rows)
 
@@ -665,7 +661,7 @@ def test_init_raises_when_csv_size_mismatches_ogg_files(
     write_json(
         tmp_path,
         {
-            "size": 3,                     # <-- mismatched size
+            "size": 3,  # <-- mismatched size
             "class_list": ["BPSK"],
             "num_iq_samples": 1,
             "elements_per_file": 1,
@@ -689,7 +685,4 @@ def test_init_raises_when_csv_size_mismatches_ogg_files(
     # --------------------------------------------------------------
     # 6️⃣  Check that the error message contains the information we expect.
     # --------------------------------------------------------------
-    assert (
-        "Metadata reports 3 elements, but OGG files contain 2."
-        in str(excinfo.value)
-    )
+    assert "Metadata reports 3 elements, but OGG files contain 2." in str(excinfo.value)

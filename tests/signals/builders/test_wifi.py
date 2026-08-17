@@ -15,11 +15,9 @@ from torchsig.signals.builders.wifi import (
     wifi_80211a_modulator,
     wifi_80211a_modulator_baseband,
 )
-from torchsig.signals.builders.constellation_maps import all_symbol_maps
 from torchsig.signals.signal_lists import CLASS_FAMILY_DICT, TorchSigSignalLists
 from torchsig.utils.dsp import TorchSigComplexDataType
 from torchsig.utils.signal_building import lookup_signal_generator_by_string
-
 
 WIFI_METADATA = {
     "sample_rate": 20_000_000,
@@ -127,9 +125,9 @@ def test_wifi_registered_in_lookup_table():
 
 def test_wifi_in_signal_lists():
     """802.11a signals are grouped into the 'wifi' family."""
-    assert CLASS_FAMILY_DICT["80211a"] == "wifi"
+    wifi_names = {"80211a", "80211a_rts", "80211a_cts", "80211a_ack"}
+
+    assert all(CLASS_FAMILY_DICT[name] == "wifi" for name in wifi_names)
     assert "wifi" in TorchSigSignalLists.family_list
     lists = TorchSigSignalLists()
-    for name in ["80211a"]: # note "80211a_rts", "80211a_cts", "80211a_ack" removed
-        assert name in lists.wifi_signals
-
+    assert wifi_names.issubset(lists.wifi_signals)

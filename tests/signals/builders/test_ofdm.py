@@ -12,7 +12,6 @@ from torchsig.signals.builders.ofdm import (
 )
 from torchsig.utils.dsp import TorchSigComplexDataType
 
-
 MODULE_PATH = "torchsig.signals.builders.ofdm"
 
 
@@ -174,9 +173,7 @@ def test_ofdm_modulator_baseband_no_cyclic_prefix_branch():
     ]
 
     symbol_map = np.array([-1 + 0j, 1 + 0j])
-    ifft_output = np.arange(32, dtype=np.float32).reshape(32, 1).astype(
-        np.complex64
-    )
+    ifft_output = np.arange(32, dtype=np.float32).reshape(32, 1).astype(np.complex64)
 
     with (
         patch.object(
@@ -227,9 +224,7 @@ def test_ofdm_modulator_baseband_adds_cyclic_prefix():
     ]
 
     symbol_map = np.array([-1 + 0j, 1 + 0j])
-    ifft_output = np.arange(32, dtype=np.float32).reshape(32, 1).astype(
-        np.complex64
-    )
+    ifft_output = np.arange(32, dtype=np.float32).reshape(32, 1).astype(np.complex64)
 
     serialized_with_cp = np.concatenate(
         (
@@ -382,9 +377,7 @@ def test_ofdm_modulator_baseband_normalizes_symbol_map():
             rng=rng,
         )
 
-    normalized_map = raw_symbol_map / np.sqrt(
-        np.mean(np.abs(raw_symbol_map) ** 2)
-    )
+    normalized_map = raw_symbol_map / np.sqrt(np.mean(np.abs(raw_symbol_map) ** 2))
 
     assert captured_grid is not None
 

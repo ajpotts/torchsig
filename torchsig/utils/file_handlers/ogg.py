@@ -2,6 +2,7 @@
 Each OGG file stores *elements_per_file* whole IQ records; every record
 contains *num_iq_samples* complex samples (I/Q pairs).
 """
+
 import bisect
 from pathlib import Path
 
@@ -73,14 +74,12 @@ class OGGReader(MetadataReader):
         # first OGG file (all files are assumed to have the same layout).
         if self.num_iq_samples == 0 or self.elements_per_file == 0:
             first_info = sf.info(self.ogg_files[0])
-            total_frames = int(first_info.frames)          # total stereo frames in file
+            total_frames = int(first_info.frames)  # total stereo frames in file
             # Guess a sensible split: we know the overall ``dataset_size``
             # (number of elements) from the JSON; we also know the number of files.
             # ``elements_per_file`` = ceil(dataset_size / num_files)
             if self.elements_per_file == 0:
-                self.elements_per_file = int(
-                    np.ceil(self.dataset_size / len(self.ogg_files))
-                )
+                self.elements_per_file = int(np.ceil(self.dataset_size / len(self.ogg_files)))
             # Now deduce ``num_iq_samples``:
             self.num_iq_samples = total_frames // self.elements_per_file
 
@@ -88,22 +87,18 @@ class OGGReader(MetadataReader):
         # Build the cumulative-start-index table that maps a **global element**
         # index → (file index, element-offset-inside-file).
         # --------------------------------------------------------------
-        self.file_start_indices: list[int] = []   # cumulative count of elements
+        self.file_start_indices: list[int] = []  # cumulative count of elements
         cum = 0
         for _ogg_path in self.ogg_files:
             self.file_start_indices.append(cum)
             cum += self.elements_per_file
         # ``self.dataset_size`` (inherited from MetadataReader) should already
         # equal the total number of elements, but we recompute a sanity-check:
-        self.total_elements = cum                # total number of **elements** in the dataset
+        self.total_elements = cum  # total number of **elements** in the dataset
 
         # Sanity-check: make sure the CSV size matches what we think we have.
         if self.dataset_size != self.total_elements:
-            raise ValueError(
-                f"Metadata reports {self.dataset_size} elements, "
-                f"but OGG files contain {self.total_elements}."
-            )
-
+            raise ValueError(f"Metadata reports {self.dataset_size} elements, but OGG files contain {self.total_elements}.")
 
     def read(self, idx: int) -> Signal:
         """Return the full IQ record for the *idx*-th element.
@@ -124,9 +119,7 @@ class OGGReader(MetadataReader):
         # Bounds check.
         # --------------------------------------------------------------
         if idx < 0 or idx >= self.dataset_size:
-            raise IndexError(
-                f"index {idx} out of range (size={self.dataset_size})"
-            )
+            raise IndexError(f"index {idx} out of range (size={self.dataset_size})")
 
         # --------------------------------------------------------------
         # Locate the file that holds this element.
@@ -141,20 +134,18 @@ class OGGReader(MetadataReader):
         total_frames_in_file = self.elements_per_file * self.num_iq_samples
         pcm, _ = sf.read(
             ogg_path,
-            start=0,                     # read from the beginning of the file
+            start=0,  # read from the beginning of the file
             frames=total_frames_in_file,
             dtype="float32",
             always_2d=False,
         )
         # Reshape to (elements_per_file, num_iq_samples, 2)
-        pcm = pcm.reshape(self.elements_per_file,
-                        self.num_iq_samples,
-                        2)
+        pcm = pcm.reshape(self.elements_per_file, self.num_iq_samples, 2)
 
         # --------------------------------------------------------------
         # Extract the element we actually asked for.
         # --------------------------------------------------------------
-        stereo = pcm[element_offset_in_file]   # shape (num_iq_samples, 2)
+        stereo = pcm[element_offset_in_file]  # shape (num_iq_samples, 2)
 
         # --------------------------------------------------------------
         # Convert to a complex64 vector.
@@ -174,7 +165,6 @@ class OGGReader(MetadataReader):
             component_signals=[],
             metadata=metadata,
         )
-
 
     def __len__(self) -> int:
         """Number of elements (rows in metadata.csv)."""

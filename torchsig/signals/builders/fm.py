@@ -12,7 +12,8 @@ from torchsig.utils.dsp import (
     low_pass_iterative_design,
 )
 
-__all__ = ["fm_modulator", "FMSignalGenerator"]
+__all__ = ["FMSignalGenerator", "fm_modulator"]
+
 
 def fm_modulator(
     bandwidth: float,
@@ -74,9 +75,7 @@ def fm_modulator(
     message = message / np.sqrt(np.mean(np.abs(message) ** 2))  # Scale to unit power
 
     # Design LPF to limit frequencies
-    lpf = low_pass_iterative_design(
-        cutoff=fmax, transition_bandwidth=fmax, sample_rate=sample_rate
-    )
+    lpf = low_pass_iterative_design(cutoff=fmax, transition_bandwidth=fmax, sample_rate=sample_rate)
 
     # Apply LPF to limit bandwidth
     source = convolve(message, lpf)
@@ -132,13 +131,9 @@ class FMSignalGenerator(BaseSignalGenerator):
             low=self["signal_duration_in_samples_min"],
             high=self["signal_duration_in_samples_max"] + 1,
         )
-        bandwidth = self.random_generator.integers(
-            low=self["bandwidth_min"], high=self["bandwidth_max"] + 1
-        )
+        bandwidth = self.random_generator.integers(low=self["bandwidth_min"], high=self["bandwidth_max"] + 1)
 
         # Generate signal
-        signal_data = fm_modulator(
-            bandwidth, sample_rate, num_iq_samples_signal, self.random_generator
-        )
+        signal_data = fm_modulator(bandwidth, sample_rate, num_iq_samples_signal, self.random_generator)
 
         return Signal(data=signal_data, center_freq=0, bandwidth=bandwidth)

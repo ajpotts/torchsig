@@ -14,7 +14,6 @@ from torchsig.utils.dsp import (
     slice_head_tail_to_length,
 )
 
-
 # --------------------------------------------------------------------------- #
 # 802.11a
 # --------------------------------------------------------------------------- #
@@ -58,23 +57,81 @@ WIFI_PILOT_SUBCARRIERS: tuple[int, ...] = (-21, -7, 7, 21)
 # multiplies these by a 127-length polarity sequence per OFDM symbol).
 WIFI_PILOT_VALUES: dict[int, complex] = {-21: 1.0, -7: 1.0, 7: 1.0, 21: -1.0}
 # Data subcarriers: -26..26 excluding DC and the four pilots (48 total).
-WIFI_DATA_SUBCARRIERS: tuple[int, ...] = tuple(
-    k for k in range(-26, 27) if k != 0 and k not in WIFI_PILOT_SUBCARRIERS
-)
+WIFI_DATA_SUBCARRIERS: tuple[int, ...] = tuple(k for k in range(-26, 27) if k != 0 and k not in WIFI_PILOT_SUBCARRIERS)
 
 # Short Training Field frequency sequence S_{-26,26} (12 active subcarriers at
 # multiples of 4), scaled to unit average power over the active tones.
 _STF_NONZERO: dict[int, complex] = {
-    -24: 1 + 1j, -20: -1 - 1j, -16: 1 + 1j, -12: -1 - 1j, -8: -1 - 1j, -4: 1 + 1j,
-    4: -1 - 1j, 8: -1 - 1j, 12: 1 + 1j, 16: 1 + 1j, 20: 1 + 1j, 24: 1 + 1j,
+    -24: 1 + 1j,
+    -20: -1 - 1j,
+    -16: 1 + 1j,
+    -12: -1 - 1j,
+    -8: -1 - 1j,
+    -4: 1 + 1j,
+    4: -1 - 1j,
+    8: -1 - 1j,
+    12: 1 + 1j,
+    16: 1 + 1j,
+    20: 1 + 1j,
+    24: 1 + 1j,
 }
 _STF_SCALE: float = np.sqrt(13.0 / 6.0)
 
 # Long Training Field frequency sequence L_{-26,26} (53 values, DC = 0).
 _LTF_SEQUENCE: tuple[int, ...] = (
-    1, 1, -1, -1, 1, 1, -1, 1, -1, 1, 1, 1, 1, 1, 1, -1, -1, 1, 1, -1, 1, -1, 1, 1, 1, 1,
+    1,
+    1,
+    -1,
+    -1,
+    1,
+    1,
+    -1,
+    1,
+    -1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    -1,
+    -1,
+    1,
+    1,
+    -1,
+    1,
+    -1,
+    1,
+    1,
+    1,
+    1,
     0,
-    1, -1, -1, 1, 1, -1, 1, -1, 1, -1, -1, -1, -1, -1, 1, 1, -1, -1, 1, -1, 1, -1, 1, 1, 1, 1,
+    1,
+    -1,
+    -1,
+    1,
+    1,
+    -1,
+    1,
+    -1,
+    1,
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
+    1,
+    1,
+    -1,
+    -1,
+    1,
+    -1,
+    1,
+    -1,
+    1,
+    1,
+    1,
+    1,
 )
 
 # Data bits per OFDM symbol (N_DBPS) by data-subcarrier constellation. Only used
@@ -164,9 +221,7 @@ def build_ltf(ifft_size: int) -> np.ndarray:
     return np.concatenate((gi2, symbol, symbol))
 
 
-def _make_payload_symbol(
-    constellation_name: str, ifft_size: int, cp_len: int, rng: np.random.Generator
-) -> np.ndarray:
+def _make_payload_symbol(constellation_name: str, ifft_size: int, cp_len: int, rng: np.random.Generator) -> np.ndarray:
     """Builds one SIGNAL/DATA OFDM symbol: random data subcarriers + fixed pilots.
 
     Args:
@@ -246,23 +301,14 @@ def wifi_80211a_modulator_baseband(
 
     # Number of DATA OFDM symbols
     if frame_type in WIFI_CONTROL_FRAME_BYTES:
-        num_data_symbols = num_data_ofdm_symbols(
-            WIFI_CONTROL_FRAME_BYTES[frame_type], WIFI_N_DBPS[constellation_name]
-        )
+        num_data_symbols = num_data_ofdm_symbols(WIFI_CONTROL_FRAME_BYTES[frame_type], WIFI_N_DBPS[constellation_name])
     else:
         # Generic data frame: fill the requested duration.
-        num_data_symbols = max(
-            1, int(np.floor((max_num_samples - preamble_len) / symbol_len))
-        )
+        num_data_symbols = max(1, int(np.floor((max_num_samples - preamble_len) / symbol_len)))
 
-    data_symbols = [
-        _make_payload_symbol(constellation_name, ifft_size, cp_len, rng)
-        for _ in range(num_data_symbols)
-    ]
+    data_symbols = [_make_payload_symbol(constellation_name, ifft_size, cp_len, rng) for _ in range(num_data_symbols)]
 
-    return np.concatenate([stf, ltf, signal_field, *data_symbols]).astype(
-        TorchSigComplexDataType
-    )
+    return np.concatenate([stf, ltf, signal_field, *data_symbols]).astype(TorchSigComplexDataType)
 
 
 def wifi_80211a_modulator(
@@ -320,11 +366,7 @@ def wifi_80211a_modulator(
     frame_correct_bw = multistage_polyphase_resampler(frame_baseband, resample_rate_ideal)
 
     # Fit to requested length: pad short bursts, slice if longer than the window.
-    frame_correct_bw = (
-        slice_head_tail_to_length(frame_correct_bw, num_samples)
-        if len(frame_correct_bw) > num_samples
-        else pad_head_tail_to_length(frame_correct_bw, num_samples)
-    )
+    frame_correct_bw = slice_head_tail_to_length(frame_correct_bw, num_samples) if len(frame_correct_bw) > num_samples else pad_head_tail_to_length(frame_correct_bw, num_samples)
 
     return frame_correct_bw.astype(TorchSigComplexDataType)
 
@@ -382,9 +424,7 @@ class Wifi80211aSignalGenerator(BaseSignalGenerator):
             low=self["signal_duration_in_samples_min"],
             high=self["signal_duration_in_samples_max"] + 1,
         )
-        bandwidth = self.random_generator.integers(
-            low=self["bandwidth_min"], high=self["bandwidth_max"] + 1
-        )
+        bandwidth = self.random_generator.integers(low=self["bandwidth_min"], high=self["bandwidth_max"] + 1)
 
         try:
             frame_type = self["frame_type"]

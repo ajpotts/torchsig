@@ -41,6 +41,7 @@ if TYPE_CHECKING:
 __all__ = ["StaticTorchSigDataset", "TorchSigDatasetConfig", "TorchSigIterableDataset", "apply_label_to_signal", "apply_transforms_and_labels_to_signal"]
 """Dataset Base Classes for creation and static loading."""
 
+
 @dataclass(frozen=True)
 class TorchSigDatasetConfig:
     """Configuration dataclass for TorchSig datasets.
@@ -56,6 +57,7 @@ class TorchSigDatasetConfig:
         dataset_metadata: A dictionary containing additional metadata about the dataset.
         target_labels: A list of target_labels. Defaults to ["class_index"].
     """
+
     dataset_id: str
     dataset_length: int
     seed: int
@@ -64,7 +66,7 @@ class TorchSigDatasetConfig:
     output_spectrogram_fft: int | None
     signal_sampling_mode: Literal["per_signal", "per_family"]
     dataset_metadata: dict[str, Any]
-    target_labels: list[str] = field(default_factory=lambda: ["class_index"]) # default classification use case
+    target_labels: list[str] = field(default_factory=lambda: ["class_index"])  # default classification use case
 
 
 def apply_label_to_signal(sample: Signal, target_label: str) -> list:
@@ -92,19 +94,13 @@ def apply_label_to_signal(sample: Signal, target_label: str) -> list:
         A list containing a sample-level value, one value for each component
         signal, or a single value for a signal without components.
     """
-    is_sample_level_label = (
-        target_label in sample.metadata
-        and not any(
-            target_label in component.metadata
-            for component in sample.component_signals
-        )
-    )
+    is_sample_level_label = target_label in sample.metadata and not any(target_label in component.metadata for component in sample.component_signals)
     if is_sample_level_label:
         return [sample[target_label]]
 
     values = []
 
-    signals = sample.component_signals if sample.component_signals else [sample]
+    signals = sample.component_signals or [sample]
 
     for signal in signals:
         if target_label == "class_index":
@@ -119,9 +115,7 @@ def apply_label_to_signal(sample: Signal, target_label: str) -> list:
     return values
 
 
-def apply_transforms_and_labels_to_signal(
-    sample: Signal, transforms: list[Transform | callable], target_labels: list
-) -> Signal | np.ndarray | tuple:
+def apply_transforms_and_labels_to_signal(sample: Signal, transforms: list[Transform | callable], target_labels: list) -> Signal | np.ndarray | tuple:
     """Applies a series of transformations to a signal sample and retrieves specified label values.
 
     Args:
@@ -151,16 +145,8 @@ def apply_transforms_and_labels_to_signal(
     targets = {}
     for key in target_labels:
         values = apply_label_to_signal(sample, key)
-        is_sample_level_label = (
-            key in sample.metadata
-            and not any(
-                key in component.metadata
-                for component in sample.component_signals
-            )
-        )
-        if len(values) == 1 and (
-            is_sample_level_label or sample["num_signals_max"] == 1
-        ):
+        is_sample_level_label = key in sample.metadata and not any(key in component.metadata for component in sample.component_signals)
+        if len(values) == 1 and (is_sample_level_label or sample["num_signals_max"] == 1):
             values = values[0]
         targets[key] = values
     if len(target_labels) == 1:
@@ -190,9 +176,7 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         transforms: list[Transform | callable] | None = None,
         component_transforms: list[Transform | callable] | None = None,
         target_labels: list | None = None,
-        sampling_grouping: (
-            GroupingLabel | str | Path | Mapping[str, Any] | None
-        ) = None,
+        sampling_grouping: (GroupingLabel | str | Path | Mapping[str, Any] | None) = None,
         # will try to validate required metadata in this dataset; can be turned off if a dataset needs to be initialized before it's metadata is known
         validate_init: bool = True,
         **kwargs,
@@ -249,9 +233,7 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
     def _validate_positive_weight(value: float, parameter_name: str) -> float:
         """Validate a likelihood/probability value used for class selection."""
         if not isinstance(value, (int, float, np.integer, np.floating)):
-            raise TypeError(
-                f"{parameter_name} must be a real number, got {type(value).__name__}"
-            )
+            raise TypeError(f"{parameter_name} must be a real number, got {type(value).__name__}")
         value = float(value)
         if not np.isfinite(value):
             raise ValueError(f"{parameter_name} must be finite")
@@ -259,7 +241,6 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
             raise ValueError(f"{parameter_name} must be > 0")
 
         return value
-
 
     def _validate_signal_sampling_configuration(self, require_complete: bool = True) -> None:
         """Validate the dataset's configured class-selection distribution."""
@@ -269,9 +250,7 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         if self._signal_probability_mode == "probability":
             probabilities = np.asarray(self.signal_probabilities, dtype=float)
             if probabilities.shape[0] != len(self.signal_generators):
-                raise ValueError(
-                    "signal probability count does not match number of generators"
-                )
+                raise ValueError("signal probability count does not match number of generators")
             if np.any(probabilities < 0.0):
                 raise ValueError("all signal probabilities must be >= 0")
             if not np.any(probabilities > 0.0):
@@ -279,26 +258,16 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
 
             probability_sum = float(np.sum(probabilities))
             if probability_sum > 1.0 + 1e-8:
-                raise ValueError(
-                    f"signal probabilities must sum to 1.0, found {probability_sum}"
-                )
-            if require_complete and not np.isclose(
-                probability_sum, 1.0, atol=1e-8
-            ):
-                raise ValueError(
-                    "signal probabilities must sum to 1.0 before sampling, "
-                    f"found {probability_sum}"
-                )
+                raise ValueError(f"signal probabilities must sum to 1.0, found {probability_sum}")
+            if require_complete and not np.isclose(probability_sum, 1.0, atol=1e-8):
+                raise ValueError(f"signal probabilities must sum to 1.0 before sampling, found {probability_sum}")
             return
 
         likelihoods = np.asarray(self.signal_likelihoods, dtype=float)
         if likelihoods.shape[0] != len(self.signal_generators):
-            raise ValueError(
-                "signal likelihood count does not match number of generators"
-            )
+            raise ValueError("signal likelihood count does not match number of generators")
         if np.any(likelihoods <= 0.0):
             raise ValueError("all signal likelihoods must be > 0")
-
 
     def _refresh_signal_probabilities(self) -> None:
         """Recompute normalized sampling probabilities from configured weights."""
@@ -342,55 +311,29 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         if not isinstance(grouping, GroupingLabel):
             grouping = GroupingLabel(grouping)
         if not self.signal_generators:
-            raise ValueError(
-                "cannot balance groups without signal generators"
-            )
+            raise ValueError("cannot balance groups without signal generators")
 
         generator_groups = []
         for generator in self.signal_generators:
             if not hasattr(generator, grouping.source):
                 class_name = getattr(generator, "class_name", "<unlabeled>")
-                raise ValueError(
-                    f"cannot balance class {class_name!r}: grouping source "
-                    f"{grouping.source!r} is not available before generation"
-                )
+                raise ValueError(f"cannot balance class {class_name!r}: grouping source {grouping.source!r} is not available before generation")
             source_value = getattr(generator, grouping.source)
             try:
                 group_name, _ = grouping.match(source_value)
             except ValueError as error:
-                raise ValueError(
-                    f"cannot balance generator value {source_value!r} from "
-                    f"source {grouping.source!r}: no group matched"
-                ) from error
+                raise ValueError(f"cannot balance generator value {source_value!r} from source {grouping.source!r}: no group matched") from error
             generator_groups.append(group_name)
 
-        group_counts = {
-            group_name: generator_groups.count(group_name)
-            for group_name in set(generator_groups)
-        }
-        configured_groups = {
-            group["name"]: group for group in grouping.groups
-        }
-        uses_probabilities = any(
-            "probability" in group for group in grouping.groups
-        )
-        uses_likelihoods = any(
-            "likelihood" in group for group in grouping.groups
-        )
+        group_counts = {group_name: generator_groups.count(group_name) for group_name in set(generator_groups)}
+        configured_groups = {group["name"]: group for group in grouping.groups}
+        uses_probabilities = any("probability" in group for group in grouping.groups)
+        uses_likelihoods = any("likelihood" in group for group in grouping.groups)
 
         if uses_probabilities:
-            unrepresented_probability_groups = [
-                group_name
-                for group_name, group in configured_groups.items()
-                if group_name not in group_counts
-                and group.get("probability", 0.0) > 0.0
-            ]
+            unrepresented_probability_groups = [group_name for group_name, group in configured_groups.items() if group_name not in group_counts and group.get("probability", 0.0) > 0.0]
             if unrepresented_probability_groups:
-                raise ValueError(
-                    "cannot assign positive probability to groups without "
-                    "signal generators: "
-                    f"{unrepresented_probability_groups}"
-                )
+                raise ValueError(f"cannot assign positive probability to groups without signal generators: {unrepresented_probability_groups}")
             group_probabilities = {
                 group_name: configured_groups[group_name].get(
                     "probability",
@@ -407,10 +350,7 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
                 for group_name in group_counts
             }
             likelihood_sum = float(sum(group_likelihoods.values()))
-            group_probabilities = {
-                group_name: likelihood / likelihood_sum
-                for group_name, likelihood in group_likelihoods.items()
-            }
+            group_probabilities = {group_name: likelihood / likelihood_sum for group_name, likelihood in group_likelihoods.items()}
         else:
             equal_group_probability = 1.0 / len(group_counts)
             group_probabilities = dict.fromkeys(
@@ -420,17 +360,13 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
 
         self._signal_probability_mode = "probability"
         self.signal_probabilities = np.asarray(
-            [
-                group_probabilities[group_name] / group_counts[group_name]
-                for group_name in generator_groups
-            ],
+            [group_probabilities[group_name] / group_counts[group_name] for group_name in generator_groups],
             dtype=float,
         )
         self.signal_likelihoods = []
         self.sampling_grouping = grouping
         self._sampling_generator_groups = generator_groups
         self._validate_signal_sampling_configuration(require_complete=True)
-
 
     def init_signal_generator(self, signal_generator: str | callable) -> None:
         """Initializes the signal generator.
@@ -442,9 +378,7 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
             TypeError: If the signal_generator is neither a string nor a callable.
         """
         if isinstance(signal_generator, str):
-            self.add_signal_generator(
-                lookup_signal_generator_by_string(signal_generator)
-            )
+            self.add_signal_generator(lookup_signal_generator_by_string(signal_generator))
         else:
             self.add_signal_generator(signal_generator)
 
@@ -477,25 +411,17 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
             ValueError: If the sampling configuration is invalid.
         """
         if likelihood is not None and probability is not None:
-            raise ValueError(
-                "Specify only one of likelihood or probability for a signal generator"
-            )
+            raise ValueError("Specify only one of likelihood or probability for a signal generator")
 
         has_generators = bool(self.signal_generators)
         using_probability_mode = self._signal_probability_mode == "probability"
-        using_likelihood_mode = (
-            self._signal_probability_mode == "likelihood" and has_generators
-        )
+        using_likelihood_mode = self._signal_probability_mode == "likelihood" and has_generators
 
         if using_probability_mode and probability is None:
-            raise ValueError(
-                "All signal generators must specify probability once probability mode is used"
-            )
+            raise ValueError("All signal generators must specify probability once probability mode is used")
 
         if using_likelihood_mode and probability is not None:
-            raise ValueError(
-                "Cannot mix explicit probability with likelihood/default likelihood generators"
-            )
+            raise ValueError("Cannot mix explicit probability with likelihood/default likelihood generators")
 
         if probability is not None:
             probability = self._validate_positive_weight(
@@ -510,10 +436,7 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
             probability_sum = float(np.sum(candidate_probabilities))
 
             if probability_sum > 1.0 + 1e-8:
-                raise ValueError(
-                    "signal probabilities must sum to 1.0 or less while "
-                    f"configuring the dataset, found {probability_sum}"
-                )
+                raise ValueError(f"signal probabilities must sum to 1.0 or less while configuring the dataset, found {probability_sum}")
         else:
             likelihood = 1.0 if likelihood is None else likelihood
             likelihood = self._validate_positive_weight(
@@ -530,11 +453,7 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         except AttributeError:
             pass  # Proceed without validation at the caller's risk.
 
-        resolved_class_index = (
-            len(self.signal_generators)
-            if class_index is None
-            else class_index
-        )
+        resolved_class_index = len(self.signal_generators) if class_index is None else class_index
         signal_generator["class_index"] = resolved_class_index
 
         if class_name is not None:
@@ -542,10 +461,7 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
 
         self.signal_generators.append(signal_generator)
 
-        if (
-            hasattr(signal_generator, "class_name")
-            and signal_generator["class_name"] is not None
-        ):
+        if hasattr(signal_generator, "class_name") and signal_generator["class_name"] is not None:
             self["class_names"].append(signal_generator["class_name"])
 
         if probability is not None:
@@ -556,7 +472,6 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
             self.signal_likelihoods.append(likelihood)
 
         self._refresh_signal_probabilities()
-
 
     def validate_metadata_fields(self) -> bool:
         """Validate dataset and signal generator metadata."""
@@ -574,18 +489,12 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         truncated during sample generation. This warning helps identify metadata
         configurations that are likely to truncate every generated component.
         """
-        if (
-            self["signal_duration_in_samples_max"]
-            > self["num_iq_samples_dataset"]
-        ):
+        if self["signal_duration_in_samples_max"] > self["num_iq_samples_dataset"]:
             warnings.warn(
-                "signal_duration_in_samples_max exceeds "
-                "num_iq_samples_dataset; generated component signals may be "
-                "truncated to fit within the dataset sample",
+                "signal_duration_in_samples_max exceeds num_iq_samples_dataset; generated component signals may be truncated to fit within the dataset sample",
                 UserWarning,
                 stacklevel=2,
             )
-
 
     def __iter__(self):
         """Returns an iterator object for the dataset.
@@ -677,14 +586,8 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
     ) -> Any:
         """Run final transforms and optionally log the completed metadata."""
         result = operation()
-        session = object.__getattribute__(self, "__dict__").get(
-            "_metadata_debug_session"
-        )
-        if (
-            self.metadata_debug_enabled
-            and session is not None
-            and "snapshot" in session.config.events
-        ):
+        session = object.__getattribute__(self, "__dict__").get("_metadata_debug_session")
+        if self.metadata_debug_enabled and session is not None and "snapshot" in session.config.events:
             self.log_metadata_snapshot(sample, include_components=True)
         return result
 
@@ -723,19 +626,13 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         Returns:
             The generated IQ samples representing the noise floor.
         """
-        real_samples = self.random_generator.normal(
-            0, 1, self["num_iq_samples_dataset"]
-        )
-        imag_samples = self.random_generator.normal(
-            0, 1, self["num_iq_samples_dataset"]
-        )
+        real_samples = self.random_generator.normal(0, 1, self["num_iq_samples_dataset"])
+        imag_samples = self.random_generator.normal(0, 1, self["num_iq_samples_dataset"])
         # combine real and imaginary portions of noise
         iq_samples = real_samples + 1j * imag_samples
         # compute an estimate of the noise floor in the frequency domain. use a large stride to process a subset
         # of the data since not many FFTs are needed to be averaged for the noise
-        noise_spectrogram_db = compute_spectrogram(
-            iq_samples, self["fft_size"], self["fft_stride"] * 16
-        )
+        noise_spectrogram_db = compute_spectrogram(iq_samples, self["fft_size"], self["fft_stride"] * 16)
         # average over time
         noise_fft_db = np.mean(noise_spectrogram_db, axis=1)
         # estimate the average noise value in dB in the frequency domain
@@ -775,22 +672,14 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
             if len(component_signals) >= num_signals_to_generate:
                 break
 
-            generator = (
-                self._random_signal_generator(group_name=retry_group)
-                if hasattr(self, "sampling_grouping")
-                else None
-            )
+            generator = self._random_signal_generator(group_name=retry_group) if hasattr(self, "sampling_grouping") else None
             if retry_group is None and generator is not None:
                 source_value = getattr(
                     generator,
                     self.sampling_grouping.source,
                 )
                 retry_group, _ = self.sampling_grouping.match(source_value)
-            new_signal = (
-                self._generate_component_signal()
-                if generator is None
-                else self._generate_component_signal(generator)
-            )
+            new_signal = self._generate_component_signal() if generator is None else self._generate_component_signal(generator)
             start_sample = self._choose_start_sample(
                 iq_samples,
                 new_signal,
@@ -828,9 +717,7 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
             data=iq_samples,
             component_signals=component_signals,
             center_freq=0,
-            bandwidth=max(
-                [0] + [signal.bandwidth for signal in component_signals]
-            ),
+            bandwidth=max([0] + [signal.bandwidth for signal in component_signals]),
         )
 
         if hasattr(self, "class_name"):
@@ -842,7 +729,6 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
             sample.add_parent(self, register=False)
 
         return sample
-
 
     def _generate_component_signal(
         self,
@@ -868,7 +754,6 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
             random_generator=self.random_generator,
         )
 
-
     def _choose_start_sample(
         self,
         iq_samples: np.ndarray,
@@ -880,8 +765,7 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
 
         if num_signal_samples > num_available_samples:
             warnings.warn(
-                "generated signal is too large to fit in the dataset sample; "
-                "it will be cut off",
+                "generated signal is too large to fit in the dataset sample; it will be cut off",
                 UserWarning,
                 stacklevel=2,
             )
@@ -899,7 +783,6 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
                 high=num_valid_start_positions,
             )
         )
-
 
     def _truncate_component_signal(
         self,
@@ -920,14 +803,9 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
             signal.data = signal.data[:num_samples_to_add]
             signal["duration_in_samples"] = num_samples_to_add
 
-
     def _allow_cochannel_overlap(self) -> bool:
         """Return whether an overlapping component should be accepted."""
-        return bool(
-            self.random_generator.uniform(0, 1)
-            < self["cochannel_overlap_probability"]
-        )
-
+        return bool(self.random_generator.uniform(0, 1) < self["cochannel_overlap_probability"])
 
     def _insert_component_signal(
         self,
@@ -950,7 +828,6 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         signal["start_in_samples"] = start_sample
         signal["duration_in_samples"] = len(signal.data)
 
-
     def _map_to_coordinates(self, new_signal: Signal, start_sample: int) -> Rectangle:
         """Maps a new signal to coordinates based on the start sample and signal characteristics.
 
@@ -969,17 +846,11 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         """
         # calculate start and stop time in terms of FFT number
         fft_start_time = np.round(start_sample / self["fft_size"])
-        fft_stop_time = np.round(
-            (start_sample + len(new_signal.data)) / self["fft_size"]
-        )
+        fft_stop_time = np.round((start_sample + len(new_signal.data)) / self["fft_size"])
         # calculate bin position in FFT
         fs = self["sample_rate"]
-        fft_start_bin_norm = (
-            (new_signal.center_freq - new_signal.bandwidth) + (fs / 2)
-        ) / (fs / 2)
-        fft_stop_bin_norm = (
-            (new_signal.center_freq + new_signal.bandwidth) + (fs / 2)
-        ) / (fs / 2)
+        fft_start_bin_norm = ((new_signal.center_freq - new_signal.bandwidth) + (fs / 2)) / (fs / 2)
+        fft_stop_bin_norm = ((new_signal.center_freq + new_signal.bandwidth) + (fs / 2)) / (fs / 2)
         fft_start_bin_index = np.round(fft_start_bin_norm * self["fft_size"])
         fft_stop_bin_index = np.round(fft_stop_bin_norm * self["fft_size"])
         # map the position into retangle coordinates
@@ -988,9 +859,7 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         # turn into a rectangle
         return Rectangle(lower_left_coord, upper_right_coord)
 
-    def _check_if_overlap(
-        self, new_rectangle: Rectangle, signal_rectangle_list: list
-    ) -> bool:
+    def _check_if_overlap(self, new_rectangle: Rectangle, signal_rectangle_list: list) -> bool:
         """Determines if a new rectangle overlaps with any of the rectangles in a list.
 
         Args:
@@ -1032,20 +901,15 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
                 if generator_group == group_name
             ]
             if not matching_generators:
-                raise ValueError(
-                    f"sampling group {group_name!r} has no signal generators"
-                )
+                raise ValueError(f"sampling group {group_name!r} has no signal generators")
             return self.random_generator.choice(matching_generators)
 
         self._validate_signal_sampling_configuration(require_complete=True)
         self._refresh_signal_probabilities()
-        return self.random_generator.choice(
-            self.signal_generators, p=self.signal_probabilities
-        )
+        return self.random_generator.choice(self.signal_generators, p=self.signal_probabilities)
 
-class SafeTorchSigIterableDataset(
-    PipelineFailOverEnabled, TorchSigIterableDataset
-):
+
+class SafeTorchSigIterableDataset(PipelineFailOverEnabled, TorchSigIterableDataset):
     """A fault-tolerant version of TorchSigIterableDataset with automatic error recovery.
 
     This class behaves exactly like :class:`TorchSigIterableDataset` but adds
@@ -1058,11 +922,7 @@ class SafeTorchSigIterableDataset(
     ``pipeline_max_retries`` attributes.
 
     Example:
-        >>> ds = SafeTorchSigIterableDataset(
-        ...     signal_generators="all",
-        ...     transforms=[MyTransform()],
-        ...     target_labels=["class_index"]
-        ... )
+        >>> ds = SafeTorchSigIterableDataset(signal_generators="all", transforms=[MyTransform()], target_labels=["class_index"])
         >>> # Configure fallback behavior
         >>> ds.pipeline_fallback = "retry"
         >>> ds.pipeline_max_retries = 3
@@ -1142,7 +1002,6 @@ class SafeTorchSigIterableDataset(
                     ),
                 ),
             )
-
 
     def set_fallback_policy(
         self,
@@ -1248,13 +1107,9 @@ class StaticTorchSigDataset(Dataset, Seedable):
         """
         if 0 <= idx < len(self):
             sample = self.reader.read(idx=idx)
-            return apply_transforms_and_labels_to_signal(
-                sample, self.transforms, self.target_labels
-            )
+            return apply_transforms_and_labels_to_signal(sample, self.transforms, self.target_labels)
 
-        raise IndexError(
-            f"Index {idx} is out of bounds. Must be [0, {self.__len__() - 1}]"
-        )
+        raise IndexError(f"Index {idx} is out of bounds. Must be [0, {self.__len__() - 1}]")
 
     def __str__(self) -> str:
         """Returns a string representation of the dataset.
@@ -1270,8 +1125,4 @@ class StaticTorchSigDataset(Dataset, Seedable):
         Returns:
             A detailed string representation of the dataset.
         """
-        return (
-            f"{self.__class__.__name__}"
-            f"(root={self.root}, "
-            f"file_handler_class={self.reader})"
-        )
+        return f"{self.__class__.__name__}(root={self.root}, file_handler_class={self.reader})"

@@ -55,10 +55,7 @@ class SigMFReader(MetadataReader):
         if not self.data_files:
             raise FileNotFoundError(f"No .sigmf-data files found in {self.root}")
 
-        self.meta_files = {
-            path.with_suffix(".sigmf-data"): path
-            for path in self.root.rglob("*.sigmf-meta")
-        }
+        self.meta_files = {path.with_suffix(".sigmf-data"): path for path in self.root.rglob("*.sigmf-meta")}
 
         csv_path = self.root / "metadata.csv"
         if csv_path.exists():
@@ -83,10 +80,7 @@ class SigMFReader(MetadataReader):
 
             if self.num_iq_samples == 0:
                 if first_samples % self.elements_per_file != 0:
-                    raise ValueError(
-                        "Cannot infer num_iq_samples: first SigMF data file does not "
-                        "contain a whole number of elements."
-                    )
+                    raise ValueError("Cannot infer num_iq_samples: first SigMF data file does not contain a whole number of elements.")
                 self.num_iq_samples = first_samples // self.elements_per_file
 
         self.file_start_indices: list[int] = []
@@ -95,17 +89,11 @@ class SigMFReader(MetadataReader):
         for data_file in self.data_files:
             samples = self._num_complex_samples(data_file)
             if samples % self.num_iq_samples != 0:
-                raise ValueError(
-                    f"{data_file} contains {samples} complex samples, which is not "
-                    f"a multiple of num_iq_samples={self.num_iq_samples}."
-                )
+                raise ValueError(f"{data_file} contains {samples} complex samples, which is not a multiple of num_iq_samples={self.num_iq_samples}.")
 
             elements_in_file = samples // self.num_iq_samples
             if elements_in_file != self.elements_per_file:
-                raise ValueError(
-                    f"{data_file} contains {elements_in_file} elements, expected "
-                    f"{self.elements_per_file}."
-                )
+                raise ValueError(f"{data_file} contains {elements_in_file} elements, expected {self.elements_per_file}.")
 
             self.file_start_indices.append(cum)
             cum += elements_in_file
@@ -168,10 +156,7 @@ class SigMFReader(MetadataReader):
     def _num_complex_samples(self, data_path: Path) -> int:
         size_bytes = data_path.stat().st_size
         if size_bytes % self.numpy_dtype.itemsize != 0:
-            raise ValueError(
-                f"{data_path} size is not divisible by dtype size "
-                f"{self.numpy_dtype.itemsize}."
-            )
+            raise ValueError(f"{data_path} size is not divisible by dtype size {self.numpy_dtype.itemsize}.")
 
         return size_bytes // self.numpy_dtype.itemsize
 
@@ -179,6 +164,4 @@ class SigMFReader(MetadataReader):
         if raw.dtype.fields is None:
             return raw.astype(np.complex64, copy=False)
 
-        return (raw["i"].astype(np.float32) + 1j * raw["q"].astype(np.float32)).astype(
-            np.complex64
-        )
+        return (raw["i"].astype(np.float32) + 1j * raw["q"].astype(np.float32)).astype(np.complex64)

@@ -107,9 +107,7 @@ def test_frequency_shift_signal_without_aliasing(
         frequency_shift_mock.call_args.args[0],
         np.ones(32, dtype=np.complex64),
     )
-    assert frequency_shift_mock.call_args.args[1] == pytest.approx(
-        expected_center_freq
-    )
+    assert frequency_shift_mock.call_args.args[1] == pytest.approx(expected_center_freq)
     assert frequency_shift_mock.call_args.args[2] == pytest.approx(100.0)
 
     anti_aliasing_filter_mock.assert_not_called()

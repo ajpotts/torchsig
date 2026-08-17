@@ -3,27 +3,22 @@
 import numpy as np
 import pytest
 
-from torchsig.signals.builders.constellation_maps import all_symbol_maps
-from torchsig.signals.signal_lists import CLASS_FAMILY_DICT, TorchSigSignalLists
-from torchsig.utils.dsp import TorchSigComplexDataType
-from torchsig.utils.signal_building import lookup_signal_generator_by_string
-
 from torchsig.signals.builders.lmr import (
     DMR_LEVEL_BY_DIBIT,
     DMR_SYMBOLS_PER_BURST,
     DMR_SYNC_PATTERNS,
+    P25_MOD_INDEX,
     DMRSignalGenerator,
+    P25SignalGenerator,
     build_dmr_symbol_stream,
+    build_p25_symbol_stream,
     dmr_modulator,
     hex_sync_to_levels,
-    P25_FRAME_SYNC_HEX,
-    P25_MOD_INDEX,
-    P25SignalGenerator,
-    build_p25_symbol_stream,
     p25_modulator,
 )
-
-
+from torchsig.signals.signal_lists import CLASS_FAMILY_DICT, TorchSigSignalLists
+from torchsig.utils.dsp import TorchSigComplexDataType
+from torchsig.utils.signal_building import lookup_signal_generator_by_string
 
 # --------------------------------------------------------------------------- #
 # Digital Mobile Radio (DMR) tests
@@ -55,9 +50,7 @@ def test_build_dmr_symbol_stream_embeds_sync():
 
     assert len(stream) == DMR_SYMBOLS_PER_BURST
     payload = (DMR_SYMBOLS_PER_BURST - len(sync_levels)) // 2
-    np.testing.assert_array_equal(
-        stream[payload : payload + len(sync_levels)], sync_levels
-    )
+    np.testing.assert_array_equal(stream[payload : payload + len(sync_levels)], sync_levels)
 
 
 def test_build_dmr_symbol_stream_length():
@@ -106,11 +99,7 @@ def test_dmr_generator_generate():
     assert signal.class_name == "dmr"
     assert signal.center_freq == 0
     assert DMR_METADATA["bandwidth_min"] <= signal.bandwidth <= DMR_METADATA["bandwidth_max"]
-    assert (
-        DMR_METADATA["signal_duration_in_samples_min"]
-        <= len(signal.data)
-        <= DMR_METADATA["signal_duration_in_samples_max"]
-    )
+    assert DMR_METADATA["signal_duration_in_samples_min"] <= len(signal.data) <= DMR_METADATA["signal_duration_in_samples_max"]
 
 
 def test_dmr_generator_reproducible():
@@ -139,6 +128,7 @@ def test_dmr_in_signal_lists():
     lists = TorchSigSignalLists()
     assert "dmr" in lists.lmr_signals
 
+
 # --------------------------------------------------------------------------- #
 # APCO P25 (25) tests
 # --------------------------------------------------------------------------- #
@@ -159,7 +149,8 @@ def test_p25_mod_index():
 
 def test_p25_symbol_stream_starts_with_sync():
     """The symbol stream begins with the 24-symbol frame sync."""
-    from torchsig.signals.builders.lmr import P25_LEVEL_BY_DIBIT, P25_SYNC_SYMBOLS, _P25_SYNC_LEVELS
+    from torchsig.signals.builders.lmr import _P25_SYNC_LEVELS, P25_SYNC_SYMBOLS
+
     rng = np.random.default_rng(0)
     stream = build_p25_symbol_stream(200, rng)
     assert len(stream) == 200
@@ -207,4 +198,3 @@ def test_p25_registered_and_in_signal_lists():
     assert CLASS_FAMILY_DICT["p25"] == "lmr"
     lists = TorchSigSignalLists()
     assert "p25" in lists.lmr_signals
-

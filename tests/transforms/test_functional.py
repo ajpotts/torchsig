@@ -5,9 +5,9 @@ from typing import Any
 import numpy as np
 import pytest
 import scipy as sp
+from numba.core.errors import TypingError
 from numpy.testing import assert_allclose, assert_array_equal
 from test_transforms_utils import generate_test_signal, generate_tone_signal
-from numba.core.errors import TypingError
 
 from torchsig.transforms.functional import (
     _build_full_profile,
@@ -83,6 +83,82 @@ def test_add_slope(data: Any, expected: bool | ValueError, is_error: bool) -> No
         assert np.allclose(data, data_test, RTOL) == expected
         assert (type(data) == type(data_test)) == expected
         assert (data.dtype == TorchSigComplexDataType) == expected
+
+
+@pytest.mark.parametrize("velocity", [10.0, 1e6])
+def test_doppler_preserves_length_for_long_inputs(velocity: float) -> None:
+    """Doppler resampling should not shorten long input signals."""
+    data = np.ones(65_536, dtype=TorchSigComplexDataType)
+    assert doppler(data, velocity, 2.9979e8).shape == data.shape
+
+
+def test_doppler_does_not_append_zeros_to_preserve_length() -> None:
+    """Length preservation should retain resampled signal content at the tail."""
+    result = doppler(np.ones(65_536, dtype=TorchSigComplexDataType), 10.0, 2.9979e8)
+    assert np.count_nonzero(result[-5:]) == 5
+
+
+@pytest.mark.parametrize(
+    ("velocity", "propagation_speed"),
+    [(2.9979e8, 2.9979e8), (2.9979e8 + 1, 2.9979e8), (np.nan, 2.9979e8), (1.0, 0.0)],
+)
+def test_doppler_rejects_invalid_physical_parameters(
+    velocity: float, propagation_speed: float
+) -> None:
+    """Invalid propagation speeds and velocities should raise a clear error."""
+    with pytest.raises(ValueError, match="velocity|propagation_speed"):
+        doppler(np.ones(16, dtype=TorchSigComplexDataType), velocity, propagation_speed)
+
+
+def test_doppler_keeps_complex64_input_during_resampling(monkeypatch) -> None:
+    """Approaching-velocity padding should not promote complex64 input."""
+    resampler_input_dtype = None
+
+    def capture_resampler(data: np.ndarray, _rate: float) -> np.ndarray:
+        nonlocal resampler_input_dtype
+        resampler_input_dtype = data.dtype
+        return data
+
+    monkeypatch.setattr(
+        "torchsig.transforms.functional.multistage_polyphase_resampler",
+        capture_resampler,
+    )
+    doppler(np.ones(32, dtype=TorchSigComplexDataType), 1e6, 2.9979e8)
+    assert resampler_input_dtype == np.dtype(TorchSigComplexDataType)
+
+
+def test_doppler_avoids_copy_when_resampler_returns_complex64(monkeypatch) -> None:
+    """The final dtype normalization should reuse complex64 resampler output."""
+    resampled = np.arange(32, dtype=TorchSigComplexDataType)
+    monkeypatch.setattr(
+        "torchsig.transforms.functional.multistage_polyphase_resampler",
+        lambda _data, _rate: resampled,
+    )
+    result = doppler(resampled.copy(), -1e6, 2.9979e8)
+    assert result.dtype == np.dtype(TorchSigComplexDataType)
+    assert np.shares_memory(result, resampled)
+
+
+def test_doppler_rejects_multidimensional_input() -> None:
+    """Doppler should reject arrays without a single sample axis."""
+    with pytest.raises(ValueError, match="one-dimensional"):
+        doppler(np.ones((2, 16), dtype=TorchSigComplexDataType))
+
+
+def test_doppler_skips_resampling_for_effective_unity_rate(monkeypatch) -> None:
+    """An effective 1:1 rate should bypass polyphase filtering."""
+    data = np.ones(32, dtype=TorchSigComplexDataType)
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("resampler should not be called for a 1:1 rate")
+
+    monkeypatch.setattr(
+        "torchsig.transforms.functional.multistage_polyphase_resampler",
+        fail_if_called,
+    )
+    result = doppler(data, 0.0, 2.9979e8)
+    np.testing.assert_array_equal(result, data)
+    assert result.dtype == TorchSigComplexDataType
 
 
 @pytest.mark.parametrize(
@@ -341,22 +417,13 @@ def test_clock_jitter(data: Any, params: dict, expected: bool | AttributeError, 
 
     jitter_ppm = params["jitter_ppm"]
 
-
     if is_error:
         with pytest.raises(expected):
-            data = clock_jitter(
-                data=data,
-                jitter_ppm=jitter_ppm,
-                rng=rng
-            )
+            data = clock_jitter(data=data, jitter_ppm=jitter_ppm, rng=rng)
     else:
         data_test = data.copy()
 
-        data = clock_jitter(
-            data=data,
-            jitter_ppm=jitter_ppm,
-            rng=rng
-        )
+        data = clock_jitter(data=data, jitter_ppm=jitter_ppm, rng=rng)
 
         assert (type(data) == type(data_test)) == expected
         assert (data != data_test).any() == expected
@@ -988,7 +1055,7 @@ def test_normalize(data: Any, params: dict, expected: np.ndarray | ValueError, i
 )
 def test_passband_ripple(params: dict, expected_success: Any, is_error: bool, is_warning: bool) -> None:
     """Test the passband_ripple function with pytest.
-    
+
     Args:
         params (dict): Function call parameters.
         expected_success (bool | type): Expected result (True if success, or Exception type if is_error is True).
@@ -1043,7 +1110,7 @@ def test_passband_ripple_output_shape():
     assert np.isrealobj(out_real)
 
     # Test Complex
-    data_complex = (np.random.randn(fft_len) + 1j * np.random.randn(fft_len))
+    data_complex = np.random.randn(fft_len) + 1j * np.random.randn(fft_len)
     out_complex = passband_ripple(data_complex, num_taps=num_taps, rng=rng)
     assert out_complex.shape == data_complex.shape
     assert np.iscomplexobj(out_complex)
@@ -1054,13 +1121,7 @@ def test_passband_ripple_gain():
     data = np.ones(1024)
     rng = np.random.default_rng(42)
 
-    out = passband_ripple(
-        data,
-        num_taps=128,
-        rng=rng,
-        passband_fuzz="smooth",
-        stopband_fuzz="smooth"
-    )
+    out = passband_ripple(data, num_taps=128, rng=rng, passband_fuzz="smooth", stopband_fuzz="smooth")
 
     # DC gain should be roughly 1.0 +/- ripple_amp
     # Since max_ripple_db=2.0 -> ripple_amp approx 0.11
@@ -1085,14 +1146,11 @@ def test_fallback_on_calculation_error(monkeypatch):
 
     # 2. Monkeypatch _build_full_profile since that is where the logic starts now
     from torchsig.transforms import functional
+
     monkeypatch.setattr(functional, "_build_full_profile", mock_fail)
 
     # 3. Execute. fallback="original" should return input data
-    result = passband_ripple(
-        data,
-        fallback="original",
-        rng=rng
-    )
+    result = passband_ripple(data, fallback="original", rng=rng)
     assert_array_equal(result, data)
 
 
@@ -1102,6 +1160,7 @@ def test_fallback_raise_mode(monkeypatch):
     rng = np.random.default_rng(42)
 
     from torchsig.transforms import functional
+
     def mock_fail(*args, **kwargs):
         raise RuntimeError("Simulated internal math failure")
 
@@ -1123,14 +1182,7 @@ def test_fft_filter_reconstruction_error(num_taps, trim_tol, ripple_amp):
     rng = np.random.default_rng(42)
 
     # Generate the target frequency profile
-    profile_standard = _build_full_profile(
-        num_taps=num_taps,
-        ripple_amp=ripple_amp,
-        ripple_freq=ripple_freq,
-        passband_fuzz="smooth",
-        stopband_fuzz="smooth",
-        rng=rng
-    )
+    profile_standard = _build_full_profile(num_taps=num_taps, ripple_amp=ripple_amp, ripple_freq=ripple_freq, passband_fuzz="smooth", stopband_fuzz="smooth", rng=rng)
 
     # 2. Generate Taps using the filter function
     # fit_metric='rms' is used to calculate the error during generation
@@ -1147,7 +1199,7 @@ def test_fft_filter_reconstruction_error(num_taps, trim_tol, ripple_amp):
     actual_mag = np.abs(actual_resp)
 
     # Calculate RMS Error manually to verify the 'fit_err' returned by the function
-    rmse = np.sqrt(np.mean((intended_mag - actual_mag)**2))
+    rmse = np.sqrt(np.mean((intended_mag - actual_mag) ** 2))
 
     # 5. Assertions
     # Tolerance logic:
@@ -1158,16 +1210,15 @@ def test_fft_filter_reconstruction_error(num_taps, trim_tol, ripple_amp):
     else:
         # Threshold can be adjusted based on your specific filter requirements
         max_allowed_rmse = 1e-3
-        assert rmse < max_allowed_rmse, \
-            f"Trimmed reconstruction error too high. tol={trim_tol}, RMSE: {rmse:.2e}"
+        assert rmse < max_allowed_rmse, f"Trimmed reconstruction error too high. tol={trim_tol}, RMSE: {rmse:.2e}"
 
     # Additionally, verify that the fit_err returned by the function matches our calculation
-    assert np.isclose(fit_err, rmse, rtol=1e-5), \
-        f"Function reported fit_err {fit_err:.2e} differs from actual RMSE {rmse:.2e}"
+    assert np.isclose(fit_err, rmse, rtol=1e-5), f"Function reported fit_err {fit_err:.2e} differs from actual RMSE {rmse:.2e}"
 
 
 def test_build_full_profile_hermitian_symmetry():
     from torchsig.transforms.functional import _build_full_profile
+
     rng = np.random.default_rng(42)
     N = 1025
 
@@ -1270,9 +1321,8 @@ def test_phase_offset(data: Any, params: dict, expected: bool | TypeError, is_er
     [
         (2.0 * np.sqrt(2) * (np.ones((16,)) + 1j * np.ones((16,))), {"num_bits": 8}, 2.0 * (np.ones((16,)) + 1j * np.ones((16,))), False),
         (np.sqrt(2) * (np.ones((16,)) + 1j * np.ones((16,))), {"num_bits": 8}, 2.0 * (np.ones((16,)) + 1j * np.ones((16,))), False),
-        ((np.zeros((16,)) + 1j * np.zeros((16,))), {"num_bits": 16}, (np.zeros((16,)) + 1j * np.zeros((16,))), False), # zero values should be quantized to zero
-        (np.array([np.nan + 1j]), {"num_bits": 10}, ValueError, True), # NaN or Inf values should raise an error
-
+        ((np.zeros((16,)) + 1j * np.zeros((16,))), {"num_bits": 16}, (np.zeros((16,)) + 1j * np.zeros((16,))), False),  # zero values should be quantized to zero
+        (np.array([np.nan + 1j]), {"num_bits": 10}, ValueError, True),  # NaN or Inf values should raise an error
     ],
 )
 def test_quantize(data: Any, params: dict, expected: np.ndarray | ValueError, is_error: bool) -> None:

@@ -12,7 +12,8 @@ from torch.utils.data import DataLoader, get_worker_info
 
 from torchsig.utils.random import Seedable
 
-__all__ = ["metadata_padding_collate_fn", "WorkerSeedingDataLoader"]
+__all__ = ["WorkerSeedingDataLoader", "metadata_padding_collate_fn"]
+
 
 def metadata_padding_collate_fn(batch):
     """Collate a batch of (data, metadata_list) pairs, padding metadata to equal lengths.
@@ -44,10 +45,7 @@ def metadata_padding_collate_fn(batch):
 
     for data_pair in batch:
         if not isinstance(data_pair, tuple) or len(data_pair) != 2:
-            raise ValueError(
-                f"{data_pair} is not a valid (x, y) pair; this collate function "
-                "expects datasets to return tuples of (x, y)"
-            )
+            raise ValueError(f"{data_pair} is not a valid (x, y) pair; this collate function expects datasets to return tuples of (x, y)")
 
         _, metadata_list = data_pair
         batch_max_len = max(batch_max_len, len(metadata_list))
@@ -86,10 +84,7 @@ def metadata_padding_collate_fn(batch):
         try:
             final_tensor_obj[key] = torch.Tensor(np.array(sequences))
         except (ValueError, TypeError, MemoryError) as e:
-            warnings.warn(
-                f"Dropping key value: '{key}' because it contained invalid tensor values: {type(e).__name__}",
-                stacklevel=2
-            )
+            warnings.warn(f"Dropping key value: '{key}' because it contained invalid tensor values: {type(e).__name__}", stacklevel=2)
     return torch.Tensor(np.array(iqs)), final_tensor_obj
 
 
@@ -112,16 +107,11 @@ class WorkerSeedingDataLoader(DataLoader, Seedable):
             ValueError: if `worker_init_fn` is provided in kwargs.
         """
         if seed is None:
-            seed = np.random.randint(
-                1000
-            )  # just pick a random seed if none is given
+            seed = np.random.randint(1000)  # just pick a random seed if none is given
         DataLoader.__init__(self, dataset, **kwargs)
         Seedable.__init__(self, seed=seed)
         if self.worker_init_fn:
-            raise ValueError(
-                "No worker_init_fn should be given to WorkerSeedingDataLoader; "
-                "it will set its own worker_init_fn."
-            )
+            raise ValueError("No worker_init_fn should be given to WorkerSeedingDataLoader; it will set its own worker_init_fn.")
 
         self.worker_init_fn = self.init_worker_seed
 

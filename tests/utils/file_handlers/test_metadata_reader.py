@@ -24,6 +24,7 @@ malformed_cases = [
     (["BPSK", None, "Noise"], "contains None"),
 ]
 
+
 # ----------------------------------------------------------------------
 # Helper: write a tiny ``metadata.csv`` (no header -- the reader supplies its own).
 # ----------------------------------------------------------------------
@@ -40,12 +41,14 @@ def write_csv(root: Path, rows: list[tuple[int, str, int, float]]) -> None:
         for row in rows:
             writer.writerow(row)
 
+
 # ----------------------------------------------------------------------
 # Helper to build a well-formed reference row.
 # ----------------------------------------------------------------------
 def good_row():
     """Return a correctly-shaped tuple that follows the CSV schema."""
-    return (0, "BPSK", 0, 192_000.0)   # index, label, modcod, sample_rate
+    return (0, "BPSK", 0, 192_000.0)  # index, label, modcod, sample_rate
+
 
 def write_info_json(root: Path, payload: dict) -> None:
     """Write an ``info.json`` file under *root*.
@@ -53,6 +56,7 @@ def write_info_json(root: Path, payload: dict) -> None:
     ``payload`` is serialised with :func:`json.dump` using UTF-8 encoding.
     """
     (root / "info.json").write_text(json.dumps(payload), encoding="utf-8")
+
 
 # ----------------------------------------------------------------------
 # Fixture: a minimal dataset directory with three rows and an optional JSON.
@@ -68,12 +72,13 @@ def dataset_dir(tmp_path: Path) -> Path:
     No ``info.json`` is written - individual tests decide whether they need it.
     """
     rows = [
-        (0, "BPSK",   0, 192_000.0),   # known label, index 0
-        (1, "QPSK",   1, 192_000.0),   # known label, index 1
-        (2, "UNKNOWN",2, 250_000.0),   # unknown label, index 2
+        (0, "BPSK", 0, 192_000.0),  # known label, index 0
+        (1, "QPSK", 1, 192_000.0),  # known label, index 1
+        (2, "UNKNOWN", 2, 250_000.0),  # unknown label, index 2
     ]
     write_csv(tmp_path, rows)
     return tmp_path
+
 
 def test_load_row_basic(dataset_dir: Path):
     """Three well-formed rows must be parsed into the expected dictionary."""
@@ -87,14 +92,14 @@ def test_load_row_basic(dataset_dir: Path):
     assert meta0["modcod"] == 0
     assert pytest.approx(meta0["sample_rate"], rel=1e-9) == 192_000.0
     assert meta0["class_name"] == "bpsk"
-    assert meta0["class_index"] == 0          # BPSK is first in the list
+    assert meta0["class_index"] == 0  # BPSK is first in the list
     assert meta0["num_signals_max"] == 1
 
     # ---- row 1 ----------------------------------------------------
     meta1 = reader.load_row(1, class_list)
     assert meta1["label"] == "QPSK"
     assert meta1["class_name"] == "qpsk"
-    assert meta1["class_index"] == 1          # QPSK is second in the list
+    assert meta1["class_index"] == 1  # QPSK is second in the list
 
     # ---- row 2 (unknown label) ---------------------------------
     meta2 = reader.load_row(2, class_list)
@@ -103,6 +108,7 @@ def test_load_row_basic(dataset_dir: Path):
     # Unknown label → class_index = -1
     assert meta2["class_index"] == -1
 
+
 def test_load_row_uses_instance_class_list(dataset_dir: Path):
     """``MetadataReader`` reads the default class list from ``info.json`` (or the
     hard-coded fallback).  When the caller does **not** provide ``class_list``,
@@ -110,8 +116,9 @@ def test_load_row_uses_instance_class_list(dataset_dir: Path):
     """
     reader = MetadataReader(dataset_dir)
     # The internal fallback is ["BPSK", "QPSK", "Noise"].
-    meta = reader.load_row(0)          # no explicit class_list argument
-    assert meta["class_index"] == 0    # BPSK → index 0 in the fallback list
+    meta = reader.load_row(0)  # no explicit class_list argument
+    assert meta["class_index"] == 0  # BPSK → index 0 in the fallback list
+
 
 def test_root_accepts_str_and_path(dataset_dir: Path):
     class_list = ["BPSK", "QPSK", "Noise"]
@@ -123,6 +130,7 @@ def test_root_accepts_str_and_path(dataset_dir: Path):
     meta_str = reader_str.load_row(0, class_list)
     assert meta_path == meta_str
 
+
 def test_load_row_out_of_range(dataset_dir: Path):
     reader = MetadataReader(dataset_dir)
     with pytest.raises(
@@ -131,18 +139,16 @@ def test_load_row_out_of_range(dataset_dir: Path):
     ):
         reader.load_row(10, ["BPSK", "QPSK", "Noise"])
 
+
 @pytest.mark.parametrize(
     ("bad_row", "expected_msg"),
     [
         # non-numeric index
-        (["not-an-int", "BPSK", 0, 192_000.0],
-         "Cannot convert 'index'='not-an-int' to int"),
+        (["not-an-int", "BPSK", 0, 192_000.0], "Cannot convert 'index'='not-an-int' to int"),
         # non-numeric modcod
-        ([0, "BPSK", "bad-modcod", 192_000.0],
-         "Cannot convert 'modcod'='bad-modcod' to int"),
+        ([0, "BPSK", "bad-modcod", 192_000.0], "Cannot convert 'modcod'='bad-modcod' to int"),
         # non-numeric sample_rate
-        ([0, "BPSK", 0, "bad-rate"],
-         "Cannot convert 'sample_rate'='bad-rate' to float"),
+        ([0, "BPSK", 0, "bad-rate"], "Cannot convert 'sample_rate'='bad-rate' to float"),
     ],
 )
 def test_load_row_type_conversion_errors(tmp_path: Path, bad_row, expected_msg):
@@ -154,10 +160,7 @@ def test_load_row_type_conversion_errors(tmp_path: Path, bad_row, expected_msg):
         writer.writerow(bad_row)
 
     reader = MetadataReader(tmp_path)
-    with pytest.raises(
-        ValueError,
-        match=expected_msg
-    ):
+    with pytest.raises(ValueError, match=expected_msg):
         reader.load_row(0)
 
 
@@ -169,10 +172,11 @@ def test_load_json_success(tmp_path: Path):
     }
     (tmp_path / "info.json").write_text(json.dumps(payload), encoding="utf-8")
     # ``load_json`` is a pure helper. It should simply return the dict.
-    reader = MetadataReader(tmp_path)          # constructor also calls it
+    reader = MetadataReader(tmp_path)  # constructor also calls it
     assert reader.dataset_metadata == payload
     assert reader.dataset_size == 123
     assert reader.class_list == payload["class_list"]
+
 
 def test_load_json_missing_is_swallowed(tmp_path: Path):
     """If ``info.json`` does not exist, the constructor must not raise.
@@ -186,13 +190,15 @@ def test_load_json_missing_is_swallowed(tmp_path: Path):
     assert reader.dataset_size == 0
     assert reader.class_list == ["BPSK", "QPSK", "Noise"]
 
+
 def test_load_json_malformed_is_swallowed(tmp_path: Path):
     """A corrupted JSON file should not crash the constructor; defaults are used."""
     (tmp_path / "info.json").write_text("{ not valid JSON !!!", encoding="utf-8")
     reader = MetadataReader(tmp_path)
-    assert reader.dataset_metadata == {}                 # JSON parsing failed
+    assert reader.dataset_metadata == {}  # JSON parsing failed
     assert reader.dataset_size == 0
     assert reader.class_list == ["BPSK", "QPSK", "Noise"]
+
 
 def test_repr_contains_root_and_size(dataset_dir: Path):
     """The representation should mention the class name, root path and advertised size."""
@@ -203,15 +209,16 @@ def test_repr_contains_root_and_size(dataset_dir: Path):
     # Size comes from the (optional) JSON; default value is 0.
     assert "size=0" in rep
 
+
 @pytest.mark.parametrize(
     ("size_value", "expected"),
     [
-        (123, 123),               # already an int → stays the same
-        ("456", 456),             # numeric string → converted to int
-        (78.9, 78),               # float → int() truncates toward zero
-        (None, 0),                # None → TypeError → fallback 0
-        ("not-a-number", 0),      # non-numeric string → ValueError → fallback 0
-        ([], 0),                  # list → TypeError → fallback 0
+        (123, 123),  # already an int → stays the same
+        ("456", 456),  # numeric string → converted to int
+        (78.9, 78),  # float → int() truncates toward zero
+        (None, 0),  # None → TypeError → fallback 0
+        ("not-a-number", 0),  # non-numeric string → ValueError → fallback 0
+        ([], 0),  # list → TypeError → fallback 0
     ],
     ids=[
         "int",
@@ -232,15 +239,17 @@ def test_dataset_size_parsing(tmp_path: Path, size_value, expected):
 
     assert reader.dataset_size == expected
 
+
 # ----------------------------------------------------------------------
 # Build a list of IDs from the description strings for the malformed class_list tests.
 # ----------------------------------------------------------------------
 case_ids = [desc for _, desc in malformed_cases]
 
+
 @pytest.mark.parametrize(
     ("bad_class_list", "description"),
     malformed_cases,
-    ids=case_ids,               # <-- explicit list of IDs (not a callable)
+    ids=case_ids,  # <-- explicit list of IDs (not a callable)
 )
 def test_class_list_fallback(tmp_path: Path, bad_class_list, description):
     """When ``info.json`` contains a ``class_list`` value that is *not* a list of
@@ -251,10 +260,8 @@ def test_class_list_fallback(tmp_path: Path, bad_class_list, description):
 
     reader = MetadataReader(tmp_path)
 
-    assert reader.class_list == ["BPSK", "QPSK", "Noise"], (
-        f"Failed for case: {description}. "
-        f"Expected fallback default, got {reader.class_list!r}"
-    )
+    assert reader.class_list == ["BPSK", "QPSK", "Noise"], f"Failed for case: {description}. Expected fallback default, got {reader.class_list!r}"
+
 
 # ----------------------------------------------------------------------
 # Test scenarios for missing required columns.
@@ -264,7 +271,7 @@ def test_class_list_fallback(tmp_path: Path, bad_class_list, description):
 missing_cases = [
     (
         "missing sample_rate column",
-        [(0, "BPSK", 0)],          # index, label, modcod
+        [(0, "BPSK", 0)],  # index, label, modcod
         {"sample_rate"},
     ),
     (
@@ -274,15 +281,16 @@ missing_cases = [
     ),
     (
         "empty row",
-        [()],                      # zero-length tuple
+        [()],  # zero-length tuple
         {"index", "label", "modcod", "sample_rate"},
     ),
     (
         "empty label value (handled later)",
-        [(0, "", 0, 192_000.0)],   # label is an empty string
-        set(),                     # no actual missing keys
+        [(0, "", 0, 192_000.0)],  # label is an empty string
+        set(),  # no actual missing keys
     ),
 ]
+
 
 @pytest.mark.parametrize(
     ("description", "rows", "expected_missing"),
@@ -291,7 +299,7 @@ missing_cases = [
         ("missing sample_rate column (different order)", [(0, "BPSK", 192_000.0)], {"sample_rate"}),
         ("empty values but all keys present", [("", "", "", "")], set()),
     ],
-    ids=lambda d: d,   # use the description string as the pytest ID
+    ids=lambda d: d,  # use the description string as the pytest ID
 )
 def test_load_row_missing_columns(tmp_path: Path, description, rows, expected_missing):
     """Verify that the “missing-column” guard raises a ``ValueError`` when a row
@@ -303,10 +311,7 @@ def test_load_row_missing_columns(tmp_path: Path, description, rows, expected_mi
 
     if expected_missing:
         # Expect a missing-column error.
-        with pytest.raises(
-            ValueError,
-            match=r"is missing required columns"
-        ) as excinfo:
+        with pytest.raises(ValueError, match=r"is missing required columns") as excinfo:
             reader.load_row(0)
         msg = str(excinfo.value)
         for col in expected_missing:
@@ -314,25 +319,21 @@ def test_load_row_missing_columns(tmp_path: Path, description, rows, expected_mi
         assert "Row 0 of" in msg
         assert str(tmp_path / "metadata.csv") in msg
     else:
-        with pytest.raises(
-            ValueError,
-            match=r"is missing required columns"
-        ):
+        with pytest.raises(ValueError, match=r"is missing required columns"):
             reader.load_row(0)
+
 
 def test_load_row_empty_value_raises_value_error(tmp_path: Path):
     """When a required column is present but its content is empty (e.g. an empty
     label string), ``load_row`` should eventually raise a ``ValueError`` during
     the conversion / class-index step.
     """
-    write_csv(tmp_path, [(0, "", 0, 192_000.0)])   # empty label
+    write_csv(tmp_path, [(0, "", 0, 192_000.0)])  # empty label
     reader = MetadataReader(tmp_path)
 
-    with pytest.raises(
-        ValueError,
-        match=r"is missing required columns"
-    ):
+    with pytest.raises(ValueError, match=r"is missing required columns"):
         reader.load_row(0)
+
 
 def test_load_row_no_rows(tmp_path: Path):
     """An empty ``metadata.csv`` (zero lines) must cause ``load_row`` to raise

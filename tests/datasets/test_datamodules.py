@@ -1,23 +1,21 @@
 """Unit Tests for datamodules"""
+
 import os
-import random
 import signal
 import subprocess
 import sys
 import textwrap
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, call, patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
 import torch
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader
 
 from torchsig.datasets.datamodules import (
     SplitTorchSigDataModule,
     TorchSigDataModule,
-    _seed_worker,
-    set_global_seed,
 )
 from torchsig.datasets.datasets import TorchSigDatasetConfig
 from torchsig.utils.defaults import TorchSigDefaults
@@ -67,6 +65,7 @@ def split_configs():
         ),
     )
 
+
 def _mock_config(
     *,
     dataset_id: str = "test_dataset",
@@ -89,7 +88,6 @@ def test_datamodule_prepare_data_creates_dataset(
     overwrite: bool,
 ) -> None:
     """Verify prepare_data creates artifacts and respects overwrite."""
-
     fft_size = 16
     metadata = TorchSigDefaults().default_dataset_metadata.copy()
     metadata.update(
@@ -143,7 +141,6 @@ def test_datamodule_dataloaders_return_batches(
     tmp_path: Path,
 ) -> None:
     """Verify train, validation, and test dataloaders return batches."""
-
     fft_size = 16
     metadata = TorchSigDefaults().default_dataset_metadata.copy()
     metadata.update(
@@ -190,7 +187,6 @@ def test_datamodule_dataloaders_with_workers_return_batches(
     tmp_path: Path,
 ) -> None:
     """Verify multiprocess loaders in an isolated, bounded process."""
-
     fft_size = 16
     metadata = TorchSigDefaults().default_dataset_metadata.copy()
     metadata.update(
@@ -259,11 +255,7 @@ def test_datamodule_dataloaders_with_workers_return_batches(
     except subprocess.TimeoutExpired:
         os.killpg(process.pid, signal.SIGKILL)
         stdout, stderr = process.communicate()
-        pytest.fail(
-            "multiprocess DataLoaders did not finish within 30 seconds\n"
-            + stdout
-            + stderr
-        )
+        pytest.fail("multiprocess DataLoaders did not finish within 30 seconds\n" + stdout + stderr)
 
     assert process.returncode == 0, stdout + stderr
 
@@ -281,6 +273,7 @@ def _first_n_batches(loader, n: int):
         except StopIteration:
             break
     return batches
+
 
 def _tensors_identical(a: torch.Tensor, b: torch.Tensor) -> bool:
     """Return ``True`` iff *both* tensors contain exactly the same samples,
@@ -307,7 +300,6 @@ def reproducibility_dataset(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> tuple[Path, dict]:
     """Create one small static dataset for reproducibility tests."""
-
     root = tmp_path_factory.mktemp("dataloader_reproducibility")
     metadata = TorchSigDefaults().default_dataset_metadata.copy()
     metadata.update(
@@ -340,12 +332,7 @@ def reproducibility_dataset(
 
 def _loader_data(loader: DataLoader) -> list[np.ndarray]:
     """Return copied sample arrays from a complete dataloader iteration."""
-
-    return [
-        signal.data.copy()
-        for batch in loader
-        for signal in batch
-    ]
+    return [signal.data.copy() for batch in loader for signal in batch]
 
 
 def _assert_same_samples(
@@ -353,7 +340,6 @@ def _assert_same_samples(
     expected: list[np.ndarray],
 ) -> None:
     """Assert that two loaders returned identical samples in identical order."""
-
     assert len(actual) == len(expected)
 
     for actual_sample, expected_sample in zip(actual, expected, strict=True):
@@ -366,7 +352,6 @@ def test_dataloader_reproducibility(
     num_workers: int,
 ) -> None:
     """Verify seeded data modules produce identical splits and loader order."""
-
     root, metadata = reproducibility_dataset
 
     shared_kwargs = {
@@ -431,6 +416,7 @@ def test_split_datamodule_initializes_from_three_configs(tmp_path):
     assert dm.val is None
     assert dm.test is None
 
+
 def test_split_datamodule_rejects_mismatched_output_representations(tmp_path):
     train_cfg = _mock_config(
         dataset_length=12,
@@ -458,6 +444,7 @@ def test_split_datamodule_rejects_mismatched_output_representations(tmp_path):
             test_cfg=test_cfg,
             root=tmp_path,
         )
+
 
 @patch("torchsig.datasets.datamodules.DatasetCreator")
 @patch("torchsig.datasets.datamodules.WorkerSeedingDataLoader")
@@ -498,28 +485,17 @@ def test_split_datamodule_prepare_data_creates_all_splits(
     assert dataloader_cls.call_count == 3
     assert dataset_creator_cls.call_count == 3
 
-    assert dataset_creator_cls.call_args_list[0].kwargs[
-        "dataset_length"
-    ] == 12
-    assert dataset_creator_cls.call_args_list[1].kwargs[
-        "dataset_length"
-    ] == 6
-    assert dataset_creator_cls.call_args_list[2].kwargs[
-        "dataset_length"
-    ] == 4
+    assert dataset_creator_cls.call_args_list[0].kwargs["dataset_length"] == 12
+    assert dataset_creator_cls.call_args_list[1].kwargs["dataset_length"] == 6
+    assert dataset_creator_cls.call_args_list[2].kwargs["dataset_length"] == 4
 
-    assert Path(dataset_creator_cls.call_args_list[0].kwargs["root"]) == (
-        tmp_path / "test_dataset" / "train"
-    )
-    assert Path(dataset_creator_cls.call_args_list[1].kwargs["root"]) == (
-        tmp_path / "test_dataset" / "val"
-    )
-    assert Path(dataset_creator_cls.call_args_list[2].kwargs["root"]) == (
-        tmp_path / "test_dataset" / "test"
-    )
+    assert Path(dataset_creator_cls.call_args_list[0].kwargs["root"]) == (tmp_path / "test_dataset" / "train")
+    assert Path(dataset_creator_cls.call_args_list[1].kwargs["root"]) == (tmp_path / "test_dataset" / "val")
+    assert Path(dataset_creator_cls.call_args_list[2].kwargs["root"]) == (tmp_path / "test_dataset" / "test")
 
     for creator in creators:
         creator.create.assert_called_once_with()
+
 
 @patch("torchsig.datasets.datamodules.DatasetCreator")
 @patch("torchsig.datasets.datamodules.WorkerSeedingDataLoader")
@@ -543,14 +519,8 @@ def test_split_datamodule_uses_split_specific_seeds(
 
     dm.prepare_data()
 
-    dataset_seeds = [
-        call_args.kwargs["seed"]
-        for call_args in iterable_dataset_cls.call_args_list
-    ]
-    loader_seeds = [
-        call_args.kwargs["seed"]
-        for call_args in dataloader_cls.call_args_list
-    ]
+    dataset_seeds = [call_args.kwargs["seed"] for call_args in iterable_dataset_cls.call_args_list]
+    loader_seeds = [call_args.kwargs["seed"] for call_args in dataloader_cls.call_args_list]
 
     assert dataset_seeds == [11, 22, 33]
     assert loader_seeds == [11, 22, 33]
@@ -584,12 +554,8 @@ def test_split_datamodule_setup_fit_loads_train_and_val_only(
 
     assert static_dataset_cls.call_count == 2
 
-    assert Path(static_dataset_cls.call_args_list[0].kwargs["root"]) == (
-        tmp_path / "test_dataset" / "train"
-    )
-    assert Path(static_dataset_cls.call_args_list[1].kwargs["root"]) == (
-        tmp_path / "test_dataset" / "val"
-    )
+    assert Path(static_dataset_cls.call_args_list[0].kwargs["root"]) == (tmp_path / "test_dataset" / "train")
+    assert Path(static_dataset_cls.call_args_list[1].kwargs["root"]) == (tmp_path / "test_dataset" / "val")
 
 
 @patch("torchsig.datasets.datamodules.StaticTorchSigDataset")
@@ -619,9 +585,7 @@ def test_split_datamodule_setup_test_loads_test_only(
 
     static_dataset_cls.assert_called_once()
 
-    assert Path(static_dataset_cls.call_args.kwargs["root"]) == (
-        tmp_path / "test_dataset" / "test"
-    )
+    assert Path(static_dataset_cls.call_args.kwargs["root"]) == (tmp_path / "test_dataset" / "test")
 
 
 @patch("torchsig.datasets.datamodules.StaticTorchSigDataset")
@@ -740,7 +704,7 @@ def test_split_datamodule_dataloader_requires_setup(
     with pytest.raises(RuntimeError, match="setup"):
         getattr(dm, method_name)()
 
-    
+
 @pytest.mark.slow_no_gpu
 def test_split_datamodule_smoke(tmp_path, split_configs):
     train_cfg, val_cfg, test_cfg = split_configs

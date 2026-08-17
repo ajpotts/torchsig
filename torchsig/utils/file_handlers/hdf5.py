@@ -14,13 +14,29 @@ import h5py
 # Third Party
 import numpy as np
 
-# TorchSig
-from torchsig.utils.dsp import torchsig_cache_version
 from torchsig.signals.signal_types import Signal
 from torchsig.utils.abstractions import HierarchicalMetadataObject
+
+# TorchSig
+from torchsig.utils.dsp import torchsig_cache_version
 from torchsig.utils.file_handlers.base_handler import BaseFileHandler, FileReader, FileWriter
 
-__all__ = ["populate_hdf5_group_with_metadata", "populate_hdf5_group_with_signal_data", "populate_hdf5_group_with_component_signals", "populate_hdf5_group_with_signal", "populate_hdf5_group_with_signals", "HDF5Writer", "handle_bytes_as_string", "load_value_from_group", "fill_object_metadata_from_group_and_id", "load_signal_from_group_by_id", "load_signal_from_group_by_index", "HDF5Reader", "HDF5FileHandler"]
+__all__ = [
+    "HDF5FileHandler",
+    "HDF5Reader",
+    "HDF5Writer",
+    "fill_object_metadata_from_group_and_id",
+    "handle_bytes_as_string",
+    "load_signal_from_group_by_id",
+    "load_signal_from_group_by_index",
+    "load_value_from_group",
+    "populate_hdf5_group_with_component_signals",
+    "populate_hdf5_group_with_metadata",
+    "populate_hdf5_group_with_signal",
+    "populate_hdf5_group_with_signal_data",
+    "populate_hdf5_group_with_signals",
+]
+
 
 def _hdf5_key(obj) -> str:
     """Return the HDF5 group key to use for *obj*.
@@ -59,13 +75,12 @@ def populate_hdf5_group_with_metadata(group, metadata_obj) -> bool:
             metadata_group.create_dataset(k, data=metadata_obj[k])
     if not metadata_obj.parent == None:
         try:
-            metadata_group.create_dataset(
-                "parent_metadata_id", data=_hdf5_key(metadata_obj.parent)
-            )
+            metadata_group.create_dataset("parent_metadata_id", data=_hdf5_key(metadata_obj.parent))
             populate_hdf5_group_with_metadata(group, metadata_obj.parent)
         except ValueError:
             print("hdf5: metadata_group create dataset ValueError")
     return True
+
 
 def populate_hdf5_group_with_signal_data(group, signal, dataset_kwargs=None):
     """Makes sure this and all parent metadata objects are represented in the hdf5 group
@@ -81,6 +96,7 @@ def populate_hdf5_group_with_signal_data(group, signal, dataset_kwargs=None):
     except ValueError:
         print("hdf5: signal data create dataset ValueError")
     return True
+
 
 def populate_hdf5_group_with_component_signals(group, signal):
     """Populates the HDF5 group with component signals.
@@ -113,14 +129,10 @@ def _populate_hdf5_group_with_signal(group, signal, data_dataset_kwargs=None):
         data_dataset_kwargs: Optional keyword arguments for dataset creation.
     """
     populate_hdf5_group_with_metadata(group["metadata"], signal)
-    populate_hdf5_group_with_signal_data(
-        group["data"], signal, dataset_kwargs=data_dataset_kwargs
-    )
+    populate_hdf5_group_with_signal_data(group["data"], signal, dataset_kwargs=data_dataset_kwargs)
     populate_hdf5_group_with_component_signals(group["component_signals"], signal)
     for component_signal in signal.component_signals:
-        _populate_hdf5_group_with_signal(
-            group, component_signal, data_dataset_kwargs=data_dataset_kwargs
-        )
+        _populate_hdf5_group_with_signal(group, component_signal, data_dataset_kwargs=data_dataset_kwargs)
 
 
 def populate_hdf5_group_with_signal(group, signal, index=True, data_dataset_kwargs=None):
@@ -132,13 +144,9 @@ def populate_hdf5_group_with_signal(group, signal, index=True, data_dataset_kwar
         index: Whether to index the signal.
         data_dataset_kwargs: Optional keyword arguments for dataset creation.
     """
-    _populate_hdf5_group_with_signal(
-        group, signal, data_dataset_kwargs=data_dataset_kwargs
-    )
+    _populate_hdf5_group_with_signal(group, signal, data_dataset_kwargs=data_dataset_kwargs)
     if index:
-        group["index"].create_dataset(
-            str(len(group["index"])), data=_hdf5_key(signal)
-        )  # keep track of this index in a dataset
+        group["index"].create_dataset(str(len(group["index"])), data=_hdf5_key(signal))  # keep track of this index in a dataset
 
 
 def populate_hdf5_group_with_signals(group, signals, index=True, data_dataset_kwargs=None):
@@ -151,9 +159,7 @@ def populate_hdf5_group_with_signals(group, signals, index=True, data_dataset_kw
         data_dataset_kwargs: Optional keyword arguments for dataset creation.
     """
     for signal in signals:
-        populate_hdf5_group_with_signal(
-            group, signal, index=index, data_dataset_kwargs=data_dataset_kwargs
-        )
+        populate_hdf5_group_with_signal(group, signal, index=index, data_dataset_kwargs=data_dataset_kwargs)
 
 
 class HDF5Writer(FileWriter):
@@ -198,7 +204,7 @@ class HDF5Writer(FileWriter):
 
         self._current_sample_index = 0
         super().__init__(root=root)
-        self.datapath = self.root.joinpath("data.h5") # fixed data file name
+        self.datapath = self.root.joinpath("data.h5")  # fixed data file name
         # Thread safety
         self._lock = threading.Lock()
 
@@ -282,7 +288,9 @@ class HDF5Writer(FileWriter):
             self._assign_hdf5_keys(signal)
 
         populate_hdf5_group_with_signals(
-            self._file, data, data_dataset_kwargs=self._data_dataset_kwargs(),
+            self._file,
+            data,
+            data_dataset_kwargs=self._data_dataset_kwargs(),
         )
 
     def _flush_buffer(self) -> None:
@@ -377,12 +385,8 @@ def fill_object_metadata_from_group_and_id(obj, group, id_str):
         if not key == "parent_metadata_id":
             obj[key] = load_value_from_group(group["metadata"][id_str], key)
     try:
-        parent_id = load_value_from_group(
-            group["metadata"][id_str], "parent_metadata_id"
-        )
-        metadata_obj = fill_object_metadata_from_group_and_id(
-            HierarchicalMetadataObject(), group, parent_id
-        )
+        parent_id = load_value_from_group(group["metadata"][id_str], "parent_metadata_id")
+        metadata_obj = fill_object_metadata_from_group_and_id(HierarchicalMetadataObject(), group, parent_id)
         obj.add_parent(metadata_obj)
     except:
         pass  # we have no parent set; do nothing
@@ -401,10 +405,7 @@ def load_signal_from_group_by_id(group, id_str):
     """
     component_signals = []
     try:
-        component_signals = [
-            load_signal_from_group_by_id(group, temp_id)
-            for temp_id in load_value_from_group(group["component_signals"], id_str)
-        ]
+        component_signals = [load_signal_from_group_by_id(group, temp_id) for temp_id in load_value_from_group(group["component_signals"], id_str)]
     except:
         pass
     signal = Signal(
@@ -442,7 +443,7 @@ class HDF5Reader(FileReader):
         self.datapath = self.root.joinpath("data.h5")
         self._file = None
         self._len_cache = None
-        self._locking = False # do not lock data file
+        self._locking = False  # do not lock data file
 
     def __len__(self) -> int:
         """Returns the total number of samples in the dataset.

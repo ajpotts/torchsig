@@ -106,9 +106,7 @@ def sampling_clock_impairments_numba(
     return np.zeros(0, dtype=np.complex64)
 
 
-def sampling_clock_impairments_numba_wrapper(
-    h, x, uprate, drate, jitter_ppm, drift_ppm, rng
-):
+def sampling_clock_impairments_numba_wrapper(h, x, uprate, drate, jitter_ppm, drift_ppm, rng):
     """Wrapper for the numba-optimized sampling clock impairments function.
 
     Matches the signature of the original function and aims for bit-identical results.
@@ -158,8 +156,8 @@ def sampling_clock_impairments_numba_wrapper(
 
 @jit(nopython=True, cache=True)
 def digital_agc_numba(
-    data: complex64[:],          # 1D complex64 array (Numba type)
-    initial_gain_db: float32,    # All scalars must be Numba types
+    data: complex64[:],  # 1D complex64 array (Numba type)
+    initial_gain_db: float32,  # All scalars must be Numba types
     alpha_smooth: float32,
     alpha_track: float32,
     alpha_overflow: float32,

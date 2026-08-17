@@ -3,8 +3,8 @@
 from unittest.mock import MagicMock, call, patch
 
 import numpy as np
-import scipy.signal as sp
 import pytest
+import scipy.signal as sp
 
 from torchsig.signals.builders.fsk import (
     MIN_SAMPLES_PER_SYMBOL,
@@ -19,7 +19,6 @@ from torchsig.signals.builders.fsk import (
     get_fsk_mod_index,
 )
 from torchsig.utils.dsp import TorchSigComplexDataType
-
 
 MODULE_PATH = "torchsig.signals.builders.fsk"
 
@@ -336,10 +335,7 @@ def test_bandwidth_symbol_product_orthogonal_fsk_is_near_constellation_size(
 @pytest.mark.parametrize("constellation_size", [2, 4, 8, 16])
 def test_bandwidth_symbol_product_increases_with_mod_index(constellation_size):
     """Wider tone spacing must widen the occupied bandwidth."""
-    values = [
-        fsk_bandwidth_symbol_product(constellation_size, mod_idx=h)
-        for h in (0.1, 0.3, 0.5, 0.7, 1.0)
-    ]
+    values = [fsk_bandwidth_symbol_product(constellation_size, mod_idx=h) for h in (0.1, 0.3, 0.5, 0.7, 1.0)]
 
     assert np.all(np.diff(values) > 0)
 
@@ -385,18 +381,14 @@ def test_bandwidth_symbol_product_span_floor_inactive_for_large_bt():
 @pytest.mark.parametrize("gaussian_span", [None, 0])
 def test_bandwidth_symbol_product_tolerates_missing_span(gaussian_span):
     """A missing or zero span must not divide by zero."""
-    gamma = fsk_bandwidth_symbol_product(
-        4, 0.3, bt=0.2, gaussian_span=gaussian_span
-    )
+    gamma = fsk_bandwidth_symbol_product(4, 0.3, bt=0.2, gaussian_span=gaussian_span)
 
     assert np.isfinite(gamma)
     assert gamma > 0
 
 
 @pytest.mark.parametrize(("fsk_type", "constellation_size"), ALL_CLASSES)
-def test_bandwidth_symbol_product_is_positive_over_drawn_parameters(
-    fsk_type, constellation_size
-):
+def test_bandwidth_symbol_product_is_positive_over_drawn_parameters(fsk_type, constellation_size):
     """Gamma must stay positive and finite across the sampled parameter space."""
     rng = np.random.default_rng(0)
     for _ in range(50):
@@ -427,9 +419,7 @@ def test_fsk_random_params_creates_default_rng():
 @pytest.mark.parametrize("fsk_type", ["fsk", "msk"])
 def test_fsk_random_params_rectangular_types_have_no_pulse_parameters(fsk_type):
     """Only the Gaussian variants should carry bt and span."""
-    mod_idx, bt, gaussian_span = fsk_random_params(
-        fsk_type, np.random.default_rng(42)
-    )
+    mod_idx, bt, gaussian_span = fsk_random_params(fsk_type, np.random.default_rng(42))
 
     assert bt is None
     assert gaussian_span is None
@@ -487,15 +477,13 @@ def test_fsk_random_params_is_reproducible(fsk_type):
 def test_fsk_symbol_timing_for_orthogonal_fsk(
     constellation_size,
 ):
-    """Orthogonal FSK should produce constellation_size * oversampling_rate_nominal 
+    """Orthogonal FSK should produce constellation_size * oversampling_rate_nominal
     samples per symbol expected.
     """
     oversampling_rate_nominal = 4
     expected_sps = constellation_size * oversampling_rate_nominal
 
-    _, samples_per_symbol = fsk_symbol_timing(
-        constellation_size, oversampling_rate_nominal, mod_idx=1.0
-    )
+    _, samples_per_symbol = fsk_symbol_timing(constellation_size, oversampling_rate_nominal, mod_idx=1.0)
 
     assert abs(samples_per_symbol - expected_sps) <= max(1, round(0.05 * expected_sps))
 
@@ -506,9 +494,7 @@ def test_fsk_symbol_timing_returns_gamma_from_the_bandwidth_model():
         f"{MODULE_PATH}.fsk_bandwidth_symbol_product",
         return_value=3.0,
     ) as product:
-        gamma, samples_per_symbol = fsk_symbol_timing(
-            4, 4, 0.4, bt=0.2, gaussian_span=3
-        )
+        gamma, samples_per_symbol = fsk_symbol_timing(4, 4, 0.4, bt=0.2, gaussian_span=3)
 
     product.assert_called_once_with(4, 0.4, 0.2, 3)
     assert gamma == 3.0
@@ -536,24 +522,18 @@ def test_fsk_symbol_timing_scales_with_nominal_oversampling(
         f"{MODULE_PATH}.fsk_bandwidth_symbol_product",
         return_value=5.0,
     ):
-        _, samples_per_symbol = fsk_symbol_timing(
-            4, oversampling_rate_nominal, 1.0
-        )
+        _, samples_per_symbol = fsk_symbol_timing(4, oversampling_rate_nominal, 1.0)
 
     assert samples_per_symbol == round(5.0 * oversampling_rate_nominal)
 
 
 @pytest.mark.parametrize(("fsk_type", "constellation_size"), ALL_CLASSES)
-def test_fsk_symbol_timing_keeps_baseband_inside_nyquist(
-    fsk_type, constellation_size
-):
-    """gamma / samples_per_symbol is the baseband occupancy; it must fit."""
+def test_fsk_symbol_timing_keeps_baseband_inside_nyquist(fsk_type, constellation_size):
+    """Gamma / samples_per_symbol is the baseband occupancy; it must fit."""
     rng = np.random.default_rng(3)
     for _ in range(50):
         params = fsk_random_params(fsk_type, rng)
-        gamma, samples_per_symbol = fsk_symbol_timing(
-            constellation_size, 4, *params
-        )
+        gamma, samples_per_symbol = fsk_symbol_timing(constellation_size, 4, *params)
         assert samples_per_symbol >= MIN_SAMPLES_PER_SYMBOL
         assert gamma / samples_per_symbol < 0.5
 
@@ -831,7 +811,6 @@ def test_fsk_modulator_baseband_gaussian_filter_branch(fsk_type):
 
 def test_fsk_modulator_baseband_scales_frequency_map_by_symbol_timing():
     """Symbols should be scaled by constellation_size / samples_per_symbol."""
-
     rng = MagicMock(spec=np.random.Generator)
     rng.integers.return_value = np.array([0, 3])
 
@@ -1153,7 +1132,6 @@ def test_fsk_modulator_creates_default_rng():
 
 def test_fsk_modulator_derives_resampling_rate_from_symbol_timing():
     """resample_rate_ideal should be oversampling_rate * gamma / sps."""
-
     rng = np.random.default_rng(42)
     resampled = np.ones(100, dtype=np.complex64)
 
@@ -1504,9 +1482,7 @@ def test_fsk_modulator_returns_exactly_num_samples(fsk_type, constellation_size)
 
 
 @pytest.mark.parametrize(("fsk_type", "constellation_size"), ALL_CLASSES)
-def test_fsk_modulator_record_contains_no_zero_padding(
-    fsk_type, constellation_size
-):
+def test_fsk_modulator_record_contains_no_zero_padding(fsk_type, constellation_size):
     """Rounding the symbol count up should remove the zero padded case.
 
     A padded record is shorter than the duration its label claims.
@@ -1524,9 +1500,7 @@ def test_fsk_modulator_record_contains_no_zero_padding(
 
 
 @pytest.mark.parametrize(("fsk_type", "constellation_size"), ALL_CLASSES)
-def test_fsk_modulator_occupied_bandwidth_matches_request(
-    fsk_type, constellation_size
-):
+def test_fsk_modulator_occupied_bandwidth_matches_request(fsk_type, constellation_size):
     """The realized bandwidth should match the requested bandwidth.
 
     This is the property the closed-form bandwidth model exists to provide: the
@@ -1548,15 +1522,11 @@ def test_fsk_modulator_occupied_bandwidth_matches_request(
 
         ratio = occupied_bandwidth(iq, sample_rate) / bandwidth
 
-        assert 0.75 < ratio < 1.30, (
-            f"{constellation_size}{fsk_type} seed {seed}: ratio {ratio:.3f}"
-        )
+        assert 0.75 < ratio < 1.30, f"{constellation_size}{fsk_type} seed {seed}: ratio {ratio:.3f}"
 
 
 @pytest.mark.parametrize(("fsk_type", "constellation_size"), ALL_CLASSES)
-def test_fsk_modulator_bandwidth_scales_with_the_request(
-    fsk_type, constellation_size
-):
+def test_fsk_modulator_bandwidth_scales_with_the_request(fsk_type, constellation_size):
     """Doubling the requested bandwidth should double the occupied bandwidth."""
     sample_rate = 10e6
     narrow = fsk_modulator(
@@ -1576,9 +1546,7 @@ def test_fsk_modulator_bandwidth_scales_with_the_request(
         rng=np.random.default_rng(5),
     )
 
-    measured = occupied_bandwidth(wide, sample_rate) / occupied_bandwidth(
-        narrow, sample_rate
-    )
+    measured = occupied_bandwidth(wide, sample_rate) / occupied_bandwidth(narrow, sample_rate)
 
     assert measured == pytest.approx(2.0, rel=0.15)
 
@@ -1615,7 +1583,7 @@ def test_fsk_modulator_output_is_finite(fsk_type, constellation_size):
     assert np.all(np.isfinite(result.view(np.float32)))
 
 
-#------------------------------------------------------------- generator
+# ------------------------------------------------------------- generator
 
 
 def test_fsk_signal_generator_initialization():
@@ -1755,9 +1723,6 @@ def test_fsk_signal_generator_generate_labels_the_requested_bandwidth():
     assert signal["center_freq"] == 0
     assert signal["data"].shape == (8_192,)
 
-    ratio = occupied_bandwidth(
-        signal["data"], metadata["sample_rate"]
-    ) / signal["bandwidth"]
+    ratio = occupied_bandwidth(signal["data"], metadata["sample_rate"]) / signal["bandwidth"]
 
     assert 0.75 < ratio < 1.30
-

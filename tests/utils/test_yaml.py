@@ -118,9 +118,7 @@ def test_load_config_from_yaml_defaults_dataset_id_to_file_stem(tmp_path, monkey
         ),
     ],
 )
-def test_load_config_from_yaml_rejects_invalid_config(
-    tmp_path, monkeypatch, mutation, expected_message
-):
+def test_load_config_from_yaml_rejects_invalid_config(tmp_path, monkeypatch, mutation, expected_message):
     install_fake_datasets_module(monkeypatch)
 
     cfg = make_valid_config_dict()

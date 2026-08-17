@@ -10,7 +10,7 @@ where the PLHEADER is a fixed 26-symbol SOF + 64-symbol PLSC, modulated with
 pi/2-BPSK -- the marker a DVB-S2 receiver locks onto. Data symbols use QPSK,
 8PSK, 16APSK, or 32APSK, root-raised-cosine pulse shaped.
 
-This is a limited model of the DVB-S2 standard as a signal builder: the 
+This is a limited model of the DVB-S2 standard as a signal builder: the
 PLHEADER modulation, frame layout, pilot-block insertion, RRC shaping, and
 constellations are faithful, but the FEC chain (BBheader, BCH/LDPC, scrambling)
 and the exact PLSC/MODCOD bit encoding are skipped -- payload symbols are random.
@@ -226,20 +226,14 @@ def dvbs2_modulator_baseband(
     # Root-raised-cosine pulse shape.
     attenuation_db = 120
     pulse_shape_filter_length = estimate_filter_length(alpha_rolloff, attenuation_db, 1)
-    pulse_shape_filter_span = int(
-        np.ceil((pulse_shape_filter_length - 1) / (2 * samples_per_symbol))
-    )
+    pulse_shape_filter_span = int(np.ceil((pulse_shape_filter_length - 1) / (2 * samples_per_symbol)))
     pulse_shape = srrc_taps(samples_per_symbol, pulse_shape_filter_span, alpha_rolloff)
 
     # Number of symbols that fit within max_num_samples after pulse shaping.
     subtract_off_symbols = 2 * pulse_shape_filter_span
-    num_symbols = max(
-        1, int(np.floor(max_num_samples / samples_per_symbol)) - subtract_off_symbols
-    )
+    num_symbols = max(1, int(np.floor(max_num_samples / samples_per_symbol)) - subtract_off_symbols)
 
-    symbols = build_dvbs2_symbol_stream(
-        num_symbols, constellation_name, frame_type, pilots, rng
-    )
+    symbols = build_dvbs2_symbol_stream(num_symbols, constellation_name, frame_type, pilots, rng)
     modulated = sp.upfirdn(pulse_shape, symbols, up=samples_per_symbol, down=1)
 
     # Adjust signal length
@@ -297,9 +291,7 @@ def dvbs2_modulator(
     oversampling_rate = sample_rate / bandwidth
     oversampling_rate_baseband = 4
     resample_rate_ideal = oversampling_rate / oversampling_rate_baseband
-    num_samples_baseband = max(
-        oversampling_rate_baseband, int(np.floor(num_samples / resample_rate_ideal))
-    )
+    num_samples_baseband = max(oversampling_rate_baseband, int(np.floor(num_samples / resample_rate_ideal)))
 
     signal_baseband = dvbs2_modulator_baseband(
         constellation_name,
@@ -314,11 +306,7 @@ def dvbs2_modulator(
     signal_correct_bw = multistage_polyphase_resampler(signal_baseband, resample_rate_ideal)
 
     # Adjust signal length
-    signal_correct_bw = (
-        slice_head_tail_to_length(signal_correct_bw, num_samples)
-        if len(signal_correct_bw) > num_samples
-        else pad_head_tail_to_length(signal_correct_bw, num_samples)
-    )
+    signal_correct_bw = slice_head_tail_to_length(signal_correct_bw, num_samples) if len(signal_correct_bw) > num_samples else pad_head_tail_to_length(signal_correct_bw, num_samples)
 
     return signal_correct_bw.astype(TorchSigComplexDataType)
 
@@ -374,16 +362,12 @@ class DVBS2SignalGenerator(BaseSignalGenerator):
             low=self["signal_duration_in_samples_min"],
             high=self["signal_duration_in_samples_max"] + 1,
         )
-        bandwidth = self.random_generator.integers(
-            low=self["bandwidth_min"], high=self["bandwidth_max"] + 1
-        )
+        bandwidth = self.random_generator.integers(low=self["bandwidth_min"], high=self["bandwidth_max"] + 1)
 
         try:
             constellation_name = self["constellation_name"]
         except AttributeError:
-            constellation_name = DVBS2_CONSTELLATIONS[
-                self.random_generator.integers(0, len(DVBS2_CONSTELLATIONS))
-            ]
+            constellation_name = DVBS2_CONSTELLATIONS[self.random_generator.integers(0, len(DVBS2_CONSTELLATIONS))]
         try:
             frame_type = self["frame_type"]
         except AttributeError:
@@ -395,9 +379,7 @@ class DVBS2SignalGenerator(BaseSignalGenerator):
         try:
             alpha_rolloff = self["alpha_rolloff"]
         except AttributeError:
-            alpha_rolloff = DVBS2_ROLLOFFS[
-                self.random_generator.integers(0, len(DVBS2_ROLLOFFS))
-            ]
+            alpha_rolloff = DVBS2_ROLLOFFS[self.random_generator.integers(0, len(DVBS2_ROLLOFFS))]
 
         signal_data = dvbs2_modulator(
             constellation_name,

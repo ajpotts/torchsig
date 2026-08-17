@@ -14,6 +14,7 @@ from torchsig.utils.verify import (
     verify_transforms,
 )
 
+
 def test_verify_bounds_returns_value_when_in_range():
     assert verify_bounds(5, "x", low=0, high=10) == 5
 

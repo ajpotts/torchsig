@@ -36,6 +36,7 @@ class DummySignal(dict):
         self["data"] = data
         self.data = data  # convenience attribute
 
+
 # --------------------------------------------------------------------------
 #  Minimal TorchSigIterableDataset that uses the mix-in
 # --------------------------------------------------------------------------
@@ -74,6 +75,7 @@ class SafeTorchSigIterableDataset(PipelineFailOverEnabled, Iterator):
             fallback_raw_signal=self.base_signal,
         )
 
+
 # --------------------------------------------------------------------------
 #  Helper functions used in the tests
 # --------------------------------------------------------------------------
@@ -83,6 +85,7 @@ def dummy_apply_func(signal: DummySignal, target_labels=None):
     this function -- see the individual test functions below.
     """
     return signal.data
+
 
 # --------------------------------------------------------------------------
 #  Tests ---------------------------------------------------------------
@@ -101,9 +104,7 @@ def test_fallback_original(base_signal, caplog):
     def bad_apply(signal, target_labels=None):
         raise RuntimeError("transform error")
 
-    dataset = SafeTorchSigIterableDataset(
-        base_signal, apply_func=bad_apply, target_labels=[]
-    )
+    dataset = SafeTorchSigIterableDataset(base_signal, apply_func=bad_apply, target_labels=[])
     dataset.pipeline_fallback = "original"
 
     sample = next(dataset)
@@ -121,9 +122,7 @@ def test_fallback_zero(base_signal, caplog):
     def bad_apply(signal, target_labels=None):
         raise RuntimeError("transform error")
 
-    dataset = SafeTorchSigIterableDataset(
-        base_signal, apply_func=bad_apply, target_labels=[]
-    )
+    dataset = SafeTorchSigIterableDataset(base_signal, apply_func=bad_apply, target_labels=[])
     dataset.pipeline_fallback = "zero"
 
     sample = next(dataset)
@@ -146,9 +145,7 @@ def test_fallback_retry_successful(base_signal, caplog):
             raise RuntimeError(f"attempt {attempts['count']}")
         return signal.data * 10.0  # success path
 
-    dataset = SafeTorchSigIterableDataset(
-        base_signal, apply_func=flaky_apply, target_labels=[]
-    )
+    dataset = SafeTorchSigIterableDataset(base_signal, apply_func=flaky_apply, target_labels=[])
     dataset.pipeline_fallback = "retry"
     dataset.pipeline_max_retries = 3
 
@@ -167,12 +164,11 @@ def test_fallback_retry_exhausted(base_signal, caplog):
     to the configured fallback (here “original”).
     """
     caplog.set_level(logging.WARNING)
+
     def always_fail(signal, target_labels=None):
         raise RuntimeError("always bad")
 
-    dataset = SafeTorchSigIterableDataset(
-        base_signal, apply_func=always_fail, target_labels=[]
-    )
+    dataset = SafeTorchSigIterableDataset(base_signal, apply_func=always_fail, target_labels=[])
     dataset.pipeline_fallback = "retry"
     dataset.pipeline_max_retries = 2  # only two retries
 
@@ -185,20 +181,16 @@ def test_fallback_retry_exhausted(base_signal, caplog):
     fallback_warnings = [rec for rec in caplog.records if "fallback" in rec.message]
     print("fallback_warnings")
     print(fallback_warnings)
-    assert any(
-        "pipeline" in rec.message.lower() and "failed" in rec.message.lower()
-        for rec in fallback_warnings
-    )
+    assert any("pipeline" in rec.message.lower() and "failed" in rec.message.lower() for rec in fallback_warnings)
 
 
 def test_success_no_fallback_needed(base_signal):
     """When the transform succeeds the result is returned unchanged."""
+
     def good_apply(signal, target_labels=None):
         return signal.data * 3.0
 
-    dataset = SafeTorchSigIterableDataset(
-        base_signal, apply_func=good_apply, target_labels=[]
-    )
+    dataset = SafeTorchSigIterableDataset(base_signal, apply_func=good_apply, target_labels=[])
     dataset.pipeline_fallback = "original"  # any value is irrelevant here
 
     result = next(dataset)
@@ -207,15 +199,14 @@ def test_success_no_fallback_needed(base_signal):
 
 def test_target_labels_passthrough(base_signal):
     """The helper should pass through target labels when requested."""
+
     # Define a dummy transform that merely copies the data
     def copy_apply(signal, target_labels=None):
         # pretend we also add a metadata entry
         signal["new_meta"] = 42
         return signal.data
 
-    dataset = SafeTorchSigIterableDataset(
-        base_signal, apply_func=copy_apply, target_labels=["new_meta"]
-    )
+    dataset = SafeTorchSigIterableDataset(base_signal, apply_func=copy_apply, target_labels=["new_meta"])
 
     # monkeypatch the mixin's run method to use our dummy function that returns (data, label)
     def dummy_func(signal, target_labels):
@@ -229,6 +220,7 @@ def test_target_labels_passthrough(base_signal):
     assert np.allclose(data, base_signal.data)
     assert lbl == 42
 
+
 def test_run_with_fallback_reraises_when_no_fallback_signal(base_signal, caplog):
     """If a stage fails before a raw signal exists, the final exception is re-raised."""
     caplog.set_level(logging.WARNING)
@@ -236,9 +228,7 @@ def test_run_with_fallback_reraises_when_no_fallback_signal(base_signal, caplog)
     def generation_fails():
         raise RuntimeError("generation failed")
 
-    dataset = SafeTorchSigIterableDataset(
-        base_signal, apply_func=dummy_apply_func, target_labels=[]
-    )
+    dataset = SafeTorchSigIterableDataset(base_signal, apply_func=dummy_apply_func, target_labels=[])
     dataset.pipeline_fallback = "retry"
     dataset.pipeline_max_retries = 2
 
@@ -248,9 +238,6 @@ def test_run_with_fallback_reraises_when_no_fallback_signal(base_signal, caplog)
             fallback_raw_signal=None,
         )
 
-    retry_warnings = [
-        rec for rec in caplog.records
-        if "Pipeline retry" in rec.message and "generation failed" in rec.message
-    ]
+    retry_warnings = [rec for rec in caplog.records if "Pipeline retry" in rec.message and "generation failed" in rec.message]
     assert len(retry_warnings) == 2
     assert any("Retries exhausted" in rec.message for rec in caplog.records)

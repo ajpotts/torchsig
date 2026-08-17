@@ -6,7 +6,8 @@ from typing import Any
 
 from torchsig.utils.printing import generate_repr_str
 
-__all__ = ["reset_folder", "FileWriter", "FileReader", "BaseFileHandler"]
+__all__ = ["BaseFileHandler", "FileReader", "FileWriter", "reset_folder"]
+
 
 def reset_folder(path: str) -> None:
     """Resets a folder by deleting it if it exists and recreating it.
@@ -31,9 +32,7 @@ def reset_folder(path: str) -> None:
     # folder does not exists / is deleted
 
     # Recreate the folder
-    folder_path.mkdir(
-        parents=True, exist_ok=True
-    )  # 'parents=True' allows creation of intermediate dirs if needed
+    folder_path.mkdir(parents=True, exist_ok=True)  # 'parents=True' allows creation of intermediate dirs if needed
 
 
 class FileWriter:
@@ -42,6 +41,7 @@ class FileWriter:
     Attributes:
         root (pathlib.Path): Location on disk to write dataset.
     """
+
     def __init__(self, root: str, **kwargs):
         """Initializes the FileWriter.
 
@@ -116,6 +116,7 @@ class FileReader:
         root (pathlib.Path): Dataset location on disk.
         dataset_info_filepath (pathlib.Path): Path to dataset info file.
     """
+
     def __init__(self, root: str, **kwargs):
         """File reader base class
 

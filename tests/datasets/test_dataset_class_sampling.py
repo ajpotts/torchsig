@@ -48,13 +48,8 @@ def sample_generator_frequencies(
 ) -> dict[str, float]:
     """Draw many class selections and return empirical frequencies."""
     dataset.seed(2026)
-    counts = Counter(
-        dataset._random_signal_generator().class_name for _ in range(num_draws)
-    )
-    return {
-        class_name: counts[class_name] / num_draws
-        for class_name in dataset["class_names"]
-    }
+    counts = Counter(dataset._random_signal_generator().class_name for _ in range(num_draws))
+    return {class_name: counts[class_name] / num_draws for class_name in dataset["class_names"]}
 
 
 def test_default_add_signal_generator_probabilities_are_uniform():
@@ -96,9 +91,7 @@ def test_sampling_grouping_balances_groups_and_classes_within_groups():
         [1 / 6, 1 / 6, 1 / 6, 1 / 2],
     )
     empirical = sample_generator_frequencies(dataset, num_draws=4_000)
-    assert abs(
-        empirical["bpsk"] + empirical["qpsk"] + empirical["8psk"] - 0.5
-    ) < 0.04
+    assert abs(empirical["bpsk"] + empirical["qpsk"] + empirical["8psk"] - 0.5) < 0.04
     assert abs(empirical["2fsk"] - 0.5) < 0.04
 
 
@@ -304,9 +297,7 @@ def test_sampling_grouping_rejects_metadata_unavailable_before_generation():
 
 
 def test_sampling_grouping_rejects_dataset_without_generators():
-    grouping = GroupingLabel(
-        {"groups": [{"name": "all", "default": True}]}
-    )
+    grouping = GroupingLabel({"groups": [{"name": "all", "default": True}]})
 
     with pytest.raises(
         ValueError,
@@ -318,9 +309,7 @@ def test_sampling_grouping_rejects_dataset_without_generators():
 def test_sampling_grouping_rejects_unmatched_generator():
     dataset = make_dataset()
     dataset.add_signal_generator(DummySignalGenerator("tone"))
-    grouping = GroupingLabel(
-        {"groups": [{"name": "phase", "regex": "psk$"}]}
-    )
+    grouping = GroupingLabel({"groups": [{"name": "phase", "regex": "psk$"}]})
 
     with pytest.raises(
         ValueError,

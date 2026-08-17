@@ -1,7 +1,8 @@
 # tests/conftest.py
+from pathlib import Path
+
 import pytest
 import torch
-from pathlib import Path
 
 
 def pytest_addoption(parser):
@@ -31,18 +32,13 @@ def pytest_collection_modifyitems(session, config, items):
 
     if test_mode != "full":
         skip_slow = pytest.mark.skip(reason="skipped in fast test mode")
-        skip_slow_no_gpu = pytest.mark.skip(
-            reason="skipped in fast test mode because no GPU is available"
-        )
+        skip_slow_no_gpu = pytest.mark.skip(reason="skipped in fast test mode because no GPU is available")
 
         for item in items:
             if item.get_closest_marker("slow") is not None:
                 item.add_marker(skip_slow)
 
-            if (
-                item.get_closest_marker("slow_no_gpu") is not None
-                and not has_gpu
-            ):
+            if item.get_closest_marker("slow_no_gpu") is not None and not has_gpu:
                 item.add_marker(skip_slow_no_gpu)
 
     # Define the priority order for test files

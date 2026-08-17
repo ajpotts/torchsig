@@ -13,7 +13,6 @@ from torchsig.signals.builders.chirpss import (
 )
 from torchsig.utils.dsp import TorchSigComplexDataType
 
-
 MODULE_PATH = "torchsig.signals.builders.chirpss"
 
 
@@ -105,9 +104,7 @@ def test_chirpss_modulator_baseband_generates_expected_symbol():
     ]
     rng.uniform.return_value = 1.0
 
-    upchirp = np.arange(128, dtype=np.float32).astype(
-        TorchSigComplexDataType
-    )
+    upchirp = np.arange(128, dtype=np.float32).astype(TorchSigComplexDataType)
 
     with patch(
         f"{MODULE_PATH}.chirp",
@@ -137,9 +134,7 @@ def test_chirpss_modulator_baseband_offsets_chirp_by_symbol_value():
     ]
     rng.uniform.return_value = 1.0
 
-    upchirp = np.arange(128, dtype=np.float32).astype(
-        TorchSigComplexDataType
-    )
+    upchirp = np.arange(128, dtype=np.float32).astype(TorchSigComplexDataType)
 
     with patch(
         f"{MODULE_PATH}.chirp",
@@ -168,9 +163,7 @@ def test_chirpss_modulator_baseband_truncates_final_symbol():
     ]
     rng.uniform.return_value = 1.0
 
-    upchirp = np.arange(128, dtype=np.float32).astype(
-        TorchSigComplexDataType
-    )
+    upchirp = np.arange(128, dtype=np.float32).astype(TorchSigComplexDataType)
 
     with patch(
         f"{MODULE_PATH}.chirp",
@@ -605,4 +598,3 @@ def test_chirpss_signal_generator_generate():
     )
 
     assert result is expected_signal
-

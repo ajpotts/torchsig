@@ -239,9 +239,7 @@ def test_sampling_clock_impairments_numba_py_func_covers_kernel_body():
     num_output_samples = int(np.ceil(padded_len * uprate / drate)) + 1
 
     rng = np.random.default_rng(123)
-    jitter_drift_pool = rng.normal(
-        0.0, 1.0, num_output_samples * 2
-    ).astype(np.float32) * 1e-6
+    jitter_drift_pool = rng.normal(0.0, 1.0, num_output_samples * 2).astype(np.float32) * 1e-6
 
     out = sampling_clock_impairments_numba.py_func(
         h,

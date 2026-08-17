@@ -32,6 +32,7 @@ from torchsig.transforms.transforms import (
 
 __all__ = ["Impairments"]
 
+
 class Impairments(Transform):
     """Applies signal and dataset transformations at specific impairment levels.
 
@@ -123,9 +124,7 @@ class Impairments(Transform):
         # Signal (TX) Transforms
         st_level_0 = []  # None
         st_level_1 = copy(tx_hw_impairments)  # TX impairments
-        st_level_2 = (
-            copy(st_level_1) + channel_models
-        )  # TX impairments + channel models
+        st_level_2 = copy(st_level_1) + channel_models  # TX impairments + channel models
 
         st_all_levels = [st_level_0, st_level_1, st_level_2]
 

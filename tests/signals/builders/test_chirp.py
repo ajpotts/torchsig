@@ -140,10 +140,7 @@ def test_chirp_matches_linear_frequency_modulation_formula():
 
     t = np.arange(samples_per_symbol, dtype=np.float64)
     chirp_rate = (f1 - f0) / (samples_per_symbol - 1)
-    phase = 2 * np.pi * (
-        f0 * t
-        + 0.5 * chirp_rate * t**2
-    )
+    phase = 2 * np.pi * (f0 * t + 0.5 * chirp_rate * t**2)
     expected = np.exp(
         1j * (phase + np.deg2rad(phi)),
     ).astype(np.complex64)
@@ -163,9 +160,7 @@ def test_chirp_constant_frequency_matches_complex_tone():
     )
 
     t = np.arange(samples_per_symbol, dtype=np.float64)
-    expected = np.exp(1j * 2 * np.pi * frequency * t).astype(
-        np.complex64
-    )
+    expected = np.exp(1j * 2 * np.pi * frequency * t).astype(np.complex64)
 
     np.testing.assert_allclose(result, expected, rtol=1e-6, atol=1e-6)
 
@@ -240,11 +235,6 @@ def test_chirp_negative_sweep_matches_formula():
 
     t = np.arange(samples_per_symbol, dtype=np.float64)
     chirp_rate = (f1 - f0) / (samples_per_symbol - 1)
-    expected = np.exp(
-        1j
-        * 2
-        * np.pi
-        * (f0 * t + 0.5 * chirp_rate * t**2)
-    ).astype(np.complex64)
+    expected = np.exp(1j * 2 * np.pi * (f0 * t + 0.5 * chirp_rate * t**2)).astype(np.complex64)
 
     np.testing.assert_allclose(result, expected, rtol=1e-6, atol=1e-6)

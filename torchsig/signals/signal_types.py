@@ -24,7 +24,8 @@ from torchsig.utils.dsp import (
     upper_freq_from_center_freq_bandwidth,
 )
 
-__all__ = ["SignalMetadataObject", "Signal"]
+__all__ = ["Signal", "SignalMetadataObject"]
+
 
 class SignalMetadataObject(HierarchicalMetadataObject):
     """Represents metadata associated with a signal.
@@ -104,9 +105,7 @@ class SignalMetadataObject(HierarchicalMetadataObject):
         Args:
             new_stop: Signal stop as a percentage of total time (0-1).
         """
-        self["duration_in_samples"] = (
-            new_stop * self.num_iq_samples_dataset
-        ) - self.start_in_samples
+        self["duration_in_samples"] = (new_stop * self.num_iq_samples_dataset) - self.start_in_samples
 
     @property
     def duration(self) -> float:
@@ -168,10 +167,7 @@ class SignalMetadataObject(HierarchicalMetadataObject):
         except (AttributeError, KeyError) as e:
             if "_upper_frequency" in self._metadata:
                 return self._metadata["_upper_frequency"]
-            raise ValueError(
-                "Cannot calculate upper frequency: missing center_freq or bandwidth"
-            ) from e
-
+            raise ValueError("Cannot calculate upper frequency: missing center_freq or bandwidth") from e
 
     @upper_freq.setter
     def upper_freq(self, new_upper_freq: float) -> None:
@@ -198,7 +194,6 @@ class SignalMetadataObject(HierarchicalMetadataObject):
             new_upper_freq,
         )
 
-
     @property
     def lower_freq(self) -> float:
         """Calculate the lower edge of the full two-sided signal bandwidth.
@@ -223,10 +218,7 @@ class SignalMetadataObject(HierarchicalMetadataObject):
         except (AttributeError, KeyError) as e:
             if "_lower_frequency" in self._metadata:
                 return self._metadata["_lower_frequency"]
-            raise ValueError(
-                "Cannot calculate lower frequency: missing center_freq or bandwidth"
-            ) from e
-
+            raise ValueError("Cannot calculate lower frequency: missing center_freq or bandwidth") from e
 
     @lower_freq.setter
     def lower_freq(self, new_lower_freq: float) -> None:
@@ -253,7 +245,6 @@ class SignalMetadataObject(HierarchicalMetadataObject):
             upper_freq,
         )
 
-
     @property
     def oversampling_rate(self) -> float:
         """Calculates the oversampling rate for a signal.
@@ -262,7 +253,6 @@ class SignalMetadataObject(HierarchicalMetadataObject):
             float: Oversampling rate (sample_rate / bandwidth).
         """
         return self.sample_rate / self.bandwidth
-
 
     def to_dict(self) -> dict[str, Any]:
         """Return signal metadata as a dictionary.
@@ -318,11 +308,7 @@ class Signal(SignalMetadataObject):
         self.data = np.array([]) if data is None else np.asarray(data)
         if "duration_in_samples" not in self.keys():
             self["duration_in_samples"] = len(self.data)
-        self.component_signals = (
-            list(component_signals)
-            if component_signals is not None
-            else []
-        )
+        self.component_signals = list(component_signals) if component_signals is not None else []
 
     def __repr__(self) -> str:
         """Returns a string representation of the Signal.
@@ -355,10 +341,7 @@ class Signal(SignalMetadataObject):
         """
         return Signal(
             data=self.data.copy(),
-            component_signals=[
-                sig.copy(preserve_parent=preserve_parent)
-                for sig in self.component_signals
-            ],
+            component_signals=[sig.copy(preserve_parent=preserve_parent) for sig in self.component_signals],
             parent=self.parent if preserve_parent else None,
             **self.get_full_metadata(),
         )

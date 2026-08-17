@@ -282,25 +282,15 @@ class HierarchicalMetadataObject(MetadataDebugMixin, Seedable):
             self._log_metadata_event("lookup", key)
 
         if key == "_metadata":
-            raise KeyError(
-                "unknown bug occured for:"
-                + str(self.__class__.__name__)
-                + "  ---   "
-                + str(self.__dict__.keys())
-                + "; check metadata field names?"
-            )
+            raise KeyError("unknown bug occured for:" + str(self.__class__.__name__) + "  ---   " + str(self.__dict__.keys()) + "; check metadata field names?")
 
-        if (
-            key == "metadata"
-        ):  # TODO: reconsider this; workaround to make getattr play nice
+        if key == "metadata":  # TODO: reconsider this; workaround to make getattr play nice
             return self._metadata.copy()
         if key in self._metadata:
             return self._metadata[key]
         if self.parent is not None:
             return self.parent[key]
-        raise MetadataAttributeError(
-            "key: '" + str(key) + "' could not be found in metadata"
-        )
+        raise MetadataAttributeError("key: '" + str(key) + "' could not be found in metadata")
 
     def __setitem__(self, key: str, value: Any) -> None:
         """Set a metadata value by key.

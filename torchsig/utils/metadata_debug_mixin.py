@@ -119,18 +119,12 @@ class MetadataDebugMixin:
         target = self if metadata_object is None else metadata_object
 
         if not self._is_metadata_debug_target(target):
-            raise TypeError(
-                "metadata_object must be a HierarchicalMetadataObject"
-            )
+            raise TypeError("metadata_object must be a HierarchicalMetadataObject")
         if not isinstance(include_components, bool):
             raise TypeError("include_components must be a boolean")
 
         session = self._get_metadata_debug_session()
-        if (
-            not self.metadata_debug_enabled
-            or session is None
-            or not session.should_emit("snapshot")
-        ):
+        if not self.metadata_debug_enabled or session is None or not session.should_emit("snapshot"):
             return
 
         session.emit_snapshot(
@@ -183,19 +177,12 @@ class MetadataDebugMixin:
         """Emit a filtered, structured metadata debug record."""
         session = self._get_metadata_debug_session()
 
-        if (
-            not self.metadata_debug_enabled
-            or session is None
-            or not session.should_emit(event, key)
-        ):
+        if not self.metadata_debug_enabled or session is None or not session.should_emit(event, key):
             return
 
         resolution = self.explain_metadata(key)
 
-        if (
-            session.config.include_values
-            and value is _MISSING_METADATA_VALUE
-        ):
+        if session.config.include_values and value is _MISSING_METADATA_VALUE:
             value = self._get_metadata_value_for_debug(key)
 
         session.emit_event(

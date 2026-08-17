@@ -2,7 +2,8 @@
 
 import numpy as np
 
-__all__ = ["remove_corners", "all_symbol_maps"]
+__all__ = ["all_symbol_maps", "remove_corners"]
+
 
 def remove_corners(const):
     """Removes corners from 'cross' modulations.
@@ -16,11 +17,7 @@ def remove_corners(const):
     """
     spacing = 2.0 / (np.sqrt(len(const)) - 1)
     cutoff = spacing * (np.sqrt(len(const)) / 6 - 0.5)
-    return [
-        p
-        for p in const
-        if np.abs(np.real(p)) < 1.0 - cutoff or np.abs(np.imag(p)) < 1.0 - cutoff
-    ]
+    return [p for p in const if np.abs(np.real(p)) < 1.0 - cutoff or np.abs(np.imag(p)) < 1.0 - cutoff]
 
 
 def apsk_rings(
@@ -54,9 +51,7 @@ def apsk_rings(
 all_symbol_maps = {
     "ook": np.add(*map(np.ravel, np.meshgrid(np.linspace(0, 1, 2), 0j))),
     "bpsk": np.add(*map(np.ravel, np.meshgrid(np.linspace(-1, 1, 2), 0j))),
-    "qpsk": np.add(
-        *map(np.ravel, np.meshgrid(np.linspace(-1, 1, 2), 1j * np.linspace(-1, 1, 2)))
-    ),
+    "qpsk": np.add(*map(np.ravel, np.meshgrid(np.linspace(-1, 1, 2), 1j * np.linspace(-1, 1, 2)))),
     "8psk": np.exp(2j * np.pi * np.linspace(0, 7, 8) / 8.0),
     "16psk": np.exp(2j * np.pi * np.linspace(0, 15, 16) / 16.0),
     "32psk": np.exp(2j * np.pi * np.linspace(0, 31, 32) / 32.0),
@@ -66,15 +61,9 @@ all_symbol_maps = {
     "16ask": np.add(*map(np.ravel, np.meshgrid(np.linspace(-1, 1, 16), 0j))),
     "32ask": np.add(*map(np.ravel, np.meshgrid(np.linspace(-1, 1, 32), 0j))),
     "64ask": np.add(*map(np.ravel, np.meshgrid(np.linspace(-1, 1, 64), 0j))),
-    "16qam": np.add(
-        *map(np.ravel, np.meshgrid(np.linspace(-1, 1, 4), 1j * np.linspace(-1, 1, 4)))
-    ),
-    "32qam": np.add(
-        *map(np.ravel, np.meshgrid(np.linspace(-1, 1, 4), 1j * np.linspace(-1, 1, 8)))
-    ),
-    "64qam": np.add(
-        *map(np.ravel, np.meshgrid(np.linspace(-1, 1, 8), 1j * np.linspace(-1, 1, 8)))
-    ),
+    "16qam": np.add(*map(np.ravel, np.meshgrid(np.linspace(-1, 1, 4), 1j * np.linspace(-1, 1, 4)))),
+    "32qam": np.add(*map(np.ravel, np.meshgrid(np.linspace(-1, 1, 4), 1j * np.linspace(-1, 1, 8)))),
+    "64qam": np.add(*map(np.ravel, np.meshgrid(np.linspace(-1, 1, 8), 1j * np.linspace(-1, 1, 8)))),
     "256qam": np.add(
         *map(
             np.ravel,
@@ -113,7 +102,5 @@ all_symbol_maps = {
     ),
     # DVB-S2 APSK constellations (representative ~rate-3/4 ring radius ratios).
     "16apsk": apsk_rings([4, 12], [1.0, 2.85], [np.pi / 4, np.pi / 12]),
-    "32apsk": apsk_rings(
-        [4, 12, 16], [1.0, 2.84, 5.27], [np.pi / 4, np.pi / 12, np.pi / 16]
-    ),    
+    "32apsk": apsk_rings([4, 12, 16], [1.0, 2.84, 5.27], [np.pi / 4, np.pi / 12, np.pi / 16]),
 }

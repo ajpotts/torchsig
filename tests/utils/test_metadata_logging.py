@@ -191,9 +191,7 @@ def test_metadata_summary_uses_context_active_when_disabled(caplog):
 
 def test_metadata_snapshot_includes_complete_object_and_components(caplog):
     caplog.set_level(logging.DEBUG, logger="torchsig.metadata")
-    dataset = HierarchicalMetadataObject(
-        metadata={"sample_rate": 10_000_000, "unused": "filtered"}
-    )
+    dataset = HierarchicalMetadataObject(metadata={"sample_rate": 10_000_000, "unused": "filtered"})
     component = Signal(
         data=np.ones(4, dtype=np.complex64),
         parent=dataset,
@@ -219,9 +217,7 @@ def test_metadata_snapshot_includes_complete_object_and_components(caplog):
         "sample_rate": "10000000",
         "complete": "True",
     }
-    assert record.metadata_component_snapshots == (
-        {"sample_rate": "10000000", "class_name": "'qpsk'"},
-    )
+    assert record.metadata_component_snapshots == ({"sample_rate": "10000000", "class_name": "'qpsk'"},)
     assert record.metadata_component_count == 1
     assert record.metadata_data_shape == (2, 2)
     assert record.metadata_data_dtype == "float32"

@@ -19,6 +19,7 @@ from torchsig.utils.dsp import (
     TorchSigRealDataType,
     is_even,
     multistage_polyphase_resampler,
+    multistage_polyphase_resampler_actual_rate,
     prototype_polyphase_filter,
     sampling_clock_impairments,
 )
@@ -83,6 +84,7 @@ class FallbackMode(str, Enum):
 
     ORIGINAL = "original"
     RAISE = "raise"
+
 
 def add_slope(data: np.ndarray) -> np.ndarray:
     """Add slope between each sample and its preceding sample is added to every sample.
@@ -162,17 +164,11 @@ def adjacent_channel_interference(
     n = len(data)
     t = np.arange(n) / sample_rate
 
-    data_filtered = np.convolve(data, filter_weights)[
-        -n:
-    ]  # band limit original data (maintain data size)
+    data_filtered = np.convolve(data, filter_weights)[-n:]  # band limit original data (maintain data size)
     phase_noise = rng.normal(0, phase_sigma, n)  # Gaussian phase noise
-    interference = data_filtered * np.exp(
-        1j * (2 * np.pi * center_frequency * t + phase_noise)
-    )  # note: does not check aliasing
+    interference = data_filtered * np.exp(1j * (2 * np.pi * center_frequency * t + phase_noise))  # note: does not check aliasing
 
-    time_shift = int(
-        np.round(rng.normal(0, time_sigma, 1))[0]
-    )  # Gaussian block time shift for data (nearest sample)
+    time_shift = int(np.round(rng.normal(0, time_sigma, 1))[0])  # Gaussian block time shift for data (nearest sample)
     if time_shift > 0:  # time shift with zero fill; # note: may produce discontinuities
         interference = np.roll(interference, time_shift)
         interference[0:time_shift] = 0 + 1j * 0
@@ -187,9 +183,7 @@ def adjacent_channel_interference(
     return (data + interference).astype(TorchSigComplexDataType)
 
 
-def awgn(
-    data: np.ndarray, noise_power_db: float, rng: np.random.Generator | None = None
-) -> np.ndarray:
+def awgn(data: np.ndarray, noise_power_db: float, rng: np.random.Generator | None = None) -> np.ndarray:
     """Adds zero-mean complex additive white Gaussian noise with power of noise_power_db.
 
     Args:
@@ -204,12 +198,7 @@ def awgn(
 
     real_noise = rng.standard_normal(*data.shape)
     imag_noise = rng.standard_normal(*data.shape)
-    return (
-        data
-        + (10.0 ** (noise_power_db / 20.0))
-        * (real_noise + 1j * imag_noise)
-        / np.sqrt(2)
-    ).astype(TorchSigComplexDataType)
+    return (data + (10.0 ** (noise_power_db / 20.0)) * (real_noise + 1j * imag_noise) / np.sqrt(2)).astype(TorchSigComplexDataType)
 
 
 def channel_swap(data: np.ndarray) -> np.ndarray:
@@ -265,15 +254,7 @@ def clock_drift(
     pfb_prototype_filter = pfb_prototype_filter.astype(TorchSigRealDataType)
 
     # call the impairment
-    data_with_drift = _sampling_clock_impairments(
-        h=pfb_prototype_filter,
-        x=data,
-        uprate=uprate,
-        drate=downrate,
-        jitter_ppm=0,
-        drift_ppm=drift_ppm,
-        rng=rng
-    )
+    data_with_drift = _sampling_clock_impairments(h=pfb_prototype_filter, x=data, uprate=uprate, drate=downrate, jitter_ppm=0, drift_ppm=drift_ppm, rng=rng)
 
     # discard extra samples from resampling process, or zero-pad if too short
     num_samples_to_discard = len(data_with_drift) - len(data)
@@ -295,9 +276,7 @@ def clock_drift(
         else:
             pad_front = (num_samples_to_pad + 1) // 2
             pad_back = num_samples_to_pad // 2
-        data_with_drift = np.concatenate(
-            (np.zeros(pad_front), data_with_drift, np.zeros(pad_back))
-        )
+        data_with_drift = np.concatenate((np.zeros(pad_front), data_with_drift, np.zeros(pad_back)))
 
     # ensure data type
     return data_with_drift.astype(TorchSigComplexDataType)
@@ -369,9 +348,7 @@ def clock_jitter(
         else:
             pad_front = (num_samples_to_pad + 1) // 2
             pad_back = num_samples_to_pad // 2
-        data_with_jitter = np.concatenate(
-            (np.zeros(pad_front), data_with_jitter, np.zeros(pad_back))
-        )
+        data_with_jitter = np.concatenate((np.zeros(pad_front), data_with_jitter, np.zeros(pad_back)))
 
     # ensure data type
     return data_with_jitter.astype(TorchSigComplexDataType)
@@ -411,9 +388,7 @@ def cochannel_interference(
     return (data + interference).astype(TorchSigComplexDataType)
 
 
-def coarse_gain_change(
-    data: np.ndarray, gain_change_db: float, start_idx: int
-) -> np.ndarray:
+def coarse_gain_change(data: np.ndarray, gain_change_db: float, start_idx: int) -> np.ndarray:
     """Implements a large instantaneous jump in receiver gain.
 
     Args:
@@ -425,7 +400,7 @@ def coarse_gain_change(
         IQ data with instantaneous gain change applied.
     """
     # convert db to linear units
-    # input is complex I/Q (amplitude), so apply /20 for dB of power 
+    # input is complex I/Q (amplitude), so apply /20 for dB of power
     gain_change_linear = 10 ** (gain_change_db / 20)
 
     # create copy of signal
@@ -485,11 +460,7 @@ def cut_out(
         real_noise = rng.standard_normal(cut_mask_length)
         imag_noise = rng.standard_normal(cut_mask_length)
         noise_power_db = -100
-        cut_mask = (
-            (10.0 ** (noise_power_db / 20.0))
-            * (real_noise + 1j * imag_noise)
-            / np.sqrt(2)
-        )
+        cut_mask = (10.0 ** (noise_power_db / 20.0)) * (real_noise + 1j * imag_noise) / np.sqrt(2)
     elif cut_type == "avg_noise":
         real_noise = rng.standard_normal(cut_mask_length)
         imag_noise = rng.standard_normal(cut_mask_length)
@@ -499,15 +470,9 @@ def cut_out(
         real_noise = rng.standard_normal(cut_mask_length)
         imag_noise = rng.standard_normal(cut_mask_length)
         noise_power_db = 40
-        cut_mask = (
-            (10.0 ** (noise_power_db / 20.0))
-            * (real_noise + 1j * imag_noise)
-            / np.sqrt(2)
-        )
+        cut_mask = (10.0 ** (noise_power_db / 20.0)) * (real_noise + 1j * imag_noise) / np.sqrt(2)
     else:
-        raise ValueError(
-            f"cut_type must be: zeros, ones, low_noise, avg_noise, or high_noise. Found: {cut_type}"
-        )
+        raise ValueError(f"cut_type must be: zeros, ones, low_noise, avg_noise, or high_noise. Found: {cut_type}")
 
     # Insert cut mask into data
     data[cut_start : cut_start + cut_mask_length] = cut_mask
@@ -584,9 +549,7 @@ def _digital_agc_python(
         elif not sample_idx:  # first sample == 0, no smoothing
             level_db = np.log(np.abs(sample))
         else:
-            level_db = level_db * alpha_smooth + np.log(np.abs(sample)) * (
-                1 - alpha_smooth
-            )
+            level_db = level_db * alpha_smooth + np.log(np.abs(sample)) * (1 - alpha_smooth)
         output_db = level_db + gain_db
         diff_db = ref_level_db - output_db
 
@@ -605,9 +568,7 @@ def _digital_agc_python(
     return output
 
 
-def doppler(
-    data: np.ndarray, velocity: float = 1e1, propagation_speed: float = speed_of_light
-) -> np.ndarray:
+def doppler(data: np.ndarray, velocity: float = 1e1, propagation_speed: float = speed_of_light) -> np.ndarray:
     """Applies wideband Doppler effect through time scaling.
 
     Args:
@@ -617,19 +578,37 @@ def doppler(
 
     Returns:
         Data with wideband Doppler.
+
+    Raises:
+        ValueError: If data is not a one-dimensional NumPy array, propagation
+            speed is not finite and positive, or velocity is not finite or has
+            magnitude greater than or equal to propagation speed.
     """
+    if not np.isfinite(propagation_speed) or propagation_speed <= 0:
+        raise ValueError("propagation_speed must be finite and positive")
+    if not np.isfinite(velocity) or abs(velocity) >= propagation_speed:
+        raise ValueError("velocity must be finite and have magnitude less than propagation_speed")
+    if not isinstance(data, np.ndarray) or data.ndim != 1:
+        raise ValueError("data must be a one-dimensional NumPy array")
+
     n = data.size
 
     # time scaling factor
     alpha = propagation_speed / (propagation_speed - velocity)
 
-    # if necessary, pad with zeros to maintain size
-    if alpha > 1.0:
-        num_zeros = int(np.ceil(n * (alpha - 1)) + 1)
-        data = np.concatenate((data, np.zeros(num_zeros)))
+    resample_rate = 1 / alpha
+    actual_rate = multistage_polyphase_resampler_actual_rate(resample_rate)
 
-    data = multistage_polyphase_resampler(data, 1 / alpha)[:n]
-    return data.astype(TorchSigComplexDataType)
+    if actual_rate == 1.0:
+        return data.astype(TorchSigComplexDataType, copy=False)
+
+    # If necessary, pad with zeros to maintain size using the effective rate.
+    if alpha > 1.0:
+        num_zeros = int(np.ceil((n / actual_rate) - n) + 1)
+        data = np.concatenate((data, np.zeros(num_zeros, dtype=data.dtype)))
+
+    data = multistage_polyphase_resampler(data, resample_rate)
+    return data[:n].astype(TorchSigComplexDataType, copy=False)
 
 
 def drop_samples(
@@ -674,9 +653,7 @@ def drop_samples(
         elif fill == "zero":
             drop_region = np.zeros(drop_sizes[idx], dtype=np.complex128)
         else:
-            raise ValueError(
-                f"{fill} fill type unsupported. Must be ffill, bfill, mean, or zero."
-            )
+            raise ValueError(f"{fill} fill type unsupported. Must be ffill, bfill, mean, or zero.")
 
         data[start:stop] = drop_region
 
@@ -704,9 +681,7 @@ def fading(
     """
     rng = rng or np.random.default_rng()
 
-    num_taps = int(
-        np.ceil(1.0 / coherence_bandwidth)
-    )  # filter length to get desired coherence bandwidth
+    num_taps = int(np.ceil(1.0 / coherence_bandwidth))  # filter length to get desired coherence bandwidth
 
     power_taps = np.sqrt(
         np.interp(
@@ -717,9 +692,7 @@ def fading(
     )
 
     # Generate initial taps
-    rayleigh_taps = rng.standard_normal(num_taps) + 1j * rng.standard_normal(
-        num_taps
-    )  # multi-path channel
+    rayleigh_taps = rng.standard_normal(num_taps) + 1j * rng.standard_normal(num_taps)  # multi-path channel
 
     # Linear interpolate taps by a factor of 100 -- so we can get accurate coherence bandwidths
     old_time = np.linspace(0, 1.0, num_taps, endpoint=True)
@@ -740,7 +713,8 @@ def fading(
 
 
 def intermodulation_products(
-    data: np.ndarray, coeffs: np.ndarray | None = None,
+    data: np.ndarray,
+    coeffs: np.ndarray | None = None,
 ) -> np.ndarray:
     """Pass IQ data through an optimized memoryless nonlinear response model
     that creates local intermodulation distortion (IMD) products.
@@ -804,14 +778,10 @@ def iq_imbalance(
         IQ data with IQ Imbalance applied.
     """
     # amplitude imbalance
-    data = 10 ** (amplitude_imbalance / 10.0) * np.real(data) + 1j * 10 ** (
-        amplitude_imbalance / 10.0
-    ) * np.imag(data)
+    data = 10 ** (amplitude_imbalance / 10.0) * np.real(data) + 1j * 10 ** (amplitude_imbalance / 10.0) * np.imag(data)
 
     # phase imbalance
-    data = np.exp(-1j * phase_imbalance / 2.0) * np.real(data) + np.exp(
-        1j * (np.pi / 2.0 + phase_imbalance / 2.0)
-    ) * np.imag(data)
+    data = np.exp(-1j * phase_imbalance / 2.0) * np.real(data) + np.exp(1j * (np.pi / 2.0 + phase_imbalance / 2.0)) * np.imag(data)
 
     # DC offset
 
@@ -826,7 +796,7 @@ def iq_imbalance(
             avg_len += 1
         avg = np.ones(avg_len) / avg_len
         data_fft_linear = sp.convolve(data_fft_linear, avg)[avg_len:-avg_len]
-         # guard against non-finite values
+        # guard against non-finite values
         finite = data_fft_linear[np.isfinite(data_fft_linear)]
         # basic blind noise floor estimate, assuming signal occupies <50% band
         # target |FFT| 25th percentile (avoid any near-zero edge bins)
@@ -866,11 +836,7 @@ def interleave_complex(
     return output.astype(TorchSigRealDataType)
 
 
-def carrier_frequency_drift(
-    data: np.ndarray,
-    drift_ppm: float = 1,
-    rng: np.random.Generator | None = None
-) -> np.ndarray:
+def carrier_frequency_drift(data: np.ndarray, drift_ppm: float = 1, rng: np.random.Generator | None = None) -> np.ndarray:
     """Carrier frequency drift from a Local Oscillator (LO), with drift modeled as accumulated gaussian random phase.
 
     Args:
@@ -1098,16 +1064,15 @@ def normalize(
     return np.multiply(data, 1.0 / norm).astype(TorchSigComplexDataType)
 
 
-_EPS: Final[float] = 1e-12           # tiny value to avoid log10(0)
+_EPS: Final[float] = 1e-12  # tiny value to avoid log10(0)
+
 
 def _safe_log10(x: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
     """Return ``log10`` of *x* without ever producing ``-inf``."""
     return np.log10(np.clip(x, _EPS, None))
 
 
-def _fft_filter(freq_profile: np.ndarray,
-               trim_tol: float = 1e-6,
-               fit_metric: str = "rms") -> tuple[np.ndarray, float]:
+def _fft_filter(freq_profile: np.ndarray, trim_tol: float = 1e-6, fit_metric: str = "rms") -> tuple[np.ndarray, float]:
     """Convert a frequency domain profile into real-valued FIR filter taps.
 
     The function performs an Inverse Fast Fourier Transform (IFFT) to move to the
@@ -1138,14 +1103,13 @@ def _fft_filter(freq_profile: np.ndarray,
     # ensure it is odd
     num_taps += 1 - (num_taps % 2)
 
-
     taps = np.fft.ifft(freq, n=num_taps)
     taps_real = np.real(taps)
     # create mirror
     taps_shift = np.fft.fftshift(taps_real)
 
     peak_idx = np.argmax(taps_shift)
-    taps_shift[:peak_idx] = taps_shift[peak_idx+1:][::-1]
+    taps_shift[:peak_idx] = taps_shift[peak_idx + 1 :][::-1]
     taps_real = np.fft.fftshift(taps_shift)
 
     mask = np.abs(taps_real) > trim_tol
@@ -1204,7 +1168,7 @@ def _build_full_profile(
     freq_pos = np.linspace(0, np.pi, n_pos + 1, endpoint=False)
 
     # 2. Determine Passband Boundary
-    w = rng.uniform(np.pi/2, np.pi)
+    w = rng.uniform(np.pi / 2, np.pi)
     pass_mask = freq_pos <= w
     stop_mask = ~pass_mask
 
@@ -1217,8 +1181,8 @@ def _build_full_profile(
     if passband_fuzz == "smooth":
         half_profile[pass_mask] = mag_pass + 0j
     elif passband_fuzz == "random":
-        mag_fuzz = rng.normal(1, .03, size=len(mag_pass))
-        half_profile[pass_mask] = np.clip(mag_fuzz, .1, 2.0) * mag_pass
+        mag_fuzz = rng.normal(1, 0.03, size=len(mag_pass))
+        half_profile[pass_mask] = np.clip(mag_fuzz, 0.1, 2.0) * mag_pass
 
     # Force DC to be strictly real
     half_profile[0] = np.abs(half_profile[0]) + 0j
@@ -1226,28 +1190,25 @@ def _build_full_profile(
     # 4. Stopband Logic
     denom = np.pi - w
     if denom > 0:
-        mag_edge = 1.0 + ripple_amp     # because cos(0)=1
+        mag_edge = 1.0 + ripple_amp  # because cos(0)=1
         ramp = mag_edge * (np.pi - freq_pos[stop_mask]) / denom
 
         if stopband_fuzz == "smooth":
             half_profile[stop_mask] = ramp + 0j
         elif stopband_fuzz == "random":
-            mag_fuzz = rng.normal(0, .3, size=len(ramp))
-            half_profile[stop_mask] = ramp * np.clip(mag_fuzz, .1, 2.0)
+            mag_fuzz = rng.normal(0, 0.3, size=len(ramp))
+            half_profile[stop_mask] = ramp * np.clip(mag_fuzz, 0.1, 2.0)
 
     # 5. Construct full profile using Hermitian Symmetry
 
-    return np.concatenate([
-        half_profile,
-        np.conj(half_profile[1:][::-1])
-    ])
+    return np.concatenate([half_profile, np.conj(half_profile[1:][::-1])])
 
 
 def _build_profile_freq_grid(num_taps):
     """Return the frequency grid corresponding to
     an output generated by _build_full_profile.
     """
-    return np.fft.fftshift(np.fft.fftfreq(num_taps, d=1/(2*np.pi)))
+    return np.fft.fftshift(np.fft.fftfreq(num_taps, d=1 / (2 * np.pi)))
 
 
 def passband_ripple(
@@ -1266,11 +1227,11 @@ def passband_ripple(
     This function simulates an imperfect filter response by designing a
     frequency profile with a cosine ripple in the passband and a linear ramp
     in the stopband. The profile is converted to real FIR taps and convolved
-    with the input data. 
-    
+    with the input data.
+
     Note that this implementation enforces symmetry (odd number of
-    taps, +1 if even) and a minimum number of 65 taps to meet ripple profile 
-    requirements reliably. If design fails (could not be satisfied after N 
+    taps, +1 if even) and a minimum number of 65 taps to meet ripple profile
+    requirements reliably. If design fails (could not be satisfied after N
     attempts), the input data is returned unchanged.
 
     Args:
@@ -1305,12 +1266,7 @@ def passband_ripple(
     # --- Deprecation Warnings ---
     for arg in ["coefficient_decay_rate", "max_counter", "fft_len"]:
         if arg in kwargs:
-            warnings.warn(
-                f"The argument '{arg}' is deprecated and will be removed in a future version. "
-                "Use the new filter design parameters.",
-                DeprecationWarning,
-                stacklevel=2
-            )
+            warnings.warn(f"The argument '{arg}' is deprecated and will be removed in a future version. Use the new filter design parameters.", DeprecationWarning, stacklevel=2)
 
     # --- Validation Block ---
     allowed_fuzzes = {"smooth", "random"}
@@ -1343,23 +1299,19 @@ def passband_ripple(
         # Convert dB ripple to linear amplitude for the cosine ripple
         # ratio = 1 + 2*amp -> amp = (ratio - 1) / 2
         # However, usually ripple_amp in _build_full_profile is the peak deviation from 1.0
-        ratio = 10**(max_ripple_db / 20.0)
+        ratio = 10 ** (max_ripple_db / 20.0)
         linear_amp = (ratio - 1.0) / 2.0
 
-        # Enforce a minimum number of taps found to reliably achieve [0.1, 3.0] dB ripple designs 
+        # Enforce a minimum number of taps found to reliably achieve [0.1, 3.0] dB ripple designs
         min_num_taps = 65
-        if num_taps < min_num_taps:            
-            warnings.warn(
-                f"The num_taps '{num_taps}' is below the enforced minimum '{min_num_taps}', and will be increased.",
-                UserWarning,
-                stacklevel=2
-            )
+        if num_taps < min_num_taps:
+            warnings.warn(f"The num_taps '{num_taps}' is below the enforced minimum '{min_num_taps}', and will be increased.", UserWarning, stacklevel=2)
             num_taps = min_num_taps
 
         # Ensure num_taps is ODD for symmetry
         if num_taps % 2 == 0:
             num_taps += 1
-            
+
         # Generate the frequency profile [DC, pos..., neg...]
         profile = _build_full_profile(
             num_taps=num_taps,
@@ -1459,7 +1411,7 @@ def quantize(
     if not isinstance(num_bits, int):
         raise TypeError("quantize() num_bits must be an integer.")
 
-    data = np.asarray(data) # force ndarray for consistent behavior
+    data = np.asarray(data)  # force ndarray for consistent behavior
     orig_shape = data.shape
 
     # reject non-finite inputs
@@ -1483,9 +1435,7 @@ def quantize(
     elif rounding_mode == "ceiling":
         threshold_levels = quant_levels - (quant_level_distance / 2)
     else:
-        raise ValueError(
-            f"quantize() rounding mode is: {rounding_mode}, must be ceiling or floor"
-        )
+        raise ValueError(f"quantize() rounding mode is: {rounding_mode}, must be ceiling or floor")
 
     # determine maximum value of signal amplitude
     max_value_signal_real = np.max(np.abs(data.real))
@@ -1512,22 +1462,14 @@ def quantize(
     input_signal_scaled_imag = input_signal_scaled.imag
 
     # check for saturated values minimum
-    real_saturation_neg_index = np.where(
-        input_signal_scaled_real <= threshold_levels[0]
-    )[0]
-    imag_saturation_neg_index = np.where(
-        input_signal_scaled_imag <= threshold_levels[0]
-    )[0]
+    real_saturation_neg_index = np.where(input_signal_scaled_real <= threshold_levels[0])[0]
+    imag_saturation_neg_index = np.where(input_signal_scaled_imag <= threshold_levels[0])[0]
     quant_signal_real[real_saturation_neg_index] = quant_levels[0]
     quant_signal_imag[imag_saturation_neg_index] = quant_levels[0]
 
     # check for saturated values maximum
-    real_saturation_pos_index = np.where(
-        input_signal_scaled_real >= threshold_levels[-1]
-    )[0]
-    imag_saturation_pos_index = np.where(
-        input_signal_scaled_imag >= threshold_levels[-1]
-    )[0]
+    real_saturation_pos_index = np.where(input_signal_scaled_real >= threshold_levels[-1])[0]
+    imag_saturation_pos_index = np.where(input_signal_scaled_imag >= threshold_levels[-1])[0]
     quant_signal_real[real_saturation_pos_index] = quant_levels[-1]
     quant_signal_imag[imag_saturation_pos_index] = quant_levels[-1]
 
@@ -1539,12 +1481,8 @@ def quantize(
     remaining_imag_index = np.setdiff1d(remaining_imag_index, imag_saturation_pos_index)
 
     # quantize all other levels. by default implements "ceiling"
-    real_index_subset = np.digitize(
-        input_signal_scaled_real[remaining_real_index], threshold_levels
-    )
-    imag_index_subset = np.digitize(
-        input_signal_scaled_imag[remaining_imag_index], threshold_levels
-    )
+    real_index_subset = np.digitize(input_signal_scaled_real[remaining_real_index], threshold_levels)
+    imag_index_subset = np.digitize(input_signal_scaled_imag[remaining_imag_index], threshold_levels)
 
     quant_signal_real[remaining_real_index] = quant_levels[real_index_subset]
     quant_signal_imag[remaining_imag_index] = quant_levels[imag_index_subset]
@@ -1619,9 +1557,7 @@ def spectrogram(data: np.ndarray, fft_size: int, fft_stride: int) -> np.ndarray:
     return dsp.compute_spectrogram(data, fft_size=fft_size, fft_stride=fft_stride)
 
 
-def spectrogram_drop_samples(
-    data: np.ndarray, drop_starts: np.ndarray, drop_sizes: np.ndarray, fill: Literal["ffill", "bfill", "mean", "zero", "max", "low", "ones"]
-) -> np.ndarray:
+def spectrogram_drop_samples(data: np.ndarray, drop_starts: np.ndarray, drop_sizes: np.ndarray, fill: Literal["ffill", "bfill", "mean", "zero", "max", "low", "ones"]) -> np.ndarray:
     """Drop samples at given locations/durations with fill technique.
 
     This function drops samples at specified locations and fills them with the specified technique.
@@ -1652,52 +1588,32 @@ def spectrogram_drop_samples(
     for idx, drop_start in enumerate(drop_starts):
         if fill == "ffill":
             drop_region_real = np.ones(drop_sizes[idx]) * flat_spec[0, drop_start - 1]
-            drop_region_complex = (
-                np.ones(drop_sizes[idx]) * flat_spec[1, drop_start - 1]
-            )
+            drop_region_complex = np.ones(drop_sizes[idx]) * flat_spec[1, drop_start - 1]
             flat_spec[0, drop_start : drop_start + drop_sizes[idx]] = drop_region_real
-            flat_spec[1, drop_start : drop_start + drop_sizes[idx]] = (
-                drop_region_complex
-            )
+            flat_spec[1, drop_start : drop_start + drop_sizes[idx]] = drop_region_complex
         elif fill == "bfill":
-            drop_region_real = (
-                np.ones(drop_sizes[idx]) * flat_spec[0, drop_start + drop_sizes[idx]]
-            )
-            drop_region_complex = (
-                np.ones(drop_sizes[idx]) * flat_spec[1, drop_start + drop_sizes[idx]]
-            )
+            drop_region_real = np.ones(drop_sizes[idx]) * flat_spec[0, drop_start + drop_sizes[idx]]
+            drop_region_complex = np.ones(drop_sizes[idx]) * flat_spec[1, drop_start + drop_sizes[idx]]
             flat_spec[0, drop_start : drop_start + drop_sizes[idx]] = drop_region_real
-            flat_spec[1, drop_start : drop_start + drop_sizes[idx]] = (
-                drop_region_complex
-            )
+            flat_spec[1, drop_start : drop_start + drop_sizes[idx]] = drop_region_complex
         elif fill == "mean":
             drop_region_real = np.ones(drop_sizes[idx]) * np.mean(flat_spec[0])
             drop_region_complex = np.ones(drop_sizes[idx]) * np.mean(flat_spec[1])
             flat_spec[0, drop_start : drop_start + drop_sizes[idx]] = drop_region_real
-            flat_spec[1, drop_start : drop_start + drop_sizes[idx]] = (
-                drop_region_complex
-            )
+            flat_spec[1, drop_start : drop_start + drop_sizes[idx]] = drop_region_complex
         elif fill == "zero":
             drop_region = np.zeros(drop_sizes[idx])
             flat_spec[:, drop_start : drop_start + drop_sizes[idx]] = drop_region
         elif fill == "min":
             drop_region_real = np.ones(drop_sizes[idx]) * np.min(np.abs(flat_spec[0]))
-            drop_region_complex = np.ones(drop_sizes[idx]) * np.min(
-                np.abs(flat_spec[1])
-            )
+            drop_region_complex = np.ones(drop_sizes[idx]) * np.min(np.abs(flat_spec[1]))
             flat_spec[0, drop_start : drop_start + drop_sizes[idx]] = drop_region_real
-            flat_spec[1, drop_start : drop_start + drop_sizes[idx]] = (
-                drop_region_complex
-            )
+            flat_spec[1, drop_start : drop_start + drop_sizes[idx]] = drop_region_complex
         elif fill == "max":
             drop_region_real = np.ones(drop_sizes[idx]) * np.max(np.abs(flat_spec[0]))
-            drop_region_complex = np.ones(drop_sizes[idx]) * np.max(
-                np.abs(flat_spec[1])
-            )
+            drop_region_complex = np.ones(drop_sizes[idx]) * np.max(np.abs(flat_spec[1]))
             flat_spec[0, drop_start : drop_start + drop_sizes[idx]] = drop_region_real
-            flat_spec[1, drop_start : drop_start + drop_sizes[idx]] = (
-                drop_region_complex
-            )
+            flat_spec[1, drop_start : drop_start + drop_sizes[idx]] = drop_region_complex
         elif fill == "low":
             drop_region = np.ones(drop_sizes[idx]) * 1e-3
             flat_spec[:, drop_start : drop_start + drop_sizes[idx]] = drop_region
@@ -1705,15 +1621,11 @@ def spectrogram_drop_samples(
             drop_region = np.ones(drop_sizes[idx])
             flat_spec[:, drop_start : drop_start + drop_sizes[idx]] = drop_region
         else:
-            raise ValueError(
-                f"fill expects ffill, bfill, mean, zero, min, max, low, ones. Found {fill}"
-            )
+            raise ValueError(f"fill expects ffill, bfill, mean, zero, min, max, low, ones. Found {fill}")
     return flat_spec.reshape(data.shape[0], data.shape[1], data.shape[2])
 
 
-def spectrogram_image(
-    data: np.ndarray, fft_size: int, fft_stride: int, black_hot: bool = True
-) -> np.ndarray:
+def spectrogram_image(data: np.ndarray, fft_size: int, fft_stride: int, black_hot: bool = True) -> np.ndarray:
     """Creates spectrogram from IQ samples.
 
     This function computes the spectrogram and converts it to a grayscale image.
@@ -1731,9 +1643,7 @@ def spectrogram_image(
     spectrogram_db = spectrogram(data, fft_size=fft_size, fft_stride=fft_stride)
 
     # convert to grey-scale image
-    img = np.zeros(
-        (spectrogram_db.shape[0], spectrogram_db.shape[1], 3), dtype=np.float32
-    )
+    img = np.zeros((spectrogram_db.shape[0], spectrogram_db.shape[1], 3), dtype=np.float32)
     img = cv2.normalize(spectrogram_db, img, 0, 255, cv2.NORM_MINMAX)
     img = cv2.cvtColor(img.astype(np.uint8), cv2.COLOR_GRAY2BGR)
 
@@ -1773,13 +1683,11 @@ def spurs(
 
     # error checking
     if (np.array(center_freqs_array) >= sample_rate / 2).any():
-        raise ValueError(f"center_freqs must be < sample rate / 2 = {sample_rate/2}")
+        raise ValueError(f"center_freqs must be < sample rate / 2 = {sample_rate / 2}")
     if (np.array(center_freqs_array) <= -sample_rate / 2).any():
-        raise ValueError(f"center_freqs must be >= -sample rate / 2 = {-sample_rate/2}")
+        raise ValueError(f"center_freqs must be >= -sample rate / 2 = {-sample_rate / 2}")
     if len(relative_power_db_array) != len(center_freqs_array):
-        raise ValueError(
-            f"len(center_freqs) = {len(center_freqs_array)}, must be same length as len(relative_power_db) = {len(relative_power_db_array)}"
-        )
+        raise ValueError(f"len(center_freqs) = {len(center_freqs_array)}, must be same length as len(relative_power_db) = {len(relative_power_db_array)}")
 
     # create copy of data since it will be modified
     output = copy(data)
@@ -1802,9 +1710,7 @@ def spurs(
     num_samples = len(data)
     for spur_index, center_freq in enumerate(center_freqs_array):
         # create the spur
-        spur = np.exp(
-            2j * np.pi * (center_freq / sample_rate) * np.arange(0, num_samples)
-        )
+        spur = np.exp(2j * np.pi * (center_freq / sample_rate) * np.arange(0, num_samples))
         # The spur is a pure complex tone, so its spectrum is a Dirichlet kernel
         # whose peak magnitude is known in closed form. Compute it analytically
         # instead of taking an FFT of the spur (which only existed to find this peak).
@@ -1813,14 +1719,10 @@ def spurs(
         if np.isclose(frac, 0.0):
             spur_max = float(num_samples)  # on-bin: all samples add coherently
         else:
-            spur_max = np.abs(
-                np.sin(np.pi * frac) / np.sin(np.pi * frac / num_samples)
-            )
+            spur_max = np.abs(np.sin(np.pi * frac) / np.sin(np.pi * frac / num_samples))
         spur_max_db = 20 * np.log10(spur_max)
         # calculate change to set spur power properly
-        gain_change_db = (noise_floor_db - spur_max_db) + relative_power_db_array[
-            spur_index
-        ]
+        gain_change_db = (noise_floor_db - spur_max_db) + relative_power_db_array[spur_index]
         # scale spur power accordingly
         gain_change = 10 ** (gain_change_db / 20)
         spur *= gain_change
@@ -1876,43 +1778,68 @@ def time_varying_noise(
     if not inflections:  # inflections == 0:
         inflection_indices = np.array([0, data.shape[0]])
     elif random_regions:
-        inflection_indices = np.sort(
-            rng.choice(data.shape[0], size=inflections, replace=False)
-        )
+        inflection_indices = np.sort(rng.choice(data.shape[0], size=inflections, replace=False))
         inflection_indices = np.append(inflection_indices, data.shape[0])
         inflection_indices = np.insert(inflection_indices, 0, 0)
     else:
-        inflection_indices = np.arange(inflections + 2) * int(
-            data.shape[0] / (inflections + 1)
-        )
+        inflection_indices = np.arange(inflections + 2) * int(data.shape[0] / (inflections + 1))
 
     for idx in range(len(inflection_indices) - 1):
         start_idx = inflection_indices[idx]
         stop_idx = inflection_indices[idx + 1]
         duration = stop_idx - start_idx
-        start_power = (
-            noise_power_low if not idx % 2 else noise_power_high
-        )  # idx % 2 == 0
+        start_power = noise_power_low if not idx % 2 else noise_power_high  # idx % 2 == 0
         stop_power = noise_power_high if not idx % 2 else noise_power_low
         noise_power[start_idx:stop_idx] = np.linspace(start_power, stop_power, duration)
 
-    return (
-        data
-        + (10.0 ** (noise_power / 20.0)) * (real_noise + 1j * imag_noise) / np.sqrt(2)
-    ).astype(TorchSigComplexDataType)
+    return (data + (10.0 ** (noise_power / 20.0)) * (real_noise + 1j * imag_noise) / np.sqrt(2)).astype(TorchSigComplexDataType)
 
 
-def _power_renorm_scale(
-    input_power: float, output_power: float, rel_floor: float = 1e-9
-) -> float:
+def _power_renorm_scale(input_power: float, output_power: float, rel_floor: float = 1e-9) -> float:
     """Scale factor ``input_power / output_power`` that is safe when the signal
-    is (near-)silent. Floor the  denominator *relative to the numerator* (the 
-    two are on the same scale): a silent buffer then yields ``0`` and a 
-    near-annihilated one is capped at ``1/rel_floor`` instead of overflowing, 
+    is (near-)silent. Floor the  denominator *relative to the numerator* (the
+    two are on the same scale): a silent buffer then yields ``0`` and a
+    near-annihilated one is capped at ``1/rel_floor`` instead of overflowing,
     while valid signals (``output_power >> rel_floor * input_power``) are unaffected
     """
     denom = max(output_power, rel_floor * input_power) + np.finfo(np.float64).tiny
     return input_power / denom
 
 
-__all__ = ["add_slope", "additive_noise", "adjacent_channel_interference", "awgn", "carrier_frequency_drift", "carrier_phase_noise", "channel_swap", "clock_drift", "clock_jitter", "coarse_gain_change", "cochannel_interference", "complex_to_2d", "cut_out", "digital_agc", "doppler", "drop_samples", "fading", "interleave_complex", "intermodulation_products", "iq_imbalance", "nonlinear_amplifier", "nonlinear_amplifier_table", "normalize", "passband_ripple", "patch_shuffle", "phase_offset", "quantize", "shadowing", "spectral_inversion", "spectrogram", "spectrogram_drop_samples", "spectrogram_image", "spurs", "time_reversal", "time_varying_noise"]
+__all__ = [
+    "add_slope",
+    "additive_noise",
+    "adjacent_channel_interference",
+    "awgn",
+    "carrier_frequency_drift",
+    "carrier_phase_noise",
+    "channel_swap",
+    "clock_drift",
+    "clock_jitter",
+    "coarse_gain_change",
+    "cochannel_interference",
+    "complex_to_2d",
+    "cut_out",
+    "digital_agc",
+    "doppler",
+    "drop_samples",
+    "fading",
+    "interleave_complex",
+    "intermodulation_products",
+    "iq_imbalance",
+    "nonlinear_amplifier",
+    "nonlinear_amplifier_table",
+    "normalize",
+    "passband_ripple",
+    "patch_shuffle",
+    "phase_offset",
+    "quantize",
+    "shadowing",
+    "spectral_inversion",
+    "spectrogram",
+    "spectrogram_drop_samples",
+    "spectrogram_image",
+    "spurs",
+    "time_reversal",
+    "time_varying_noise",
+]

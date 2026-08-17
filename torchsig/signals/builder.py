@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 
 __all__ = ["BaseSignalGenerator", "ConcatSignalGenerator"]
 
+
 class BaseSignalGenerator(HierarchicalMetadataObject):
     """Defines a callable object which takes no arguments and returns a Signal.
 
@@ -62,10 +63,7 @@ class BaseSignalGenerator(HierarchicalMetadataObject):
             self,
             preserve_parent=preserve_parent,
         )
-        cpy.transforms = [
-            transform.copy() if hasattr(transform, "copy") else transform
-            for transform in self.transforms
-        ]
+        cpy.transforms = [transform.copy() if hasattr(transform, "copy") else transform for transform in self.transforms]
         return cpy
 
     def validate_metadata_fields(self) -> None:
@@ -84,15 +82,11 @@ class BaseSignalGenerator(HierarchicalMetadataObject):
             return
         for key in self.required_metadata_fields:
             if not isinstance(key, str):
-                raise TypeError(
-                    "Could not validate metadata; all required metadata field names should be strings"
-                )
+                raise TypeError("Could not validate metadata; all required metadata field names should be strings")
             try:
                 _ = self[key]
             except AttributeError as err:
-                raise ValueError(
-                    f"{self.__class__.__name__} missing required metadata key: '{key}'"
-                ) from err
+                raise ValueError(f"{self.__class__.__name__} missing required metadata key: '{key}'") from err
 
     def __call__(self) -> Signal:
         """Generates a new signal and applies all transforms.
@@ -103,9 +97,7 @@ class BaseSignalGenerator(HierarchicalMetadataObject):
         new_signal = self.generate()  # generate the signal
         new_signal.add_parent(self, register=False)  # transient parent link
         if hasattr(self, "class_name"):
-            new_signal["class_name"] = (
-                self.class_name
-            )  # if a class_name is given, it will override any class_name already in signal.metadata
+            new_signal["class_name"] = self.class_name  # if a class_name is given, it will override any class_name already in signal.metadata
         for transform in self.transforms:  # apply all transforms
             new_signal = transform(new_signal)
         return new_signal
@@ -153,9 +145,7 @@ class ConcatSignalGenerator(BaseSignalGenerator):
         random_generator: Random number generator used to select a signal generator.
     """
 
-    def __init__(
-        self, signal_generators: list[BaseSignalGenerator], **kwargs: dict[str, Any]
-    ) -> None:
+    def __init__(self, signal_generators: list[BaseSignalGenerator], **kwargs: dict[str, Any]) -> None:
         """Initializes the ConcatSignalGenerator.
 
         Args:
@@ -197,22 +187,15 @@ class ConcatSignalGenerator(BaseSignalGenerator):
             A new ``ConcatSignalGenerator`` with copied metadata,
             transforms, and signal generators.
         """
-        copied_signal_generators = [
-            signal_generator.copy(preserve_parent=False)
-            for signal_generator in self.signal_generators
-        ]
+        copied_signal_generators = [signal_generator.copy(preserve_parent=False) for signal_generator in self.signal_generators]
 
         return ConcatSignalGenerator(
             signal_generators=copied_signal_generators,
-            transforms=[
-                transform.copy() if hasattr(transform, "copy") else transform
-                for transform in self.transforms
-            ],
+            transforms=[transform.copy() if hasattr(transform, "copy") else transform for transform in self.transforms],
             parent=self.parent if preserve_parent else None,
             seed=self.rng_seed,
             metadata=self._metadata.copy(),
         )
-
 
     def validate_metadata_fields(self) -> bool:
         """Validates metadata fields for all wrapped signal generators.

@@ -25,13 +25,15 @@ DEFAULT_CONFIGS = [
     "wideband_clean_train_all.yaml",
     "wideband_clean_val_all.yaml",
     "wideband_impaired_train_all.yaml",
-    "wideband_impaired_val_all.yaml"
+    "wideband_impaired_val_all.yaml",
 ]
+
 
 @pytest.fixture(params=DEFAULT_CONFIGS)
 def config_file(request):
     """Fixture that provides path to each default config file."""
     return CONFIGS_DIR / request.param
+
 
 class TestConfigLoaders:
     """Test loading and validation of YAML config files."""
@@ -44,8 +46,7 @@ class TestConfigLoaders:
     def test_load_config(self, config_file):
         """Test that each config can be loaded into TorchSigDatasetConfig."""
         config = load_config_from_yaml(config_file)
-        assert isinstance(config, TorchSigDatasetConfig), \
-            f"Config {config_file.name} did not load as TorchSigDatasetConfig"
+        assert isinstance(config, TorchSigDatasetConfig), f"Config {config_file.name} did not load as TorchSigDatasetConfig"
 
     def test_config_required_fields(self, config_file):
         """Verify all configs have required fields with correct types."""
@@ -60,14 +61,13 @@ class TestConfigLoaders:
             "output_representation": str,
             "signal_sampling_mode": str,
             "dataset_metadata": dict,
-            "output_spectrogram_fft": (int, type(None))
+            "output_spectrogram_fft": (int, type(None)),
         }
 
         for field, expected_type in required_fields.items():
             assert hasattr(config, field), f"Missing field: {field} in {config_file.name}"
             value = getattr(config, field)
-            assert isinstance(value, expected_type), \
-                f"Field {field} has wrong type. Expected {expected_type}, got {type(value)}"
+            assert isinstance(value, expected_type), f"Field {field} has wrong type. Expected {expected_type}, got {type(value)}"
 
         # Validate enum fields
         assert config.output_representation in ["iq", "spectrogram"]
@@ -78,18 +78,22 @@ class TestConfigLoaders:
         assert "sample_rate" in metadata, "Missing sample_rate in dataset_metadata"
         assert "num_iq_samples_dataset" in metadata, "Missing num_iq_samples_dataset in dataset_metadata"
 
+
 class TestConfigProperties:
     """Test specific properties of known configurations."""
 
-    @pytest.mark.parametrize(("config_file", "expected"), [
-        ("narrowband_clean_train_all.yaml", ("iq", 1_140_000, 0)),
-        ("narrowband_clean_val_all.yaml", ("iq", 11_400, 0)),
-        ("wideband_clean_train_all.yaml", ("spectrogram", 57_000, 0)),
-        ("wideband_clean_val_all.yaml", ("spectrogram", 11_400, 0)),
-        ("narrowband_toy_dataset.yaml", ("iq", 100, 0)),
-        ("narrowband_impaired_train_all.yaml", ("iq", 5_700_000, 2)),
-        ("wideband_impaired_train_all.yaml", ("spectrogram", 57_000, 2)),
-    ])
+    @pytest.mark.parametrize(
+        ("config_file", "expected"),
+        [
+            ("narrowband_clean_train_all.yaml", ("iq", 1_140_000, 0)),
+            ("narrowband_clean_val_all.yaml", ("iq", 11_400, 0)),
+            ("wideband_clean_train_all.yaml", ("spectrogram", 57_000, 0)),
+            ("wideband_clean_val_all.yaml", ("spectrogram", 11_400, 0)),
+            ("narrowband_toy_dataset.yaml", ("iq", 100, 0)),
+            ("narrowband_impaired_train_all.yaml", ("iq", 5_700_000, 2)),
+            ("wideband_impaired_train_all.yaml", ("spectrogram", 57_000, 2)),
+        ],
+    )
     def test_known_config_properties(self, config_file, expected):
         """Test expected properties of specific configs."""
         config = load_config_from_yaml(CONFIGS_DIR / config_file)
@@ -99,30 +103,18 @@ class TestConfigProperties:
 
     def test_clean_configs_have_zero_impairment(self):
         """Test all clean configs have impairment_level=0."""
-        clean_configs = [
-            "narrowband_clean_train_all.yaml",
-            "narrowband_clean_val_all.yaml",
-            "wideband_clean_train_all.yaml",
-            "wideband_clean_val_all.yaml",
-            "narrowband_toy_dataset.yaml"
-        ]
+        clean_configs = ["narrowband_clean_train_all.yaml", "narrowband_clean_val_all.yaml", "wideband_clean_train_all.yaml", "wideband_clean_val_all.yaml", "narrowband_toy_dataset.yaml"]
         for config_file in clean_configs:
             config = load_config_from_yaml(CONFIGS_DIR / config_file)
-            assert config.impairment_level == 0, \
-                f"{config_file} should have impairment_level=0"
+            assert config.impairment_level == 0, f"{config_file} should have impairment_level=0"
 
     def test_impaired_configs_have_positive_impairment(self):
         """Test all impaired configs have impairment_level>0."""
-        impaired_configs = [
-            "narrowband_impaired_train_all.yaml",
-            "narrowband_impaired_val_all.yaml",
-            "wideband_impaired_train_all.yaml",
-            "wideband_impaired_val_all.yaml"
-        ]
+        impaired_configs = ["narrowband_impaired_train_all.yaml", "narrowband_impaired_val_all.yaml", "wideband_impaired_train_all.yaml", "wideband_impaired_val_all.yaml"]
         for config_file in impaired_configs:
             config = load_config_from_yaml(CONFIGS_DIR / config_file)
-            assert config.impairment_level > 0, \
-                f"{config_file} should have impairment_level>0"
+            assert config.impairment_level > 0, f"{config_file} should have impairment_level>0"
+
 
 class TestDataModuleCreation:
     """Test creating TorchSigDataModule from configs."""
@@ -136,7 +128,7 @@ class TestDataModuleCreation:
             config,
             root=dataset_root,
             dataset_size=100,  # Use small size for testing
-            overwrite=True
+            overwrite=True,
         )
 
         assert dm.dataset_size == 100
@@ -148,12 +140,7 @@ class TestDataModuleCreation:
     def test_narrowband_transforms(self, tmp_path):
         """Test narrowband configs produce expected transforms."""
         config = load_config_from_yaml(CONFIGS_DIR / "narrowband_clean_train_all.yaml")
-        dm = TorchSigDataModule.from_config(
-            config,
-            root=tmp_path / "test_narrowband",
-            dataset_size=100,
-            overwrite=True
-        )
+        dm = TorchSigDataModule.from_config(config, root=tmp_path / "test_narrowband", dataset_size=100, overwrite=True)
 
         transform_classes = [t.__class__ for t in dm.transforms]
         assert ComplexTo2D in transform_classes, "Narrowband config should include ComplexTo2D"
@@ -162,16 +149,12 @@ class TestDataModuleCreation:
     def test_wideband_transforms(self, tmp_path):
         """Test wideband configs produce expected transforms."""
         config = load_config_from_yaml(CONFIGS_DIR / "wideband_clean_train_all.yaml")
-        dm = TorchSigDataModule.from_config(
-            config,
-            root=tmp_path / "test_wideband",
-            dataset_size=100,
-            overwrite=True
-        )
+        dm = TorchSigDataModule.from_config(config, root=tmp_path / "test_wideband", dataset_size=100, overwrite=True)
 
         transform_classes = [t.__class__ for t in dm.transforms]
         assert Spectrogram in transform_classes, "Wideband config should include Spectrogram"
         assert ComplexTo2D not in transform_classes, "Wideband config should not include ComplexTo2D"
+
 
 class TestYOLOLabelBehavior:
     """Test YOLOLabel behavior for spectrogram outputs."""
@@ -179,12 +162,7 @@ class TestYOLOLabelBehavior:
     def test_default_yolo_label(self, tmp_path):
         """Test that wideband configs include YOLOLabel by default."""
         config = load_config_from_yaml(CONFIGS_DIR / "wideband_clean_train_all.yaml")
-        dm = TorchSigDataModule.from_config(
-            config,
-            root=tmp_path / "test_default_yolo",
-            dataset_size=100,
-            overwrite=True
-        )
+        dm = TorchSigDataModule.from_config(config, root=tmp_path / "test_default_yolo", dataset_size=100, overwrite=True)
 
         transform_classes = [t.__class__ for t in dm.transforms]
         assert YOLOLabel in transform_classes, "Wideband should include YOLOLabel by default"
@@ -198,7 +176,7 @@ class TestYOLOLabelBehavior:
             root=tmp_path / "test_no_yolo",
             dataset_size=100,
             overwrite=True,
-            target_labels=[]  # Explicitly disable YOLO
+            target_labels=[],  # Explicitly disable YOLO
         )
 
         transform_classes = [t.__class__ for t in dm.transforms]
@@ -209,13 +187,7 @@ class TestYOLOLabelBehavior:
     def test_custom_target_labels_with_yolo(self, tmp_path):
         """Test custom target labels including yolo_label."""
         config = load_config_from_yaml(CONFIGS_DIR / "wideband_clean_train_all.yaml")
-        dm = TorchSigDataModule.from_config(
-            config,
-            root=tmp_path / "test_custom_with_yolo",
-            dataset_size=100,
-            overwrite=True,
-            target_labels=["yolo_label", "snr"]
-        )
+        dm = TorchSigDataModule.from_config(config, root=tmp_path / "test_custom_with_yolo", dataset_size=100, overwrite=True, target_labels=["yolo_label", "snr"])
 
         transform_classes = [t.__class__ for t in dm.transforms]
         assert YOLOLabel in transform_classes, "YOLOLabel should be present"
@@ -230,7 +202,7 @@ class TestYOLOLabelBehavior:
             root=tmp_path / "test_narrowband_yolo",
             dataset_size=100,
             overwrite=True,
-            target_labels=["yolo_label"]  # This should be ignored for IQ output
+            target_labels=["yolo_label"],  # This should be ignored for IQ output
         )
 
         transform_classes = [t.__class__ for t in dm.transforms]

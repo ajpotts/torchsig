@@ -9,11 +9,9 @@ from torchsig.signals.builders.lora import (
     build_lora_symbol_stream,
     lora_modulator,
 )
-from torchsig.signals.builders.constellation_maps import all_symbol_maps
 from torchsig.signals.signal_lists import CLASS_FAMILY_DICT, TorchSigSignalLists
 from torchsig.utils.dsp import TorchSigComplexDataType
 from torchsig.utils.signal_building import lookup_signal_generator_by_string
-
 
 LORA_METADATA = {
     "sample_rate": 10_000_000,
@@ -43,8 +41,7 @@ def test_lora_modulator_output():
     """The modulator returns finite complex IQ of the right length."""
     rng = np.random.default_rng(42)
     num_samples = 4096
-    iq = lora_modulator(sf=9, bandwidth=250_000, sample_rate=10_000_000,
-                        num_samples=num_samples, rng=rng)
+    iq = lora_modulator(sf=9, bandwidth=250_000, sample_rate=10_000_000, num_samples=num_samples, rng=rng)
     assert iq.dtype == TorchSigComplexDataType
     assert len(iq) == num_samples
     assert np.all(np.isfinite(iq))

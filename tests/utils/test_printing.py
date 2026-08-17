@@ -146,10 +146,7 @@ def test_dataset_metadata_repr_handles_none_distributions():
 
 
 def assert_metadata_line(result: str, field: str, value: str):
-    assert any(
-        line.startswith(field) and value in line
-        for line in result.splitlines()
-    )
+    assert any(line.startswith(field) and value in line for line in result.splitlines())
 
 
 def test_dataset_metadata_str_contains_header_separator_and_core_fields():

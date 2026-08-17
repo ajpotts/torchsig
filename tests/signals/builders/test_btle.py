@@ -3,18 +3,15 @@
 import numpy as np
 import pytest
 
-from torchsig.signals.builders.constellation_maps import all_symbol_maps
-from torchsig.signals.signal_lists import CLASS_FAMILY_DICT, TorchSigSignalLists
-from torchsig.utils.dsp import TorchSigComplexDataType
-from torchsig.utils.signal_building import lookup_signal_generator_by_string
-
-
 from torchsig.signals.builders.btle import (
     BTLE_ACCESS_ADDRESS,
     BTLESignalGenerator,
     btle_modulator,
     build_btle_bit_stream,
 )
+from torchsig.signals.signal_lists import CLASS_FAMILY_DICT, TorchSigSignalLists
+from torchsig.utils.dsp import TorchSigComplexDataType
+from torchsig.utils.signal_building import lookup_signal_generator_by_string
 
 BTLE_METADATA = {
     "sample_rate": 10_000_000,
@@ -32,7 +29,8 @@ def test_btle_access_address():
 
 def test_btle_bit_stream_contains_access_address():
     """The bit stream begins with the 8-bit preamble then the 32-bit access address."""
-    from torchsig.signals.builders.btle import _AA_BITS, _PREAMBLE_BITS
+    from torchsig.signals.builders.btle import _PREAMBLE_BITS
+
     rng = np.random.default_rng(0)
     stream = build_btle_bit_stream(100, rng)
     assert len(stream) == 100

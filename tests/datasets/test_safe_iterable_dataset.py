@@ -48,6 +48,7 @@ class DummySignalGenerator(dict):
         This generator inherits from dict to support metadata assignment via
         dictionary-style access, which is required by TorchSig's dataset machinery.
     """
+
     def __call__(self) -> Signal:
         """Generate a test Signal with predefined IQ data and metadata.
 
@@ -98,12 +99,11 @@ def _minimal_metadata() -> dict:
     )
     return md
 
+
 # ----------------------------------------------------------------------
 # Helper: transform that can be forced to fail a few times
 # ----------------------------------------------------------------------
-def _counter_transform(
-    counter: list[int], failures_before_success: int = 0, multiply: float | None = None
-) -> Callable[[Signal], Signal]:
+def _counter_transform(counter: list[int], failures_before_success: int = 0, multiply: float | None = None) -> Callable[[Signal], Signal]:
     def _transform(sig: Signal) -> Signal:
         if counter[0] < failures_before_success:
             counter[0] += 1
@@ -111,7 +111,9 @@ def _counter_transform(
         if multiply is not None:
             sig.data = sig.data * multiply
         return sig
+
     return _transform
+
 
 # ----------------------------------------------------------------------
 # Helper to create the dataset
@@ -130,6 +132,7 @@ def _make_safe_dataset(
         **md,
     )
 
+
 # ----------------------------------------------------------------------
 # Fixture that captures logs
 # ----------------------------------------------------------------------
@@ -138,6 +141,7 @@ def default_logging(caplog):
     caplog.set_level(logging.WARNING)
     return caplog
 
+
 # ----------------------------------------------------------------------
 # Helpers for log asserts
 # ----------------------------------------------------------------------
@@ -145,9 +149,11 @@ def _has_exact_fallback_warning(records):
     """Return True iff records contain the sentence 'Retries exhausted'."""
     return any("Retries exhausted" in r.message for r in records)
 
+
 def _count_retry_warnings(records):
     """Return the number of lines containing 'retry NUMBER/MINUS failed'."""
     return len([r for r in records if re.search(r"retry \d+/\d+ failed", r.message)])
+
 
 # ----------------------------------------------------------------------
 # Tests
@@ -165,6 +171,7 @@ def test_safe_dataset_normal_operation(default_logging):
     assert data.dtype == np.complex64
     assert isinstance(lbl, int)
 
+
 def test_safe_dataset_fallback_original(default_logging):
     counter = [0]
     ds = _make_safe_dataset(
@@ -177,6 +184,7 @@ def test_safe_dataset_fallback_original(default_logging):
     assert val.shape[0] == 256
     assert val.dtype == np.complex64
     assert _count_retry_warnings(default_logging.records) == 0
+
 
 def test_safe_dataset_fallback_zero(default_logging):
     counter = [0]
@@ -191,6 +199,7 @@ def test_safe_dataset_fallback_zero(default_logging):
     assert val.dtype == np.complex64
     assert np.allclose(val, np.zeros_like(val))
     assert _count_retry_warnings(default_logging.records) == 0
+
 
 def test_safe_dataset_fallback_retry_success(default_logging):
     counter = [0]
@@ -210,6 +219,7 @@ def test_safe_dataset_fallback_retry_success(default_logging):
     # No explicit 'Retries exhausted' line
     assert not _has_exact_fallback_warning(default_logging.records)
 
+
 def test_safe_dataset_fallback_retry_exhausted(default_logging):
     counter = [0]
     ds = _make_safe_dataset(
@@ -227,6 +237,7 @@ def test_safe_dataset_fallback_retry_exhausted(default_logging):
     # Exactly one explicit 'Retries exhausted' line
     assert _has_exact_fallback_warning(default_logging.records)
 
+
 def test_safe_dataset_fallback_original(default_logging):
     counter = [0]
     ds = _make_safe_dataset(
@@ -242,6 +253,7 @@ def test_safe_dataset_fallback_original(default_logging):
     assert val.dtype == np.complex64
     assert _count_retry_warnings(default_logging.records) == 1
     assert _has_exact_fallback_warning(default_logging.records)
+
 
 def test_safe_dataset_fallback_zero(default_logging):
     counter = [0]
@@ -260,9 +272,8 @@ def test_safe_dataset_fallback_zero(default_logging):
     assert _count_retry_warnings(default_logging.records) == 1
     assert _has_exact_fallback_warning(default_logging.records)
 
-def test_safe_dataset_generation_failure_reraises_without_raw_signal(
-    default_logging, monkeypatch
-):
+
+def test_safe_dataset_generation_failure_reraises_without_raw_signal(default_logging, monkeypatch):
     ds = _make_safe_dataset(
         transforms=[],
         target_labels=[],
@@ -336,9 +347,7 @@ def test_safe_dataset_logs_completed_metadata_snapshot(caplog):
 
     next(dataset)
 
-    snapshots = [
-        record for record in caplog.records if record.metadata_event == "snapshot"
-    ]
+    snapshots = [record for record in caplog.records if record.metadata_event == "snapshot"]
     assert len(snapshots) == 1
     snapshot = snapshots[0]
     assert snapshot.metadata_snapshot == {"complete": "True"}

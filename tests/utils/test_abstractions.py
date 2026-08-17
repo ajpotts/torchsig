@@ -94,9 +94,7 @@ def test_metadata_can_be_accessed_as_attribute():
 
 
 def test_real_attribute_takes_precedence_over_metadata():
-    obj = ExampleMetadataObject(
-        metadata={"class_attribute": "metadata value"}
-    )
+    obj = ExampleMetadataObject(metadata={"class_attribute": "metadata value"})
 
     assert obj.class_attribute == "class value"
     assert obj["class_attribute"] == "metadata value"
@@ -461,12 +459,11 @@ def test_metadata_debug_context_restores_enabled_state_after_exception():
     )
     previous_config = obj.metadata_debug_config
 
-    with pytest.raises(RuntimeError, match="test error"):
-        with obj.metadata_debug(
-            keys={"temporary"},
-            events={"set"},
-        ):
-            raise RuntimeError("test error")
+    with pytest.raises(RuntimeError, match="test error"), obj.metadata_debug(
+        keys={"temporary"},
+        events={"set"},
+    ):
+        raise RuntimeError("test error")
 
     assert obj.metadata_debug_enabled is True
     assert obj.metadata_debug_config == previous_config
@@ -497,9 +494,7 @@ def test_metadata_debug_state_survives_pickle_round_trip():
 
 def test_metadata_debug_filters_keys_and_events(caplog):
     caplog.set_level(logging.DEBUG, logger="torchsig.metadata")
-    obj = HierarchicalMetadataObject(
-        metadata={"field": "value", "other": "other-value"}
-    )
+    obj = HierarchicalMetadataObject(metadata={"field": "value", "other": "other-value"})
     obj.enable_metadata_debug(keys={"field"}, events={"lookup"})
 
     assert obj["field"] == "value"

@@ -80,17 +80,10 @@ class _MetadataDebugSession:
 
     def should_emit(self, event: MetadataDebugEvent, key: str | None = None) -> bool:
         """Apply filters and rate limits before constructing a log record."""
-        if event not in self.config.events or (
-            key is not None
-            and self.config.keys is not None
-            and key not in self.config.keys
-        ):
+        if event not in self.config.events or (key is not None and self.config.keys is not None and key not in self.config.keys):
             self.filtered_events += 1
             return False
-        if (
-            self.config.max_events is not None
-            and self.emitted_events >= self.config.max_events
-        ) or not _log.isEnabledFor(logging.DEBUG):
+        if (self.config.max_events is not None and self.emitted_events >= self.config.max_events) or not _log.isEnabledFor(logging.DEBUG):
             self.suppressed_events += 1
             return False
         return True
@@ -169,9 +162,7 @@ class _MetadataDebugSession:
             "metadata_event": "snapshot",
             "metadata_object_type": type(metadata_object).__name__,
             "metadata_snapshot_keys": tuple(selected_metadata),
-            "metadata_component_snapshot_keys": tuple(
-                tuple(metadata) for metadata in component_metadata
-            ),
+            "metadata_component_snapshot_keys": tuple(tuple(metadata) for metadata in component_metadata),
             "metadata_component_count": len(component_metadata),
             "metadata_data_shape": getattr(data, "shape", None),
             "metadata_data_dtype": str(getattr(data, "dtype", "")) or None,
@@ -182,10 +173,7 @@ class _MetadataDebugSession:
                 selected_metadata,
                 self.config.value_repr_limit,
             )
-            extra["metadata_component_snapshots"] = tuple(
-                _snapshot_value_reprs(metadata, self.config.value_repr_limit)
-                for metadata in component_metadata
-            )
+            extra["metadata_component_snapshots"] = tuple(_snapshot_value_reprs(metadata, self.config.value_repr_limit) for metadata in component_metadata)
 
         _log.debug(
             "metadata snapshot: object=%s keys=%d components=%d",
@@ -327,10 +315,7 @@ def _snapshot_value_reprs(
     limit: int,
 ) -> dict[str, str]:
     """Return bounded representations for all values in a metadata snapshot."""
-    return {
-        key: _bounded_metadata_value_repr(value, limit)[0]
-        for key, value in metadata.items()
-    }
+    return {key: _bounded_metadata_value_repr(value, limit)[0] for key, value in metadata.items()}
 
 
 @dataclass(frozen=True)
