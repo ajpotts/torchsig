@@ -79,9 +79,6 @@ CLASS_FAMILY_DICT: Final[dict[str, str]] = {
     "p25": "lmr",
     "lora": "lora",
     "80211a": "wifi",  # data
-    "80211a_ack": "wifi",
-    "80211a_cts": "wifi",
-    "80211a_rts": "wifi",
     "zigbee": "zigbee",
 }
 
@@ -117,7 +114,7 @@ class TorchSigSignalLists:
         lmr_signals: Land Mobile Radio standards: Digital Mobile Radio (structured 4FSK) 'dmr'
             and APCO P25 Phase I (structured C4FM 4FSK) 'p25'.
         lora_signals: LoRa signal, a chirp spread spectrum with structured preamble.
-        wifi_signals: WiFi signals, such as IEEE 802.11a (structured OFDM) signals, incl. RTS/CTS/ACK.
+        wifi_signals: WiFi signals, such as IEEE 802.11a structured OFDM data signals.
         zigbee_signals: IEEE 802.15.4 ZigBee (O-QPSK DSSS).
     """
 

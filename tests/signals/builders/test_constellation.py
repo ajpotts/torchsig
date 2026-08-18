@@ -777,10 +777,11 @@ def test_constellation_modulator_rejects_incorrect_final_length():
         patch(
             f"{MODULE_PATH}.pad_head_tail_to_length",
             return_value=incorrectly_padded,
-        ),pytest.raises(
-        ValueError,
-        match=("constellation mod producing incorrect number of samples: 99 but requested: 100"),
-    )
+        ),
+        pytest.raises(
+            ValueError,
+            match=("constellation mod producing incorrect number of samples: 99 but requested: 100"),
+        ),
     ):
         constellation_modulator(
             constellation_name="qpsk",

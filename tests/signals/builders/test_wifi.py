@@ -113,21 +113,23 @@ def test_wifi_generator_reproducible():
 
 
 def test_wifi_registered_in_lookup_table():
-    """All four 802.11a class names resolve and appear in 'all'."""
+    """All frame generators resolve, but only data appears in 'all'."""
+    control_frame_names = {"80211a_rts", "80211a_cts", "80211a_ack"}
     for name in ["80211a", "80211a_rts", "80211a_cts", "80211a_ack"]:
         assert isinstance(lookup_signal_generator_by_string(name), Wifi80211aSignalGenerator)
 
     all_gen = lookup_signal_generator_by_string("all")
-    class_names = [g.class_name for g in all_gen.signal_generators if hasattr(g, "class_name")]
-    for name in ["80211a", "80211a_rts", "80211a_cts", "80211a_ack"]:
-        assert name in class_names
+    class_names = {generator.class_name for generator in all_gen.signal_generators if hasattr(generator, "class_name")}
+    assert "80211a" in class_names
+    assert control_frame_names.isdisjoint(class_names)
 
 
 def test_wifi_in_signal_lists():
-    """802.11a signals are grouped into the 'wifi' family."""
-    wifi_names = {"80211a", "80211a_rts", "80211a_cts", "80211a_ack"}
+    """Only the 802.11a data signal is exposed in the WiFi class list."""
+    control_frame_names = {"80211a_rts", "80211a_cts", "80211a_ack"}
 
-    assert all(CLASS_FAMILY_DICT[name] == "wifi" for name in wifi_names)
+    assert CLASS_FAMILY_DICT["80211a"] == "wifi"
+    assert control_frame_names.isdisjoint(CLASS_FAMILY_DICT)
     assert "wifi" in TorchSigSignalLists.family_list
     lists = TorchSigSignalLists()
-    assert wifi_names.issubset(lists.wifi_signals)
+    assert lists.wifi_signals == ["80211a"]

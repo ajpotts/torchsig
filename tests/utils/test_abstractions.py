@@ -459,9 +459,12 @@ def test_metadata_debug_context_restores_enabled_state_after_exception():
     )
     previous_config = obj.metadata_debug_config
 
-    with pytest.raises(RuntimeError, match="test error"), obj.metadata_debug(
-        keys={"temporary"},
-        events={"set"},
+    with (
+        pytest.raises(RuntimeError, match="test error"),
+        obj.metadata_debug(
+            keys={"temporary"},
+            events={"set"},
+        ),
     ):
         raise RuntimeError("test error")
 

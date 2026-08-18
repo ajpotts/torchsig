@@ -60,6 +60,7 @@ notebooks = [
     "ipywidgets",
     "nb-clean",
     "tqdm",
+    "sigmf",
 ]
 
 examples = [

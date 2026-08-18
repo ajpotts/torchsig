@@ -1,4 +1,3 @@
-
 from torchsig.signals.signal_lists import CLASS_FAMILY_DICT
 from torchsig.utils.signal_building import signal_generator_lookup_table
 

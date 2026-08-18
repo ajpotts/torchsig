@@ -102,9 +102,7 @@ def test_doppler_does_not_append_zeros_to_preserve_length() -> None:
     ("velocity", "propagation_speed"),
     [(2.9979e8, 2.9979e8), (2.9979e8 + 1, 2.9979e8), (np.nan, 2.9979e8), (1.0, 0.0)],
 )
-def test_doppler_rejects_invalid_physical_parameters(
-    velocity: float, propagation_speed: float
-) -> None:
+def test_doppler_rejects_invalid_physical_parameters(velocity: float, propagation_speed: float) -> None:
     """Invalid propagation speeds and velocities should raise a clear error."""
     with pytest.raises(ValueError, match="velocity|propagation_speed"):
         doppler(np.ones(16, dtype=TorchSigComplexDataType), velocity, propagation_speed)
