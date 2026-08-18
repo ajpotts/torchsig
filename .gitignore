@@ -59,6 +59,8 @@ examples/scripts/*
 !examples/scripts/dev/
 examples/scripts/dev/*
 !examples/scripts/dev/debug_datamodule_pipeline.py
+!examples/scripts/dev/debug_wideband_metadata_snapshot.py
+!examples/scripts/dev/debug_wideband_pipeline.py
 
 # Pytest Files
 *.coverage
