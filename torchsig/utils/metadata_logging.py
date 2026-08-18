@@ -9,6 +9,7 @@ import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
+from pprint import pformat
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal, TypeAlias
 
@@ -23,6 +24,69 @@ _CONTEXT_VALUE_LIMIT = 200
 _METADATA_DEBUG_EVENTS = frozenset({"lookup", "set", "delete", "snapshot"})
 _MISSING_METADATA_VALUE = object()
 _log = logging.getLogger("torchsig.metadata")
+
+
+class MetadataDebugFormatter(logging.Formatter):
+    """Format structured metadata operation and summary records for humans."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        """Return a compact record with correlation and resolution fields."""
+        if getattr(record, "metadata_event", None) == "summary":
+            return (
+                "metadata debug summary: "
+                f"emitted={getattr(record, 'metadata_emitted_events', None)} "
+                f"suppressed={getattr(record, 'metadata_suppressed_events', None)} "
+                f"filtered={getattr(record, 'metadata_filtered_events', None)}"
+            )
+
+        fields = getattr(record, "metadata_correlation_fields", {})
+        value = getattr(record, "metadata_value", "<values disabled>")
+        return (
+            f"session={getattr(record, 'metadata_session_id', None)} "
+            f"sample={getattr(record, 'metadata_sample_index', None)} "
+            f"worker={getattr(record, 'metadata_worker_id', None)} "
+            f"stage={fields.get('stage')} "
+            f"event={getattr(record, 'metadata_event', None)} "
+            f"key={getattr(record, 'metadata_key', None)} "
+            f"source={getattr(record, 'metadata_source', None)} "
+            f"depth={getattr(record, 'metadata_depth', None)} "
+            f"value={value}"
+        )
+
+
+class MetadataSnapshotFormatter(logging.Formatter):
+    """Format structured metadata snapshot and summary records for humans."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        """Return a readable completed snapshot or debug-session summary."""
+        if getattr(record, "metadata_event", None) == "summary":
+            return (
+                "metadata snapshot summary: "
+                f"emitted={getattr(record, 'metadata_emitted_events', None)} "
+                f"suppressed={getattr(record, 'metadata_suppressed_events', None)}"
+            )
+
+        context = getattr(record, "metadata_correlation_fields", {})
+        snapshot = {
+            "session_id": getattr(record, "metadata_session_id", None),
+            "dataset_id": getattr(record, "metadata_dataset_id", None),
+            "sample_index": getattr(record, "metadata_sample_index", None),
+            "worker_id": getattr(record, "metadata_worker_id", None),
+            "stage": context.get("stage"),
+            "data_shape": getattr(record, "metadata_data_shape", None),
+            "data_dtype": getattr(record, "metadata_data_dtype", None),
+            "metadata": getattr(record, "metadata_snapshot", None),
+            "component_metadata": getattr(
+                record,
+                "metadata_component_snapshots",
+                (),
+            ),
+        }
+        return "completed metadata snapshot:\n" + pformat(
+            snapshot,
+            sort_dicts=False,
+            width=100,
+        )
 
 
 @dataclass(frozen=True)
@@ -443,8 +507,10 @@ def _metadata_logging_extra() -> dict[str, object]:
 __all__ = [
     "MetadataContextValue",
     "MetadataDebugConfig",
+    "MetadataDebugFormatter",
     "MetadataDebugStatistics",
     "MetadataLoggingContext",
+    "MetadataSnapshotFormatter",
     "get_metadata_logging_context",
     "metadata_logging_context",
 ]

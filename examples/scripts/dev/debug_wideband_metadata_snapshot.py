@@ -18,51 +18,16 @@ import argparse
 import logging
 from contextlib import nullcontext
 from pathlib import Path
-from pprint import pformat
 from tempfile import TemporaryDirectory
 
 from torchsig.datasets.datamodules import TorchSigDataModule
+from torchsig.utils.metadata_logging import MetadataSnapshotFormatter
 from torchsig.utils.writer import identity_collate_fn
 
 DEFAULT_CONFIG = (
     Path(__file__).resolve().parents[3]
     / "torchsig/datasets/default_configs/wideband_clean_train_all.yaml"
 )
-
-
-class MetadataSnapshotFormatter(logging.Formatter):
-    """Format a complete metadata snapshot for interactive inspection."""
-
-    def format(self, record: logging.LogRecord) -> str:
-        """Return a readable snapshot or debug-session summary."""
-        if getattr(record, "metadata_event", None) == "summary":
-            return (
-                "metadata snapshot summary: "
-                f"emitted={record.metadata_emitted_events} "
-                f"suppressed={record.metadata_suppressed_events}"
-            )
-
-        context = getattr(record, "metadata_correlation_fields", {})
-        snapshot = {
-            "session_id": getattr(record, "metadata_session_id", None),
-            "dataset_id": getattr(record, "metadata_dataset_id", None),
-            "sample_index": getattr(record, "metadata_sample_index", None),
-            "worker_id": getattr(record, "metadata_worker_id", None),
-            "stage": context.get("stage"),
-            "data_shape": getattr(record, "metadata_data_shape", None),
-            "data_dtype": getattr(record, "metadata_data_dtype", None),
-            "metadata": getattr(record, "metadata_snapshot", None),
-            "component_metadata": getattr(
-                record,
-                "metadata_component_snapshots",
-                (),
-            ),
-        }
-        return "completed metadata snapshot:\n" + pformat(
-            snapshot,
-            sort_dicts=False,
-            width=100,
-        )
 
 
 def parse_args() -> argparse.Namespace:

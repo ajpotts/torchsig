@@ -21,6 +21,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from torchsig.datasets.datamodules import TorchSigDataModule
+from torchsig.utils.metadata_logging import MetadataDebugFormatter
 from torchsig.utils.writer import identity_collate_fn
 
 DEFAULT_CONFIG = (
@@ -42,26 +43,6 @@ DEBUG_KEYS = {
     "signal_center_freq_max",
     "signal_center_freq_min",
 }
-
-
-class MetadataDebugFormatter(logging.Formatter):
-    """Format TorchSIG metadata records with their correlation fields."""
-
-    def format(self, record: logging.LogRecord) -> str:
-        """Return a compact, human-readable representation of one record."""
-        fields = getattr(record, "metadata_correlation_fields", {})
-        value = getattr(record, "metadata_value", "<values disabled>")
-        return (
-            f"session={getattr(record, 'metadata_session_id', None)} "
-            f"sample={getattr(record, 'metadata_sample_index', None)} "
-            f"worker={getattr(record, 'metadata_worker_id', None)} "
-            f"stage={fields.get('stage')} "
-            f"event={getattr(record, 'metadata_event', None)} "
-            f"key={getattr(record, 'metadata_key', None)} "
-            f"source={getattr(record, 'metadata_source', None)} "
-            f"depth={getattr(record, 'metadata_depth', None)} "
-            f"value={value}"
-        )
 
 
 def parse_args() -> argparse.Namespace:
