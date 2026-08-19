@@ -526,6 +526,93 @@ def test_split_datamodule_uses_split_specific_seeds(
     assert loader_seeds == [11, 22, 33]
 
 
+@patch("torchsig.datasets.datamodules.DatasetCreator")
+@patch("torchsig.datasets.datamodules.WorkerSeedingDataLoader")
+@patch("torchsig.datasets.datamodules.TorchSigIterableDataset")
+def test_split_datamodule_enables_metadata_debug_for_every_split(
+    iterable_dataset_cls,
+    dataloader_cls,
+    dataset_creator_cls,
+    tmp_path,
+):
+    datasets = [MagicMock(), MagicMock(), MagicMock()]
+    iterable_dataset_cls.side_effect = datasets
+    debug_options = {
+        "events": {"snapshot"},
+        "include_values": True,
+        "max_events": 7,
+    }
+    dm = SplitTorchSigDataModule(
+        train_cfg=_mock_config(dataset_length=12, seed=11),
+        val_cfg=_mock_config(dataset_length=6, seed=22),
+        test_cfg=_mock_config(dataset_length=4, seed=33),
+        root=tmp_path,
+        metadata_debug=debug_options,
+    )
+
+    dm.prepare_data()
+
+    for dataset in datasets:
+        dataset.enable_metadata_debug.assert_called_once_with(**debug_options)
+
+
+@patch("torchsig.datasets.datamodules.DatasetCreator")
+@patch("torchsig.datasets.datamodules.WorkerSeedingDataLoader")
+@patch("torchsig.datasets.datamodules.TorchSigIterableDataset")
+def test_datamodule_metadata_debug_is_disabled_by_default(
+    iterable_dataset_cls,
+    dataloader_cls,
+    dataset_creator_cls,
+    tmp_path,
+):
+    dataset = iterable_dataset_cls.return_value
+    dm = TorchSigDataModule(
+        root=tmp_path,
+        metadata={},
+        dataset_size=1,
+    )
+
+    dm.prepare_data()
+
+    dataset.enable_metadata_debug.assert_not_called()
+
+
+@patch("torchsig.datasets.datamodules.DatasetCreator")
+@patch("torchsig.datasets.datamodules.WorkerSeedingDataLoader")
+@patch("torchsig.datasets.datamodules.TorchSigIterableDataset")
+def test_datamodule_metadata_debug_true_uses_default_options(
+    iterable_dataset_cls,
+    dataloader_cls,
+    dataset_creator_cls,
+    tmp_path,
+):
+    dataset = iterable_dataset_cls.return_value
+    dm = TorchSigDataModule(
+        root=tmp_path,
+        metadata={},
+        dataset_size=1,
+        metadata_debug=True,
+    )
+
+    dm.prepare_data()
+
+    dataset.enable_metadata_debug.assert_called_once_with()
+
+
+@pytest.mark.parametrize("metadata_debug", [None, 1, "trace", []])
+def test_datamodule_rejects_invalid_metadata_debug_configuration(
+    metadata_debug,
+    tmp_path,
+):
+    with pytest.raises(TypeError, match="metadata_debug must be"):
+        TorchSigDataModule(
+            root=tmp_path,
+            metadata={},
+            dataset_size=1,
+            metadata_debug=metadata_debug,
+        )
+
+
 @patch("torchsig.datasets.datamodules.StaticTorchSigDataset")
 def test_split_datamodule_setup_fit_loads_train_and_val_only(
     static_dataset_cls,
