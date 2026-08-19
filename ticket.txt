@@ -1,0 +1,32 @@
+## Description
+
+`test_all_generator_contains_only_concrete_generators` fails because the `"all"` signal generator list is inconsistent with the concrete generators in `signal_generator_lookup_table`.
+
+This may have been introduced when the 802.11a control-frame signal classes were removed. Entries for the removed control-frame types appear to remain in `signal_generator_lookup_table`, while they are no longer included in the `"all"` generator list.
+
+## Failure
+
+```text
+FAILED tests/utils/test_signal_building.py::test_all_generator_contains_only_concrete_generators
+
+At index 68 diff:
+(<class 'torchsig.signals.builders.zigbee.ZigBeeSignalGenerator'>, {})
+!=
+(<class 'torchsig.signals.builders.wifi.Wifi80211aSignalGenerator'>,
+ {'frame_type': 'ack'})
+
+Right contains 3 more items, first extra item:
+(<class 'torchsig.signals.builders.wifi.Wifi80211aSignalGenerator'>,
+ {'frame_type': 'cts'})
+```
+
+## Expected Behavior
+
+All concrete generators in `signal_generator_lookup_table` should be represented consistently in the `"all"` generator list. Removed 802.11a control-frame signal types should not remain as concrete lookup-table entries.
+
+## Test
+
+```bash
+pytest -q tests/utils/test_signal_building.py::test_all_generator_contains_only_concrete_generators
+```
+
