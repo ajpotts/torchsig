@@ -78,16 +78,47 @@ Snapshots can also be emitted explicitly::
 The ``keys`` filter applies to both sample and component mappings. Snapshot
 construction reads the hierarchy without producing additional lookup events.
 
+DataModule and DataLoader pipelines
+-----------------------------------
+
+Both TorchSig DataModules can enable metadata debugging on the iterable
+datasets used to create their static datasets. Pass ``metadata_debug=True`` to
+use the default event configuration::
+
+    datamodule = TorchSigDataModule(
+        ...,
+        metadata_debug=True,
+    )
+
+Pass a mapping to forward options to ``enable_metadata_debug``::
+
+    datamodule = SplitTorchSigDataModule(
+        ...,
+        metadata_debug={
+            "events": {"snapshot"},
+            "include_values": True,
+            "max_events": 100,
+        },
+    )
+
+Debugging is enabled before the creation DataLoader starts, so worker copies
+inherit the debug session. Configure the ``torchsig.metadata`` logger in the
+main application before starting workers. Records include process and worker
+identifiers and may arrive interleaved when ``create_num_workers`` is greater
+than zero. Use ``metadata_debug=False`` (the default) for normal generation.
+
 Examples
 --------
 
-The developer scripts demonstrate both modes with the default wideband
-configuration:
+The developer script demonstrates snapshot debugging through dataset creation
+and a DataModule-provided loader:
 
 .. code-block:: console
 
-    python examples/scripts/dev/debug_wideband_pipeline.py
-    python examples/scripts/dev/debug_wideband_metadata_snapshot.py
+    python examples/scripts/dev/debug_datamodule_pipeline.py
+
+Pass ``--root PATH`` to retain the generated demonstration dataset. Without
+that argument, the script uses and removes a temporary directory.
 
 Value safety
 ------------

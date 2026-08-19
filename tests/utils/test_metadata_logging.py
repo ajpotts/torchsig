@@ -15,7 +15,9 @@ import pytest
 from torchsig.signals.signal_types import Signal
 from torchsig.utils.abstractions import HierarchicalMetadataObject
 from torchsig.utils.metadata_logging import (
+    MetadataDebugFormatter,
     MetadataLoggingContext,
+    MetadataSnapshotFormatter,
     get_metadata_logging_context,
     metadata_logging_context,
 )
@@ -189,6 +191,40 @@ def test_metadata_summary_uses_context_active_when_disabled(caplog):
     assert summary.metadata_session_id == "summary-session"
 
 
+def test_metadata_debug_formatter_formats_operation_record(caplog):
+    caplog.set_level(logging.DEBUG, logger="torchsig.metadata")
+    obj = HierarchicalMetadataObject(metadata={"field": "value"})
+    obj.enable_metadata_debug(include_values=True)
+
+    with metadata_logging_context(
+        session_id="session",
+        sample_index=7,
+        worker_id=2,
+        fields={"stage": "generate"},
+    ):
+        assert obj["field"] == "value"
+
+    formatted = MetadataDebugFormatter().format(caplog.records[-1])
+
+    assert formatted == ("session=session sample=7 worker=2 stage=generate event=lookup key=field source=local depth=0 value='value'")
+
+
+def test_metadata_debug_formatter_handles_disabled_values_and_summary(caplog):
+    caplog.set_level(logging.DEBUG, logger="torchsig.metadata")
+    obj = HierarchicalMetadataObject(metadata={"field": "value"})
+    obj.enable_metadata_debug()
+    assert obj["field"] == "value"
+    operation = caplog.records[-1]
+    obj.disable_metadata_debug()
+    summary = caplog.records[-1]
+
+    formatted_operation = MetadataDebugFormatter().format(operation)
+    formatted_summary = MetadataDebugFormatter().format(summary)
+
+    assert formatted_operation.endswith("value=<values disabled>")
+    assert formatted_summary == ("metadata debug summary: emitted=1 suppressed=0 filtered=0")
+
+
 def test_metadata_snapshot_includes_complete_object_and_components(caplog):
     caplog.set_level(logging.DEBUG, logger="torchsig.metadata")
     dataset = HierarchicalMetadataObject(metadata={"sample_rate": 10_000_000, "unused": "filtered"})
@@ -222,6 +258,46 @@ def test_metadata_snapshot_includes_complete_object_and_components(caplog):
     assert record.metadata_data_shape == (2, 2)
     assert record.metadata_data_dtype == "float32"
     assert "unused" not in record.metadata_snapshot
+
+
+def test_metadata_snapshot_formatter_formats_snapshot_record(caplog):
+    caplog.set_level(logging.DEBUG, logger="torchsig.metadata")
+    obj = HierarchicalMetadataObject(metadata={"field": "value"})
+    obj.enable_metadata_debug(events={"snapshot"}, include_values=True)
+
+    with metadata_logging_context(
+        session_id="session",
+        dataset_id="dataset",
+        sample_index=3,
+        worker_id=1,
+        fields={"stage": "transform"},
+    ):
+        obj.log_metadata_snapshot()
+
+    formatted = MetadataSnapshotFormatter().format(caplog.records[-1])
+
+    assert formatted.startswith("completed metadata snapshot:\n")
+    assert "'session_id': 'session'" in formatted
+    assert "'dataset_id': 'dataset'" in formatted
+    assert "'stage': 'transform'" in formatted
+    assert "'metadata': {'field': \"'value'\"}" in formatted
+    assert "'component_metadata': ()" in formatted
+
+
+def test_metadata_snapshot_formatter_handles_disabled_values_and_summary(caplog):
+    caplog.set_level(logging.DEBUG, logger="torchsig.metadata")
+    obj = HierarchicalMetadataObject(metadata={"field": "value"})
+    obj.enable_metadata_debug(events={"snapshot"})
+    obj.log_metadata_snapshot()
+    snapshot = caplog.records[-1]
+    obj.disable_metadata_debug()
+    summary = caplog.records[-1]
+
+    formatted_snapshot = MetadataSnapshotFormatter().format(snapshot)
+    formatted_summary = MetadataSnapshotFormatter().format(summary)
+
+    assert "'metadata': None" in formatted_snapshot
+    assert formatted_summary == "metadata snapshot summary: emitted=1 suppressed=0"
 
 
 def test_metadata_snapshot_requires_value_logging_to_include_values(caplog):
