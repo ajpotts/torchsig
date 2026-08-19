@@ -1,8 +1,22 @@
 ## Description
 
-`test_all_generator_contains_only_concrete_generators` fails because the `"all"` signal generator list is inconsistent with the concrete generators in `signal_generator_lookup_table`.
+`test_all_generator_contains_only_concrete_generators` fails because it assumes that every concrete generator in `signal_generator_lookup_table` should also be included in the `"all"` generator.
 
-This may have been introduced when the 802.11a control-frame signal classes were removed. Entries for the removed control-frame types appear to remain in `signal_generator_lookup_table`, while they are no longer included in the `"all"` generator list.
+Some generators are intentionally provided only for specific use cases. In particular, the 802.11a ACK, CTS, and RTS generators remain available through `signal_generator_lookup_table` so they can be explicitly requested, but they are not public signal classes.
+
+These special-use generators should **not** be included in:
+
+* The `"all"` generator
+* `CLASS_FAMILY_DICT`
+* `SIGNALS_SHARED_LIST`
+
+The current implementation correctly excludes them from `"all"`:
+
+```python
+non_public_generator_names = {"80211a_ack", "80211a_cts", "80211a_rts"}
+```
+
+However, the test constructs its expected list from all concrete entries in `signal_generator_lookup_table`, causing it to incorrectly expect these generators in `"all"`.
 
 ## Failure
 
@@ -15,18 +29,12 @@ At index 68 diff:
 (<class 'torchsig.signals.builders.wifi.Wifi80211aSignalGenerator'>,
  {'frame_type': 'ack'})
 
-Right contains 3 more items, first extra item:
-(<class 'torchsig.signals.builders.wifi.Wifi80211aSignalGenerator'>,
- {'frame_type': 'cts'})
+Right contains 3 more items
 ```
 
 ## Expected Behavior
 
-All concrete generators in `signal_generator_lookup_table` should be represented consistently in the `"all"` generator list. Removed 802.11a control-frame signal types should not remain as concrete lookup-table entries.
+The `"all"` generator should contain all public signal classes while excluding special-use generators.
 
-## Test
-
-```bash
-pytest -q tests/utils/test_signal_building.py::test_all_generator_contains_only_concrete_generators
-```
+`80211a_ack`, `80211a_cts`, and `80211a_rts` should remain directly available through `signal_generator_lookup_table`, but should not appear in `"all"` or the shared signal-class lists.
 
