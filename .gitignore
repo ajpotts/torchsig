@@ -72,6 +72,8 @@ env/
 # Specific ignores
 .vscode/
 *.h5
+!tests/utils/file_handlers/golden/packed_v1/data.h5
+!tests/utils/file_handlers/golden/homogeneous_v1/data.h5
 *.conflict
 *.pyo
 *.pyd

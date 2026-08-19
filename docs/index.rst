@@ -21,6 +21,7 @@ TorchSig
     transforms
     metadata_transforms
     metadata_debugging
+    hdf5_readers
     utils
     api
 
