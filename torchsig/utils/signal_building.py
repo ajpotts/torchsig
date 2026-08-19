@@ -24,6 +24,8 @@ __all__ = ["family_names", "lookup_signal_generator_by_string", "num_subcarrier_
 # Stores generator class and metadata for generators to make per label
 SignalGeneratorSpec = tuple[type, dict[str, Any]] | tuple[type, list[tuple[type, dict[str, Any]]], dict[str, Any]]
 
+non_public_generator_names = {"80211a_ack", "80211a_cts", "80211a_rts"}
+
 signal_generator_lookup_table: dict[str, SignalGeneratorSpec] = {}
 
 
@@ -130,7 +132,6 @@ _add_signal_generator("zigbee", ZigBeeSignalGenerator, {})
 
 # convert to list
 concrete_generator_names = list(signal_generator_lookup_table)
-non_public_generator_names = {"80211a_ack", "80211a_cts", "80211a_rts"}
 public_generator_names = [name for name in concrete_generator_names if name not in non_public_generator_names]
 
 signal_generator_lookup_table["all"] = (

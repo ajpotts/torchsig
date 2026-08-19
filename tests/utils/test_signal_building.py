@@ -96,17 +96,34 @@ def test_am_generator_entries(am_mode):
     )
 
 
-def test_all_generator_contains_only_concrete_generators():
+def test_all_generator_contains_only_public_concrete_generators():
     generator_cls, generator_list, metadata = signal_building.signal_generator_lookup_table["all"]
 
     assert generator_cls is ConcatSignalGenerator
     assert metadata == {}
 
-    concrete_names = [name for name in signal_building.signal_generator_lookup_table if name not in {"all", *signal_building.family_names}]
+    public_concrete_names = [
+        name
+        for name in signal_building.signal_generator_lookup_table
+        if name
+        not in {
+            "all",
+            *signal_building.family_names,
+            *signal_building.non_public_generator_names,
+        }
+    ]
 
-    expected_generator_list = [signal_building.signal_generator_lookup_table[name] for name in concrete_names]
+    expected_generator_list = [signal_building.signal_generator_lookup_table[name] for name in public_concrete_names]
 
     assert generator_list == expected_generator_list
+
+
+def test_non_public_generators_are_available_but_excluded_from_all():
+    _, generator_list, _ = signal_building.signal_generator_lookup_table["all"]
+
+    for name in signal_building.non_public_generator_names:
+        assert name in signal_building.signal_generator_lookup_table
+        assert signal_building.signal_generator_lookup_table[name] not in generator_list
 
 
 @pytest.mark.parametrize("family_name", signal_building.family_names)
