@@ -1,0 +1,96 @@
+Description
+
+While reviewing TorchSigIterableDataset.__generate_new_signal__(), we noticed that center_freq appears to represent different concepts depending on where it is stored in the metadata hierarchy.
+Current behavior appears to be:
+
+
+        
+      
+Dataset metadata
+
+
+center_freq represents the configured RF/receiver center frequency (e.g. 2.4 GHz).
+
+
+
+        
+      
+Generated parent Signal
+
+
+center_freq is explicitly set to 0, suggesting the assembled IQ recording is represented in baseband coordinates.
+
+
+
+        
+      
+Component Signals
+
+
+frequency_shift_signal() assigns center_freq to the relative frequency shift within the sampled IQ bandwidth.
+
+
+
+Since HierarchicalMetadataObject.get_full_metadata() allows child metadata to override parent metadata, the dataset-level center_freq is shadowed first by the parent signal (0) and then again by each component signal (relative baseband offset).
+This raises questions about the intended semantics of center_freq and whether the API is conflating multiple concepts.
+Questions to investigate
+
+
+
+        
+      What is the intended meaning of center_freq at each hierarchy level?
+
+
+        
+      Dataset metadata
+
+        
+      Generated parent Signal
+
+
+        
+      Component Signal
+
+
+
+
+        
+      Is center_freq intended to represent:
+
+
+        
+      absolute RF center frequency,
+
+        
+      the baseband origin of the IQ recording,
+
+        
+      or a baseband-relative offset?
+
+
+
+        
+      Are component center_freq values intended to be relative to:
+
+
+        
+      the dataset,
+
+        
+      the immediate parent,
+
+        
+      or another coordinate system?
+
+
+
+        
+      Is the current behavior intentional, or should RF center frequency be preserved separately from baseband coordinates?
+
+        
+      Would introducing separate metadata fields (e.g. rf_center_freq and center_freq) improve clarity and avoid metadata shadowing?
+
+Notes
+
+frequency_shift_signal() currently assigns center_freq using the frequency shift applied within the sampled IQ bandwidth, which suggests component center_freq is baseband-relative. The generated parent Signal is then created with center_freq=0, while the dataset metadata may still contain an RF center frequency.
+This may be entirely intentional from a DSP perspective, but the metadata semantics are not obvious and become increasingly ambiguous when Signal objects are nested. The goal of this investigation is to document the intended coordinate system and determine whether the API should be clarified or refactored.
