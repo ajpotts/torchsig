@@ -54,6 +54,10 @@ examples/datasets/
 !examples/transforms/*.ipynb
 !examples/*.py
 !examples/*.yaml
+!examples/scripts/
+examples/scripts/*
+!examples/scripts/train_homogeneous_hdf5.py
+!examples/scripts/train_packed_hdf5.py
 
 # Pytest Files
 *.coverage
