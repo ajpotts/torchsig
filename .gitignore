@@ -13,6 +13,7 @@ dist/
 *.p
 *.png
 *.txt
+!packed_vs_homogeneous_hdf5.txt
 *.npy
 *.jpg
 *.pt*

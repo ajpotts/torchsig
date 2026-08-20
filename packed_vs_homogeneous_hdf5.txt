@@ -1,0 +1,30 @@
+Example of a Dataset That Requires Packed HDF5
+================================================
+
+A variable-length IQ dataset is a good use case for packed HDF5. For example,
+individual radio bursts may have different capture durations and therefore
+contain different numbers of IQ samples:
+
+    burst 1: complex64 array with shape (1024,)
+    burst 2: complex64 array with shape (2048,)
+    burst 3: complex64 array with shape (3750,)
+
+The packed HDF5 format can store each example with its own shape. This preserves
+the original duration of every burst without adding artificial samples or
+discarding recorded data.
+
+The homogeneous HDF5 format requires every example in the dataset to have the
+same shape and data type. It therefore cannot directly store the three arrays
+above as one homogeneous dataset. They would first need to be padded to a common
+length, truncated to a common length, or divided into separate datasets.
+
+Packed HDF5 is also useful when examples have different channel counts,
+different signal representations, or variable-size targets such as a different
+number of bounding boxes per example. Homogeneous HDF5 is preferable when all
+examples have a fixed schema because its regular layout supports efficient
+batched reads.
+
+In TorchSIG, a straightforward demonstration is a collection of generated or
+recorded signals whose num_iq_samples_dataset value varies between examples.
+Packed HDF5 can preserve those variable-length signals, whereas homogeneous
+HDF5 requires them to be normalized to one fixed length before writing.
