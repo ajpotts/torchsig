@@ -1,0 +1,107 @@
+Summary
+
+Several TorchSig DSP and impairment functions remain relatively expensive in the current benchmark suite. Investigate whether selected implementations can be accelerated using Numba, particularly functions that contain element-wise numerical loops or repeated sample-by-sample calculations that are not already efficiently vectorized.
+The goal is to improve dataset generation and augmentation throughput without changing numerical behavior, output types, reproducibility, or supported platforms.
+Motivation
+
+Recent Linux benchmark results show several functions with substantially higher execution times than the simpler transforms.
+Potential candidates include:
+
+
+        
+      
+doppler: approximately 1.93 ms mean
+
+        
+      
+spurs: approximately 658 µs mean
+
+        
+      
+fading: approximately 461 µs mean
+
+        
+      
+time_varying_noise: approximately 346 µs mean
+
+        
+      
+quantize: approximately 328 µs mean
+
+        
+      
+nonlinear_amplifier: approximately 106 µs mean
+
+        
+      
+intermodulation_products: approximately 84 µs mean
+
+        
+      
+digital_agc: approximately 17 µs mean
+
+The benchmark results also show that several FFT-heavy operations, including spectrogram generation and passband ripple, are relatively expensive. These may be poor candidates for Numba if most of their runtime is spent inside NumPy or SciPy FFT routines, but they should be profiled to confirm where time is being spent.
+Proposed work
+
+
+
+        
+      Profile the slower benchmarked functions and identify time spent in:
+
+
+        
+      Python loops
+
+        
+      scalar calculations
+
+        
+      array allocation
+
+        
+      NumPy or SciPy library calls
+
+        
+      random-number generation
+
+
+
+        
+      Select functions where Numba is likely to provide a meaningful improvement.
+
+        
+      Extract performance-sensitive kernels into small functions compatible with numba.njit.
+
+        
+      Preserve a non-Numba implementation or fallback for environments where Numba is unavailable.
+
+        
+      Add or extend benchmarks to compare the original and accelerated implementations across representative input sizes.
+
+        
+      Verify that JIT compilation time is excluded from steady-state benchmark measurements.
+
+Initial candidates
+
+Prioritize functions with explicit Python loops or sequential state:
+
+
+        
+      digital AGC
+
+        
+      fading kernels
+
+        
+      nonlinear amplifier
+
+        
+      quantization
+
+        
+      spur generation
+
+        
+      Doppler-related sample processing
+
+Lower-priority candidates include functions dominated by optimized NumPy, SciPy, or FFT operations.
