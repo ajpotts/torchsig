@@ -1,0 +1,115 @@
+Batch Doppler: Benefits and Integration Requirements
+====================================================
+
+Overview
+--------
+
+A batch Doppler function applies one wideband Doppler resampling plan to a
+two-dimensional IQ array shaped (batch, samples). It processes the sample axis
+for all batch entries together instead of calling the scalar Doppler function
+once per signal from Python.
+
+Potential benefit
+-----------------
+
+The main benefit is higher throughput when many equal-length signals require
+the same Doppler rate. A batched implementation can:
+
+* eliminate the Python loop around individual signals;
+* calculate the Doppler and rational resampling rates once per batch;
+* reuse the same polyphase filter coefficients for every batch entry;
+* invoke the underlying array and SciPy operations on the complete batch; and
+* provide a natural entry point for future parallel, compiled, or GPU-backed
+  implementations.
+
+These benefits become more meaningful for large batches and long signals. For
+small batches, the runtime saved by removing the Python loop may be minor
+compared with the cost of the polyphase filtering itself.
+
+When it can be used
+-------------------
+
+The simplest batch Doppler operation can be used when all of the following are
+true:
+
+* every signal has the same number of IQ samples;
+* the signals can be represented by one homogeneous NumPy array;
+* Doppler is applied along the final sample axis;
+* every entry uses the same propagation speed; and
+* every entry uses the same velocity, and therefore the same resampling rate.
+
+The shared-rate requirement is important. Polyphase filter design, padding,
+transition trimming, and output length all depend on the resampling rate. If
+each signal has a different velocity, a single vectorized resampling operation
+cannot directly process the complete batch. Such a batch would need to be
+grouped by rate, processed with separate plans, or handled by a more complex
+per-example resampling implementation.
+
+Variable-length signals also cannot be represented by a simple rectangular
+batch without first padding them and retaining their original lengths.
+
+Current limitation
+------------------
+
+TorchSIG currently applies transforms to individual Signal objects during
+dataset generation. The DataLoader forms batches only after those transforms
+have run. Consequently, adding a standalone batch Doppler function does not
+speed up the existing production pipeline: there is no current pipeline stage
+that calls it with a batch.
+
+An unused public function still has costs. Its behavior, validation, numerical
+accuracy, documentation, and compatibility become part of the API that must be
+maintained even though normal TorchSIG workloads do not benefit from it.
+
+Functionality needed in TorchSIG
+--------------------------------
+
+For batch Doppler to provide practical value, TorchSIG would need a supported
+batched-transform integration. That integration would need to include:
+
+1. A pipeline stage that receives a batch before applying eligible transforms.
+   This could be a post-collation transform stage, a batched dataset interface,
+   or explicit batched preprocessing in the data module.
+
+2. A batch-aware transform contract. TorchSIG would need to distinguish scalar
+   transforms from transforms that accept arrays shaped (batch, samples), and
+   define how they compose with existing per-Signal transforms.
+
+3. Parameter sampling rules. The pipeline must specify whether one Doppler
+   velocity is sampled for the entire batch or one velocity is sampled per
+   example. A shared velocity enables direct vectorization. Per-example values
+   require grouping or separate resampling plans.
+
+4. Metadata updates for every example. Applying Doppler to a batch must update
+   each Signal's associated frequency, duration, and other relevant metadata in
+   the same way as the existing scalar Doppler transform.
+
+5. Deterministic random-number behavior. Batched and scalar execution should
+   have defined seeding semantics so that worker count, batch size, and choice
+   of execution path do not unexpectedly change sampled transform parameters.
+
+6. Padding and length handling. The integration must define how to handle
+   variable-length inputs and ensure that filter transition trimming occurs on
+   the final sample axis rather than the batch axis.
+
+7. Compatibility and fallback behavior. Unsupported inputs, such as different
+   rates or shapes within a batch, should either fall back to scalar processing
+   or fail with a clear error.
+
+8. End-to-end benchmarks. Performance should be measured through the actual
+   dataset and DataLoader pipeline, not only by directly timing the low-level
+   function. This establishes whether batching improves real workloads after
+   collation, metadata processing, and memory allocation are included.
+
+9. Equivalence tests. Tests should compare batched results and metadata against
+   independently processed scalar signals over approaching, receding, and
+   near-unity velocities, multiple signal lengths, and supported dtypes.
+
+Recommendation
+--------------
+
+Keep the existing scalar Doppler and resampler improvements independently of
+batch Doppler. Add a public batch Doppler function when a real batched-transform
+caller is implemented and end-to-end measurements show a useful improvement.
+Until then, a private prototype or benchmark helper is preferable to an unused
+public API.
