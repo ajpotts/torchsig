@@ -13,6 +13,7 @@ dist/
 *.p
 *.png
 *.txt
+!tone_segment_viewport_proposal.txt
 *.npy
 *.jpg
 *.pt*

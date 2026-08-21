@@ -1,0 +1,172 @@
+Metadata-First Segment Generation for Viewports
+================================================
+
+Problem
+-------
+
+The expanded-canvas viewport prototype generates a large time-frequency scene
+and then returns only a smaller receiver viewport. This is flexible and
+physically intuitive, but most generated samples are discarded. The current
+benchmark creates a 131,072-sample canvas and returns 32,768 samples at half the
+canvas sample rate.
+
+Even after avoiding isolated component-IQ reconstruction, the expanded path
+must still:
+
+* allocate and populate the complete canvas;
+* select the input interval corresponding to the viewport;
+* frequency-shift that interval to the viewport center; and
+* filter and decimate it to the requested output sample rate.
+
+This makes the viewport loader much slower than a regular loader that generates
+the requested output geometry directly.
+
+Proposal
+--------
+
+Separate signal generation into two stages:
+
+1. Sample the conceptual burst parameters and placement metadata without
+   allocating waveform samples.
+2. Generate only the interval of that conceptual burst that intersects the
+   selected viewport.
+
+In pseudocode:
+
+    parameters = generator.sample_parameters()
+    intersection = conceptual_burst.intersect(viewport)
+
+    if intersection:
+        component = generator.generate_segment(
+            parameters,
+            start_sample=intersection.offset_in_burst,
+            num_samples=intersection.length,
+        )
+
+This retains knowledge of the complete burst while avoiding waveform work for
+the hidden prefix and suffix. The full duration, canvas placement, and viewport
+intersection remain available for metadata and labels.
+
+Tone prototype
+--------------
+
+ToneSignalGenerator implements the first prototype of this contract.
+
+ToneGenerationParameters is an immutable parameter object containing
+num_samples, the duration of the complete conceptual tone burst.
+
+ToneSignalGenerator.sample_parameters() samples the conceptual duration using
+the generator's existing random-number source but does not call the modulator or
+allocate IQ data.
+
+ToneSignalGenerator.generate_from_parameters(parameters) generates the complete
+baseband burst from an already sampled parameter object. This is useful as a
+reference and as a fallback for callers that still require the full signal.
+
+ToneSignalGenerator.generate_segment(parameters, start_sample, num_samples)
+validates that the requested interval is nonempty and contained within the
+conceptual burst, then generates only that interval. The returned Signal records:
+
+    segment_start_in_samples
+    original_duration_in_samples
+
+At baseband, a tone consists of unit-valued complex samples. Any interval can
+therefore be generated exactly without constructing the hidden samples. Tests
+verify that direct segment generation is sample-for-sample identical to slicing
+the same interval from a completely generated tone.
+
+Example
+-------
+
+    parameters = generator.sample_parameters()
+
+    visible_tone = generator.generate_segment(
+        parameters,
+        start_sample=32_768,
+        num_samples=32_768,
+    )
+
+The returned signal contains 32,768 samples but retains metadata indicating its
+offset and the duration of the complete conceptual burst.
+
+Benchmark prototype
+-------------------
+
+The optional viewport benchmark contains a DirectToneViewportDataset. It uses
+generate_segment() to create the visible interval directly and returns the same
+batch count, output IQ length, and complex64 dtype as the expanded and regular
+loader cases.
+
+Representative measurements for batches of eight signals were:
+
+    regular output-sized loader       approximately 365 microseconds
+    direct tone viewport              approximately 404 microseconds
+    expanded-canvas viewport          approximately 45.9 milliseconds
+    expanded viewport + component IQ  approximately 73.0 milliseconds
+
+In this isolated prototype, direct tone viewport generation is approximately
+113 times faster than expanded-canvas viewport generation and is within about
+11 percent of the regular loader. The exact ratios depend on the machine and
+benchmark configuration.
+
+Why tone is only a first step
+-----------------------------
+
+Tone segment generation is intentionally simple. At baseband, every sample is
+one, so skipping samples requires no modulator state. More complex generators
+must preserve state associated with the skipped portion, including:
+
+* symbol and bit position;
+* pulse-shaping filter history;
+* carrier and modulation phase;
+* protocol framing and preamble position;
+* frequency or phase drift state; and
+* deterministic random choices made earlier in the conceptual burst.
+
+For a frequency-positioned tone, dataset integration must also apply carrier
+phase corresponding to the segment offset. Generating a baseband segment is
+exact, but applying a carrier as if the segment began at time zero would produce
+the wrong phase relative to the conceptual full burst.
+
+Production integration requirements
+-----------------------------------
+
+The DirectToneViewportDataset currently lives in the optional benchmark. It is
+a proof of the achievable generation cost, not yet a replacement for
+PrototypeViewportDataset. A production integration needs:
+
+1. Metadata-first sampling of burst duration, canvas start, center frequency,
+   bandwidth, amplitude, and class information.
+
+2. Time and frequency intersection calculations before waveform generation.
+
+3. Carrier-phase correction based on the number of skipped canvas samples.
+
+4. Viewport-rate noise generation with a documented relationship to noise that
+   would have been generated and decimated from a full canvas.
+
+5. Multiple-component insertion and the existing cochannel-overlap policy.
+
+6. Correct component transforms and metadata updates for partial signals.
+
+7. A fallback that performs full generation and slicing for generators that do
+   not implement segment generation.
+
+8. Reproducible random-number behavior so the selected execution path does not
+   unexpectedly alter parameter sampling.
+
+9. Equivalence tests covering burst starts, burst endings, middle segments,
+   carrier phase, viewport boundaries, and output labels.
+
+Recommended rollout
+-------------------
+
+Keep the segment API experimental while implementing it for a small set of
+simple generators. After tone, useful candidates are FSK and constellation
+signals, followed by OFDM. Each generator should demonstrate equivalence to a
+slice from full generation before being enabled by the viewport pipeline.
+
+The production viewport can then select the fast path when a generator supports
+segments and use the current expanded-canvas implementation as a compatibility
+fallback. This provides incremental performance improvements without requiring
+all TorchSIG signal families to adopt the new contract at once.

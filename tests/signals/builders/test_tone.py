@@ -5,7 +5,11 @@ from unittest.mock import MagicMock, call, patch
 import numpy as np
 import pytest
 
-from torchsig.signals.builders.tone import ToneSignalGenerator, tone_modulator
+from torchsig.signals.builders.tone import (
+    ToneGenerationParameters,
+    ToneSignalGenerator,
+    tone_modulator,
+)
 from torchsig.utils.dsp import TorchSigComplexDataType
 
 MODULE_PATH = "torchsig.signals.builders.tone"
@@ -255,3 +259,68 @@ def test_tone_signal_generator_generate_allows_maximum_duration():
         call(low=100, high=201),
     ]
     modulator.assert_called_once_with(200)
+
+
+def test_tone_segment_matches_slice_of_complete_burst():
+    """Segment generation should exactly reproduce the corresponding full IQ."""
+    generator = ToneSignalGenerator(
+        signal_duration_in_samples_min=1_000,
+        signal_duration_in_samples_max=1_000,
+    )
+    parameters = ToneGenerationParameters(num_samples=1_000)
+
+    complete = generator.generate_from_parameters(parameters)
+    segment = generator.generate_segment(
+        parameters,
+        start_sample=321,
+        num_samples=127,
+    )
+
+    np.testing.assert_array_equal(segment.data, complete.data[321:448])
+    assert segment.segment_start_in_samples == 321
+    assert segment.original_duration_in_samples == 1_000
+
+
+def test_tone_parameter_sampling_does_not_generate_iq(monkeypatch):
+    """Metadata-first sampling should not allocate waveform data."""
+    generator = ToneSignalGenerator(
+        signal_duration_in_samples_min=100,
+        signal_duration_in_samples_max=200,
+        seed=42,
+    )
+
+    def fail_modulator(_num_samples):
+        raise AssertionError("parameter sampling must not generate IQ")
+
+    monkeypatch.setattr(f"{MODULE_PATH}.tone_modulator", fail_modulator)
+
+    parameters = generator.sample_parameters()
+
+    assert 100 <= parameters.num_samples <= 200
+
+
+@pytest.mark.parametrize(
+    ("start_sample", "num_samples", "message"),
+    [
+        (-1, 10, "nonnegative"),
+        (0, 0, "positive"),
+        (90, 11, "exceeds"),
+    ],
+)
+def test_tone_segment_rejects_invalid_interval(
+    start_sample: int,
+    num_samples: int,
+    message: str,
+):
+    """Segment bounds must describe a nonempty subset of the full burst."""
+    generator = ToneSignalGenerator(
+        signal_duration_in_samples_min=100,
+        signal_duration_in_samples_max=100,
+    )
+
+    with pytest.raises(ValueError, match=message):
+        generator.generate_segment(
+            ToneGenerationParameters(num_samples=100),
+            start_sample=start_sample,
+            num_samples=num_samples,
+        )
