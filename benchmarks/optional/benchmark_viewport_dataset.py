@@ -83,13 +83,17 @@ class FixedOutputDataset(TorchSigIterableDataset):
         return output_signal()
 
 
-def viewport_dataset() -> FixedCanvasViewportDataset:
+def viewport_dataset(
+    *,
+    include_component_data: bool = False,
+) -> FixedCanvasViewportDataset:
     """Build the fixed-canvas viewport dataset used by the benchmarks."""
     return FixedCanvasViewportDataset(
         viewport_num_iq_samples=OUTPUT_NUM_SAMPLES,
         viewport_sample_rate=OUTPUT_SAMPLE_RATE,
         viewport_time_start=32_768,
         viewport_center_freq=2_000_000,
+        include_component_data=include_component_data,
         signal_generators=[],
         validate_init=False,
         metadata={
@@ -142,9 +146,13 @@ def test_generator_integrated(benchmark) -> None:
     ("name", "dataset_factory"),
     [
         ("viewport", viewport_dataset),
+        (
+            "viewport-with-component-iq",
+            lambda: viewport_dataset(include_component_data=True),
+        ),
         ("regular", regular_dataset),
     ],
-    ids=["viewport", "regular"],
+    ids=["viewport", "viewport-with-component-iq", "regular"],
 )
 def test_loader_output_size_comparison(benchmark, name, dataset_factory) -> None:
     """Compare loaders that return the same batch count and IQ shape."""

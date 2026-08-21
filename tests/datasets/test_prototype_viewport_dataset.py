@@ -99,9 +99,18 @@ def test_dataset_returns_cropped_viewport() -> None:
     component = output.component_signals[0]
     assert component.start_in_samples == 0
     assert component.duration_in_samples == 4
-    assert component.data.shape == (4,)
+    assert component.data.shape == (0,)
     assert component.data.dtype == np.complex64
     assert component.center_freq == pytest.approx(0)
+
+
+def test_component_iq_processing_can_be_enabled() -> None:
+    """Callers can opt into isolated, viewport-relative component IQ data."""
+    output = next(_dataset(include_component_data=True))
+
+    component = output.component_signals[0]
+    assert component.data.shape == (4,)
+    assert component.data.dtype == np.complex64
 
 
 def test_output_transforms_run_after_viewport_selection() -> None:
