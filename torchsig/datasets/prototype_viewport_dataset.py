@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
-from scipy.signal import resample_poly
 
 from torchsig.datasets.dataset_utils import frequency_shift_signal
 from torchsig.datasets.datasets import (
@@ -13,7 +12,11 @@ from torchsig.datasets.datasets import (
     apply_transforms_and_labels_to_signal,
 )
 from torchsig.signals.signal_types import Signal
-from torchsig.utils.dsp import frequency_shift, update_signal_snr_bandwidth
+from torchsig.utils.dsp import (
+    frequency_shift,
+    polyphase_decimator,
+    update_signal_snr_bandwidth,
+)
 
 
 class PrototypeViewportDataset(TorchSigIterableDataset):
@@ -34,6 +37,9 @@ class PrototypeViewportDataset(TorchSigIterableDataset):
         allow_empty: Whether viewports containing no component signals are
             allowed when ``num_signals_min`` is zero. Generated components are
             otherwise placed so they overlap the viewport.
+        include_component_data: Whether to frequency-shift and decimate isolated
+            IQ data for each cropped component. Defaults to ``False`` because
+            metadata labels do not require this duplicate DSP work.
         **kwargs: Arguments passed to :class:`TorchSigIterableDataset`. Its
             metadata must describe the expanded canvas.
     """
@@ -46,6 +52,7 @@ class PrototypeViewportDataset(TorchSigIterableDataset):
         viewport_time_start: int | None = None,
         viewport_center_freq: float | None = None,
         allow_empty: bool = True,
+        include_component_data: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -63,6 +70,7 @@ class PrototypeViewportDataset(TorchSigIterableDataset):
         self.viewport_time_start = viewport_time_start
         self.viewport_center_freq = viewport_center_freq
         self.allow_empty = allow_empty
+        self.include_component_data = include_component_data
         self.decimation = int(ratio)
         self.last_canvas: Signal | None = None
         self._active_time_start: int | None = None
@@ -119,7 +127,7 @@ class PrototypeViewportDataset(TorchSigIterableDataset):
         half_bandwidth = self.viewport_sample_rate / 2
         selected = canvas.data[time_start : time_start + input_span]
         shifted = frequency_shift(selected, -center_freq, float(self["sample_rate"]))
-        data = resample_poly(shifted, up=1, down=self.decimation).astype(
+        data = polyphase_decimator(shifted, self.decimation).astype(
             np.complex64,
             copy=False,
         )[: self.viewport_num_iq_samples]
@@ -249,21 +257,24 @@ class PrototypeViewportDataset(TorchSigIterableDataset):
                     "bandwidth": frequency_upper - frequency_lower,
                 }
             )
-            component_offset = int(time_lower - component.start_in_samples)
-            component_length = int(time_upper - time_lower)
-            component_data = component.data[
-                component_offset : component_offset + component_length
-            ]
-            component_data = resample_poly(
-                frequency_shift(
-                    component_data,
-                    -center_freq,
-                    float(self["sample_rate"]),
-                ),
-                up=1,
-                down=self.decimation,
-            ).astype(np.complex64, copy=False)
-            component_data = component_data[: local_metadata["duration_in_samples"]]
+            component_data = np.empty(0, dtype=np.complex64)
+            if self.include_component_data:
+                component_offset = int(time_lower - component.start_in_samples)
+                component_length = int(time_upper - time_lower)
+                component_data = component.data[
+                    component_offset : component_offset + component_length
+                ]
+                component_data = polyphase_decimator(
+                    frequency_shift(
+                        component_data,
+                        -center_freq,
+                        float(self["sample_rate"]),
+                    ),
+                    self.decimation,
+                ).astype(np.complex64, copy=False)
+                component_data = component_data[
+                    : local_metadata["duration_in_samples"]
+                ]
             components.append(Signal(data=component_data, **local_metadata))
         return components
 
