@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 
 from torchsig.datasets.datasets import TorchSigIterableDataset
-from torchsig.transforms.functional import doppler, doppler_batch
+from torchsig.transforms.functional import doppler
 from torchsig.transforms.transforms import Doppler
 from torchsig.utils.defaults import TorchSigDefaults
 from torchsig.utils.dsp import TorchSigComplexDataType
@@ -30,26 +30,6 @@ PROPAGATION_SPEED = 2.9979e8
 # optimized candidate while retaining the current implementation as a baseline.
 DOPPLER_IMPLEMENTATIONS: dict[str, Callable[..., np.ndarray]] = {
     "current": doppler,
-}
-
-
-def _scalar_doppler_batch(
-    data: np.ndarray,
-    velocity: float,
-    propagation_speed: float,
-) -> np.ndarray:
-    """Apply scalar Doppler independently for an A/B batch baseline."""
-    return np.stack(
-        [
-            doppler(signal, velocity, propagation_speed)
-            for signal in data
-        ]
-    )
-
-
-DOPPLER_BATCH_IMPLEMENTATIONS: dict[str, Callable[..., np.ndarray]] = {
-    "scalar-loop": _scalar_doppler_batch,
-    "axis-batch": doppler_batch,
 }
 
 
@@ -99,42 +79,6 @@ def test_benchmark_doppler_functional(
     warm_result = implementation(**kwargs)
     assert warm_result.shape == data.shape
     assert warm_result.dtype == TorchSigComplexDataType
-
-    result = benchmark(implementation, **kwargs)
-
-    assert result.shape == data.shape
-    assert result.dtype == TorchSigComplexDataType
-    assert np.all(np.isfinite(result))
-
-
-@pytest.mark.benchmark
-@pytest.mark.parametrize("num_samples", [1_024, 8_192, 65_536])
-@pytest.mark.parametrize("batch_size", [4, 16])
-@pytest.mark.parametrize(
-    ("implementation_name", "implementation"),
-    DOPPLER_BATCH_IMPLEMENTATIONS.items(),
-    ids=DOPPLER_BATCH_IMPLEMENTATIONS,
-)
-def test_benchmark_doppler_batch(
-    benchmark,
-    implementation_name: str,
-    implementation: Callable[..., np.ndarray],
-    batch_size: int,
-    num_samples: int,
-) -> None:
-    """Compare shared-rate axis filtering against independent calls."""
-    del implementation_name
-    data = np.stack(
-        [_complex_noise(num_samples, SEED + index) for index in range(batch_size)]
-    )
-    kwargs = {
-        "data": data,
-        "velocity": 1e6,
-        "propagation_speed": PROPAGATION_SPEED,
-    }
-
-    warm_result = implementation(**kwargs)
-    assert warm_result.shape == data.shape
 
     result = benchmark(implementation, **kwargs)
 

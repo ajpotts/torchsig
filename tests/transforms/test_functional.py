@@ -25,7 +25,6 @@ from torchsig.transforms.functional import (
     cut_out,
     digital_agc,
     doppler,
-    doppler_batch,
     drop_samples,
     fading,
     interleave_complex,
@@ -804,31 +803,6 @@ def test_doppler_rejects_multidimensional_input() -> None:
             velocity=0.0,
             propagation_speed=2.9979e8,
         )
-
-
-@pytest.mark.parametrize("velocity", [-1e6, 10.0, 1e6])
-def test_doppler_batch_matches_scalar_processing(velocity: float) -> None:
-    """A shared-rate batch should match independently processed signals."""
-    rng = np.random.default_rng(0)
-    data = (
-        rng.standard_normal((4, 1_024))
-        + 1j * rng.standard_normal((4, 1_024))
-    ).astype(TorchSigComplexDataType)
-
-    result = doppler_batch(data, velocity, 2.9979e8)
-    expected = np.stack(
-        [doppler(signal, velocity, 2.9979e8) for signal in data]
-    )
-
-    assert result.shape == data.shape
-    assert result.dtype == np.dtype(TorchSigComplexDataType)
-    np.testing.assert_allclose(result, expected, rtol=1e-5, atol=1e-6)
-
-
-def test_doppler_batch_requires_two_dimensional_input() -> None:
-    """Batch Doppler should require explicit batch and sample axes."""
-    with pytest.raises(ValueError, match="two-dimensional"):
-        doppler_batch(np.ones(16, dtype=TorchSigComplexDataType))
 
 
 def test_doppler_skips_resampling_for_effective_unity_rate(monkeypatch) -> None:

@@ -573,7 +573,7 @@ def polyphase_fractional_resampler(input_signal: np.ndarray, fractional_rate: fl
     subtract_begin = int(np.floor(total_subtract_off / 2))
     subtract_end = int(np.ceil(total_subtract_off / 2))
 
-    return fractional_interp_out[..., subtract_begin:-subtract_end]
+    return fractional_interp_out[subtract_begin:-subtract_end]
 
 
 @lru_cache(maxsize=16)
@@ -728,16 +728,12 @@ def polyphase_integer_interpolator(
         subtract_off_begin = half_filter_length - int(np.floor(num_branches / 2))
         subtract_off_end = half_filter_length - int(np.ceil(num_branches / 2)) + 1
 
-    interpolate_out = interpolate_out[..., subtract_off_begin:-subtract_off_end]
+    interpolate_out = interpolate_out[subtract_off_begin:-subtract_off_end]
 
     # length check for even interpolation rates
-    equal_lengths_boolean = interpolate_out.shape[-1] == int(
-        num_branches * input_signal.shape[-1]
-    )
+    equal_lengths_boolean = len(interpolate_out) == int(num_branches * len(input_signal))
     # length check for odd interpolation rates
-    lengths_off_by_one_boolean = interpolate_out.shape[-1] == int(
-        (num_branches * input_signal.shape[-1]) + 1
-    )
+    lengths_off_by_one_boolean = len(interpolate_out) == int((num_branches * len(input_signal)) + 1)
 
     if not (equal_lengths_boolean or lengths_off_by_one_boolean):
         raise ValueError("polyphase_integer_interpolator() does not have proper number of samples")
@@ -785,16 +781,12 @@ def polyphase_decimator(input_signal: np.ndarray, decimation_rate: int) -> np.nd
         subtract_off_begin = int(np.floor(half_filter_length / decimation_rate))
         subtract_off_end = int(np.ceil(half_filter_length / decimation_rate)) + 1
 
-    decimate_out = decimate_out[..., subtract_off_begin:-subtract_off_end]
+    decimate_out = decimate_out[subtract_off_begin:-subtract_off_end]
 
     # length checks, have to account the ceil() and floor() round-off
-    fractional_length = input_signal.shape[-1] / num_branches
-    length_floor_boolean = decimate_out.shape[-1] == int(
-        np.floor(fractional_length)
-    )
-    length_ceil_boolean = decimate_out.shape[-1] == int(
-        np.ceil(fractional_length)
-    )
+    fractional_length = len(input_signal) / num_branches
+    length_floor_boolean = len(decimate_out) == int(np.floor(fractional_length))
+    length_ceil_boolean = len(decimate_out) == int(np.ceil(fractional_length))
 
     length_off_by_one_floor_boolean = len(decimate_out) == int(np.floor(fractional_length) - 1)
     length_off_by_one_ceil_boolean = len(decimate_out) == int(np.ceil(fractional_length) - 1)
