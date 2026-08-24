@@ -1468,6 +1468,71 @@ def test_static_dataset_getitem_raises_index_error_for_out_of_bounds(tmp_path):
         dataset[3]
 
 
+def test_static_dataset_uses_native_contiguous_batch_reader():
+    class FakeReader:
+        def __init__(self):
+            self.batch_calls = []
+            self.read_calls = []
+
+        def read_signals_batch(self, start, stop):
+            self.batch_calls.append((start, stop))
+            return [
+                Signal(data=np.full(4, idx, dtype=np.complex64), index=idx)
+                for idx in range(start, stop)
+            ]
+
+        def read(self, idx):
+            self.read_calls.append(idx)
+            return Signal(data=np.full(4, idx, dtype=np.complex64), index=idx)
+
+    dataset = StaticTorchSigDataset.__new__(StaticTorchSigDataset)
+    dataset.dataset_length = 5
+    dataset.reader = FakeReader()
+    dataset.transforms = []
+    dataset.target_labels = None
+
+    batch = dataset.__getitems__([1, 2, 3])
+
+    assert [signal["index"] for signal in batch] == [1, 2, 3]
+    assert dataset.reader.batch_calls == [(1, 4)]
+    assert dataset.reader.read_calls == []
+
+
+def test_static_dataset_noncontiguous_batch_falls_back_to_single_reads():
+    class FakeReader:
+        def __init__(self):
+            self.batch_calls = []
+            self.read_calls = []
+
+        def read_signals_batch(self, start, stop):
+            self.batch_calls.append((start, stop))
+            return []
+
+        def read(self, idx):
+            self.read_calls.append(idx)
+            return Signal(data=np.full(4, idx, dtype=np.complex64), index=idx)
+
+    dataset = StaticTorchSigDataset.__new__(StaticTorchSigDataset)
+    dataset.dataset_length = 5
+    dataset.reader = FakeReader()
+    dataset.transforms = []
+    dataset.target_labels = None
+
+    batch = dataset.__getitems__([3, 0, 2])
+
+    assert [signal["index"] for signal in batch] == [3, 0, 2]
+    assert dataset.reader.batch_calls == []
+    assert dataset.reader.read_calls == [3, 0, 2]
+
+
+def test_static_dataset_batch_rejects_out_of_bounds_index():
+    dataset = StaticTorchSigDataset.__new__(StaticTorchSigDataset)
+    dataset.dataset_length = 3
+
+    with pytest.raises(IndexError, match=r"Index 3 is out of bounds"):
+        dataset.__getitems__([1, 3])
+
+
 def test_static_dataset_verify_raises_for_missing_root(tmp_path):
     dataset = StaticTorchSigDataset.__new__(StaticTorchSigDataset)
     dataset.root = tmp_path / "does_not_exist"

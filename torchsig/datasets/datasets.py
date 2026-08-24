@@ -1111,6 +1111,44 @@ class StaticTorchSigDataset(Dataset, Seedable):
 
         raise IndexError(f"Index {idx} is out of bounds. Must be [0, {self.__len__() - 1}]")
 
+    def __getitems__(
+        self,
+        indices: list[int],
+    ) -> list[Signal | np.ndarray | tuple]:
+        """Retrieve a DataLoader batch, using native contiguous reads when available.
+
+        Readers without ``read_signals_batch`` and non-contiguous index lists use
+        the existing single-item path.
+        """
+        if not indices:
+            return []
+        if any(idx < 0 or idx >= len(self) for idx in indices):
+            invalid_idx = next(
+                idx for idx in indices if idx < 0 or idx >= len(self)
+            )
+            raise IndexError(
+                f"Index {invalid_idx} is out of bounds. "
+                f"Must be [0, {self.__len__() - 1}]"
+            )
+
+        read_signals_batch = getattr(self.reader, "read_signals_batch", None)
+        contiguous = all(
+            idx == indices[0] + offset
+            for offset, idx in enumerate(indices)
+        )
+        if read_signals_batch is None or not contiguous:
+            return [self[idx] for idx in indices]
+
+        samples = read_signals_batch(indices[0], indices[-1] + 1)
+        return [
+            apply_transforms_and_labels_to_signal(
+                sample,
+                self.transforms,
+                self.target_labels,
+            )
+            for sample in samples
+        ]
+
     def __str__(self) -> str:
         """Returns a string representation of the dataset.
 

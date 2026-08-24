@@ -24,11 +24,15 @@ class ExampleMetadataObject(HierarchicalMetadataObject):
 
 
 class RequiredArgumentMetadataObject(HierarchicalMetadataObject):
-    """Subclass illustrating the constructor constraint imposed by copy()."""
+    """Subclass using the copy hook to preserve required constructor state."""
 
     def __init__(self, required_value: str, **kwargs) -> None:
+        """Initialize the object with required subclass state."""
         self.required_value = required_value
         super().__init__(**kwargs)
+
+    def _copy_kwargs(self):
+        return {"required_value": self.required_value}
 
 
 def test_metadata_attribute_error_is_attribute_error():
@@ -816,14 +820,42 @@ def test_copy_preserves_runtime_subclass():
     assert copied["field"] == "value"
 
 
-def test_copy_requires_subclasses_to_support_base_constructor_contract():
+def test_copy_hook_preserves_required_subclass_constructor_state():
     obj = RequiredArgumentMetadataObject(
         required_value="required",
+        seed=123,
         metadata={"field": "value"},
     )
 
-    with pytest.raises(TypeError):
-        obj.copy()
+    copied = obj.copy()
+
+    assert type(copied) is RequiredArgumentMetadataObject
+    assert copied is not obj
+    assert copied.required_value == "required"
+    assert copied.rng_seed == 123
+    assert copied["field"] == "value"
+
+
+def test_copy_hook_preserves_parent_option_and_shallow_metadata_copy():
+    parent = HierarchicalMetadataObject(metadata={"inherited": "value"})
+    nested_value = {"items": [1, 2, 3]}
+    obj = RequiredArgumentMetadataObject(
+        required_value="required",
+        parent=parent,
+        metadata={"nested": nested_value},
+    )
+
+    attached = obj.copy()
+    detached = obj.copy(preserve_parent=False)
+
+    assert attached.parent is parent
+    assert detached.parent is None
+    assert attached["nested"] is nested_value
+    assert detached["nested"] is nested_value
+    attached["copy_only"] = True
+    detached["detached_only"] = True
+    assert "copy_only" not in obj.keys()
+    assert "detached_only" not in obj.keys()
 
 
 def test_setstate_updates_instance_dictionary():

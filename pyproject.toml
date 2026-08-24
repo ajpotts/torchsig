@@ -49,6 +49,7 @@ dev = [
     "pytest-xdist",
     "ruff",
     "pygal",
+    "pre-commit",
 ]
 
 notebooks = [

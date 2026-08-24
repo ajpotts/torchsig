@@ -8,6 +8,8 @@ from torchsig.datasets.datasets import StaticTorchSigDataset, TorchSigIterableDa
 from torchsig.utils.data_loading import WorkerSeedingDataLoader
 from torchsig.utils.defaults import TorchSigDefaults, default_dataset
 from torchsig.utils.writer import DatasetCreator
+from torchsig.datasets.datasets import TorchSigIterableDataset, StaticTorchSigDataset
+from torchsig.utils.file_handlers import PackedHDF5Writer
 
 
 @pytest.mark.parametrize(
@@ -89,6 +91,80 @@ def test_DatasetCreator_overwrite_false_skips_when_matching(tmp_path):
     DatasetCreator(dataloader=dl, dataset_length=6, root=tmp_path, overwrite=False, multithreading=False).create()
     assert sentinel.exists()
     assert sentinel.read_text() == "do not delete"
+
+
+def test_DatasetCreator_overwrite_false_reports_changed_writer_options(
+    tmp_path, capsys
+):
+    ds = default_dataset(num_signals_max=1, num_signals_min=1)
+    dl = WorkerSeedingDataLoader(ds, seed=42, batch_size=2)
+    DatasetCreator(
+        dataloader=dl,
+        dataset_length=6,
+        root=tmp_path,
+        overwrite=True,
+        multithreading=False,
+        compression="lzf",
+    ).create()
+
+    DatasetCreator(
+        dataloader=dl,
+        dataset_length=6,
+        root=tmp_path,
+        overwrite=False,
+        multithreading=False,
+        compression="gzip",
+    ).create()
+
+    assert "file_handler_kwargs" in capsys.readouterr().out
+
+
+def test_DatasetCreator_overwrite_false_rejects_changed_writer(tmp_path):
+    ds = default_dataset(num_signals_max=1, num_signals_min=1)
+    dl = WorkerSeedingDataLoader(ds, seed=42, batch_size=2)
+    DatasetCreator(
+        dataloader=dl,
+        dataset_length=6,
+        root=tmp_path,
+        overwrite=True,
+        multithreading=False,
+    ).create()
+
+    with pytest.raises(RuntimeError, match="different file handler"):
+        DatasetCreator(
+            dataloader=dl,
+            dataset_length=6,
+            root=tmp_path,
+            overwrite=False,
+            multithreading=False,
+            file_handler=PackedHDF5Writer,
+        ).create()
+
+
+def test_DatasetCreator_overwrite_false_accepts_legacy_writer_info(
+    tmp_path,
+):
+    ds = default_dataset(num_signals_max=1, num_signals_min=1)
+    dl = WorkerSeedingDataLoader(ds, seed=42, batch_size=2)
+    DatasetCreator(
+        dataloader=dl,
+        dataset_length=6,
+        root=tmp_path,
+        overwrite=True,
+        multithreading=False,
+    ).create()
+    writer_info_path = tmp_path / "writer_info.yaml"
+    writer_info = yaml.safe_load(writer_info_path.read_text())
+    del writer_info["file_handler_kwargs"]
+    writer_info_path.write_text(yaml.safe_dump(writer_info))
+
+    DatasetCreator(
+        dataloader=dl,
+        dataset_length=6,
+        root=tmp_path,
+        overwrite=False,
+        multithreading=False,
+    ).create()
 
 
 def test_DatasetCreator_overwrite_false_errors_if_incomplete(tmp_path):

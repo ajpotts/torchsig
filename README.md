@@ -188,6 +188,21 @@ make help
 
 Note for Windows Users: make is a Unix utility. To use these commands on Windows, please use WSL (Windows Subsystem for Linux), Git Bash, or install make via Chocolatey.
 
+### Pre-commit Hooks
+
+TorchSig uses `pre-commit` to run automated checks before commits. After installing the development dependencies, install the Git hooks with:
+
+```bash
+pre-commit install
+```
+
+To run all pre-commit checks manually:
+
+```bash
+pre-commit run --all-files
+```
+
+The hooks will automatically run on staged files when committing. If a hook modifies a file, review and stage the changes before committing again.
 
 # License
 TorchSig is released under the MIT License. The MIT license is a popular open-source software license enabling free use, redistribution, and modifications, even for commercial purposes, provided the license is included in all copies or substantial portions of the software. TorchSig has no connection to MIT, other than through the use of this license.

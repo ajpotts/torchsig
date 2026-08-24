@@ -239,7 +239,9 @@ class HierarchicalMetadataObject(MetadataDebugMixin, Seedable):
         Creates a new instance of the same class with a shallow copy of its
         metadata. By default, the copied object preserves the same parent
         relationship as the original, but this behavior can be disabled to
-        create a detached copy with no parent.
+        create a detached copy with no parent. Subclasses with additional
+        required constructor arguments can provide them by overriding
+        :meth:`_copy_kwargs` without replacing the rest of the copy behavior.
 
         Args:
             preserve_parent: If ``True`` (default), preserve the parent
@@ -254,7 +256,21 @@ class HierarchicalMetadataObject(MetadataDebugMixin, Seedable):
             parent=self.parent if preserve_parent else None,
             seed=self.rng_seed,
             metadata=self._metadata.copy(),
+            **self._copy_kwargs(),
         )
+
+    def _copy_kwargs(self) -> dict[str, Any]:
+        """Return subclass-specific constructor arguments used by ``copy``.
+
+        Subclasses whose constructors require arguments beyond ``parent``,
+        ``seed``, and ``metadata`` should override this method and return those
+        arguments as a new dictionary. The base copy implementation continues
+        to control metadata copying and parent preservation.
+
+        Returns:
+            Additional keyword arguments for constructing the copied object.
+        """
+        return {}
 
     def __getitem__(self, key: str) -> Any:
         """Get a metadata value by key.
