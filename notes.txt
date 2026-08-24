@@ -1,0 +1,11 @@
+freq(f) = f_0 + Deltaf_drift(epsilon)
+
+Want a more realistic starting frequency offset
+
+Delta = frequency drift ppm
+sigma = phase stdev
+
+(f_min, f_max) frequency offset in ppm
+Randomly pick f_0 starting frequency.
+
+Check the parameter ranges in the corresponding transforms.
