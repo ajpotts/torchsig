@@ -223,16 +223,14 @@ def clock_drift(
     drift_ppm: float = 10,
     rng: np.random.Generator | None = None,
 ) -> np.ndarray:
-    """Clock drift from a Local Oscillator (LO), modeled as accumulated gaussian random noise impacting the
-    sampling rate.
+    """Apply a fixed sampling-clock rate offset.
 
-    The drift applies a randomness to the sampling rate, and by accumulating the gaussian RV
-    over time it will slightly increase or decrease the sampling rate of the data, and thereby changing the
-    number of samples by a very small number.
+    The offset changes the nominal resampling increment by a signed fractional
+    amount. It remains constant for the duration of this call.
 
     Args:
         data: Complex valued IQ data samples.
-        drift_ppm: Clock drift in parts per million (ppm). Default 10.
+        drift_ppm: Signed sampling-clock rate offset in PPM. Default 10.
         rng: Random number generator. Defaults to np.random.default_rng(seed=None).
 
     Returns:
@@ -287,20 +285,19 @@ def clock_jitter(
     jitter_ppm: float = 10,
     rng: np.random.Generator | None = None,
 ) -> np.ndarray:
-    """Clock jitter from a Local Oscillator (LO), modeled as gaussian random noise impacting the
-    sampling phase.
+    """Apply independent Gaussian sampling-time jitter.
 
-    The jitter applies a randomness to the sampling phase, applying a slight
-    increment or decrement to the sampling phase and therefore potentially changing the number of
-    samples by a very small number.
+    Each output sampling instant receives an independent timing displacement.
+    The displacement does not accumulate into subsequent sampling positions.
 
     Args:
         data: Complex valued IQ data samples.
-        jitter_ppm: Jitter in parts per million (ppm). Default 10.
+        jitter_ppm: Nonnegative RMS timing displacement in PPM of one input-
+            sample period. Default 10.
         rng: Random number generator. Defaults to np.random.default_rng(seed=None).
 
     Returns:
-        Data with LO drift applied.
+        Data with sampling-time jitter applied.
     """
     rng = rng or np.random.default_rng()
 

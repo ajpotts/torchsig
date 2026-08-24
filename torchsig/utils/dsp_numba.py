@@ -3,8 +3,8 @@
 Currently provides:
   * ``sampling_clock_impairments_numba_wrapper`` - drop-in replacement for
     ``torchsig.utils.dsp.sampling_clock_impairments`` (clock_drift / clock_jitter).
-    Aims for bit-identical results and fixes the RNG ordering by generating
-    random numbers in the same order as NumPy.
+    Uses the same fixed-rate-offset and independent-timing-jitter model as the
+    NumPy reference.
   * ``digital_agc_numba`` - the sequential AGC sample loop used by ``digital_agc``.
 
 Importing this module requires numba; callers should fall back to the pure-NumPy
@@ -14,6 +14,9 @@ implementations if the import fails.
 import numpy as np
 from numba import jit
 from numba.types import complex64, float32
+
+_OUTPUT_CAPACITY_ERROR = "sampling clock output capacity exhausted"
+_MAX_OUTPUT_CAPACITY_MULTIPLIER = 16
 
 
 @jit(nopython=True, cache=True)
@@ -33,125 +36,199 @@ def partition_polyphase_numba(h, up_rate, taps_per_phase):
 
 @jit(nopython=True, cache=True)
 def sampling_clock_impairments_numba(
-    h,
     x_real,
     x_imag,
     uprate,
-    drate,
-    jitter_ppm,
-    drift_ppm,
-    jitter_drift_pool,
+    jitter_values,
     h_pfb_reversed,
     taps_per_phase,
     padded_len,
-    max_start,
+    max_input_idx,
+    nominal_position_increment,
+    initial_position,
     num_output_samples,
 ):
-    """Numba-optimized sampling clock impairments.
-    Uses pre-reversed filter bank and pre-generated interleaved random number pools.
+    """Apply sampling-clock offset and jitter using polyphase filtering.
+
+    The nominal clock is represented by one absolute position in polyphase
+    units. Jitter perturbs only the current sampling position and does not
+    accumulate into subsequent nominal positions.
     """
     input_padded_real = np.zeros(padded_len, dtype=np.float32)
     input_padded_imag = np.zeros(padded_len, dtype=np.float32)
 
-    start = taps_per_phase - 1
-    end = start + len(x_real)
+    input_start = taps_per_phase - 1
+    input_end = input_start + len(x_real)
 
-    input_padded_real[start:end] = x_real
-    input_padded_imag[start:end] = x_imag
-
-    q_step = uprate / drate
+    input_padded_real[input_start:input_end] = x_real
+    input_padded_imag[input_start:input_end] = x_imag
 
     output_real = np.zeros(num_output_samples, dtype=np.float32)
     output_imag = np.zeros(num_output_samples, dtype=np.float32)
 
+    # Preserve the legacy one-commutator-step initial alignment.
+    nominal_position = initial_position
+    max_sample_position = max_input_idx * uprate + (uprate - 1)
+
     output_idx = 0
-    input_idx = 0
-    clock_drift = 0.0
 
-    while input_idx <= max_start:
-        while q_step >= uprate:
-            q_step -= uprate
-            input_idx += 1
+    while nominal_position <= max_sample_position:
+        if output_idx >= num_output_samples or output_idx >= len(jitter_values):
+            raise RuntimeError(_OUTPUT_CAPACITY_ERROR)
 
-        if input_idx > max_start:
-            break
+        # Jitter affects this sampling instant only. It is not included when
+        # advancing nominal_position below.
+        sample_position = nominal_position + jitter_values[output_idx]
 
-        phase = int(q_step)
+        if sample_position < 0.0:
+            sample_position = 0.0
+        elif sample_position > max_sample_position:
+            sample_position = max_sample_position
+
+        input_idx = int(sample_position // uprate)
+        phase_position = sample_position - input_idx * uprate
+        phase = int(phase_position)
 
         acc_re = 0.0
         acc_im = 0.0
 
-        for i in range(taps_per_phase):
-            acc_re += h_pfb_reversed[phase, i] * input_padded_real[input_idx + i]
-            acc_im += h_pfb_reversed[phase, i] * input_padded_imag[input_idx + i]
+        for tap_idx in range(taps_per_phase):
+            coefficient = h_pfb_reversed[phase, tap_idx]
+            input_position = input_idx + tap_idx
+
+            acc_re += coefficient * input_padded_real[input_position]
+            acc_im += coefficient * input_padded_imag[input_position]
 
         output_real[output_idx] = acc_re
         output_imag[output_idx] = acc_im
         output_idx += 1
 
-        if jitter_ppm != 0.0 or drift_ppm != 0.0:
-            pool_index = (output_idx - 1) * 2
-            clock_jitter = jitter_drift_pool[pool_index]
-            clock_drift += jitter_drift_pool[pool_index + 1]
-            q_step += drate + clock_jitter + clock_drift
-        else:
-            q_step += drate
+        nominal_position += nominal_position_increment
 
-    if output_idx > 0:
-        result = np.zeros(output_idx, dtype=np.complex64)
-        for i in range(output_idx):
-            result[i] = output_real[i] + 1j * output_imag[i]
-        return result
+    result = np.zeros(output_idx, dtype=np.complex64)
 
-    return np.zeros(0, dtype=np.complex64)
+    for idx in range(output_idx):
+        result[idx] = output_real[idx] + 1j * output_imag[idx]
+
+    return result
 
 
-def sampling_clock_impairments_numba_wrapper(h, x, uprate, drate, jitter_ppm, drift_ppm, rng):
-    """Wrapper for the numba-optimized sampling clock impairments function.
+def sampling_clock_impairments_numba_wrapper(
+    h,
+    x,
+    uprate,
+    drate,
+    jitter_ppm,
+    drift_ppm,
+    rng,
+):
+    """Apply sampling-clock offset and jitter using the Numba implementation.
 
-    Matches the signature of the original function and aims for bit-identical results.
-    Generates interleaved jitter/drift pairs to match NumPy RNG consumption order.
+    ``drift_ppm`` is a signed fractional offset applied to the nominal
+    input-position increment. Positive values advance through the input faster
+    and generally produce fewer output samples.
+
+    ``jitter_ppm`` is the standard deviation of independent sampling-time
+    displacement, expressed in millionths of one input-sample period. Jitter
+    affects only the current output sample and does not accumulate.
     """
-    taps_per_phase = int(np.ceil(len(h) / uprate))
+    if not isinstance(uprate, (int, np.integer)) or uprate <= 0:
+        raise ValueError("uprate must be a positive integer")
+    if not np.isfinite(drate) or drate <= 0.0:
+        raise ValueError("drate must be finite and positive")
+    if not np.isfinite(jitter_ppm) or jitter_ppm < 0.0:
+        raise ValueError("jitter_ppm must be finite and nonnegative")
+    if not np.isfinite(drift_ppm):
+        raise ValueError("drift_ppm must be finite")
 
+    nominal_position_increment = drate * (1.0 + drift_ppm * 1e-6)
+    if not np.isfinite(nominal_position_increment) or nominal_position_increment <= 0.0:
+        raise ValueError("drift_ppm produces a nonfinite or nonpositive sampling-position increment")
+
+    rng = np.random.default_rng() if rng is None else rng
+
+    taps_per_phase = int(np.ceil(len(h) / uprate))
     h_pfb = partition_polyphase_numba(h, uprate, taps_per_phase)
-    h_pfb_reversed = np.ascontiguousarray(np.flip(h_pfb, axis=1))
+
+    # Reverse each branch once instead of reversing every input slice inside
+    # the compiled loop.
+    h_pfb_reversed = np.ascontiguousarray(
+        np.flip(h_pfb, axis=1),
+        dtype=np.float32,
+    )
 
     padded_len = len(x) + 2 * taps_per_phase - 1
-    max_start = padded_len - taps_per_phase
+    max_input_idx = padded_len - taps_per_phase
+    max_sample_position = max_input_idx * uprate + (uprate - 1)
 
-    num_output_samples = int(np.ceil(padded_len * uprate / drate)) + 1
+    # Preserve the legacy initial alignment used by the NumPy implementation.
+    initial_position = uprate / drate
 
-    if jitter_ppm != 0.0 or drift_ppm != 0.0:
-        jitter_std = jitter_ppm * 1e-6
-        drift_std = drift_ppm * 1e-6
-
-        pairs = rng.normal(0.0, 1.0, (num_output_samples, 2)).astype(np.float32)
-
-        jitter_drift_pool = np.empty(num_output_samples * 2, dtype=np.float32)
-        jitter_drift_pool[0::2] = pairs[:, 0] * jitter_std
-        jitter_drift_pool[1::2] = pairs[:, 1] * drift_std
+    if initial_position <= max_sample_position:
+        nominal_output_samples = int(np.floor((max_sample_position - initial_position) / nominal_position_increment)) + 1
     else:
-        jitter_drift_pool = np.zeros(num_output_samples * 2, dtype=np.float32)
+        nominal_output_samples = 0
 
-    x_real = x.real.astype(np.float32)
-    x_imag = x.imag.astype(np.float32)
+    # Keep at least one slot so capacity growth remains well-defined.
+    num_output_samples = max(nominal_output_samples, 1)
+    max_output_samples = num_output_samples * _MAX_OUTPUT_CAPACITY_MULTIPLIER
 
-    return sampling_clock_impairments_numba(
-        h,
-        x_real,
-        x_imag,
-        uprate,
-        drate,
-        jitter_ppm,
-        drift_ppm,
-        jitter_drift_pool,
-        h_pfb_reversed,
-        taps_per_phase,
-        padded_len,
-        max_start,
-        num_output_samples,
-    )
+    jitter_std = uprate * jitter_ppm * 1e-6
+
+    if jitter_std > 0.0:
+        jitter_values = rng.normal(
+            0.0,
+            jitter_std,
+            num_output_samples,
+        )
+    else:
+        jitter_values = np.zeros(
+            num_output_samples,
+            dtype=np.float64,
+        )
+
+    x_real = np.ascontiguousarray(x.real, dtype=np.float32)
+    x_imag = np.ascontiguousarray(x.imag, dtype=np.float32)
+
+    while True:
+        try:
+            return sampling_clock_impairments_numba(
+                x_real,
+                x_imag,
+                uprate,
+                jitter_values,
+                h_pfb_reversed,
+                taps_per_phase,
+                padded_len,
+                max_input_idx,
+                nominal_position_increment,
+                initial_position,
+                num_output_samples,
+            )
+        except RuntimeError as exc:
+            if str(exc) != _OUTPUT_CAPACITY_ERROR or num_output_samples >= max_output_samples:
+                raise
+
+        new_capacity = min(
+            num_output_samples * 2,
+            max_output_samples,
+        )
+        additional_count = new_capacity - num_output_samples
+
+        if jitter_std > 0.0:
+            additional_jitter = rng.normal(
+                0.0,
+                jitter_std,
+                additional_count,
+            )
+        else:
+            additional_jitter = np.zeros(
+                additional_count,
+                dtype=np.float64,
+            )
+
+        jitter_values = np.concatenate((jitter_values, additional_jitter))
+        num_output_samples = new_capacity
 
 
 @jit(nopython=True, cache=True)

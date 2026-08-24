@@ -635,13 +635,14 @@ class ChannelSwap(SignalTransform):
 
 
 class ClockDrift(SignalTransform):
-    """Simulates a clock drift effect, which applies a random error to the sampling rate."""
+    """Apply a fixed sampling-clock rate offset selected for each signal."""
 
     def __init__(self, drift_ppm: tuple[float, float] = (1, 10), **kwargs):
         """Initialize the ClockDrift transform.
 
         Args:
-            drift_ppm: Drift in parts per million (ppm). Default (1,10).
+            drift_ppm: Range of positive sampling-clock offsets in PPM.
+                Default (1, 10).
             **kwargs: Additional keyword arguments passed to the parent class.
         """
         super().__init__(required_metadata=[], data_dtype=TorchSigComplexDataType, **kwargs)
@@ -665,13 +666,14 @@ class ClockDrift(SignalTransform):
 
 
 class ClockJitter(SignalTransform):
-    """Simulates a clock jitter effect, which applies a random error to the sampling phase."""
+    """Apply independent Gaussian error to each sampling instant."""
 
     def __init__(self, jitter_ppm: tuple[float, float] = (1, 10), **kwargs):
         """Initialize the ClockJitter transform.
 
         Args:
-            jitter_ppm: Jitter in parts per million (ppm). Default (1,10).
+            jitter_ppm: Range of nonnegative RMS timing jitter in PPM of one
+                input-sample period. Default (1, 10).
             **kwargs: Additional keyword arguments passed to the parent class.
         """
         super().__init__(required_metadata=[], data_dtype=TorchSigComplexDataType, **kwargs)

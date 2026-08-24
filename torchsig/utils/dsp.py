@@ -819,81 +819,130 @@ def sampling_clock_impairments(
     drift_ppm: float,
     rng: np.random.Generator | None = None,
 ) -> np.ndarray:
-    """Implements sampling clock impairments (jitter and drift) using polyphase filtering.
+    """Apply sampling-clock offset and jitter using polyphase filtering.
 
-    This function applies clock jitter and drift to a signal by introducing random variations
-    in the sampling rate during resampling. It uses a polyphase filter bank approach for
-    efficient implementation.
+    ``drift_ppm`` is a signed, fixed fractional error in the nominal
+    input-position increment. Positive values advance through the input
+    faster and generally produce fewer output samples.
+
+    ``jitter_ppm`` is the standard deviation of independent sampling-time
+    displacement, expressed in millionths of one input-sample period.
+    Jitter perturbs the position of the current output sample but does not
+    accumulate into later nominal sampling positions.
 
     Args:
-        h: Filter coefficients (1D array of floats)
-        x: Input signal (1D array of complex numbers)
-        uprate: Upsampling factor (integer)
-        drate: Downsampling factor (float)
-        jitter_ppm: Jitter in parts per million (float)
-        drift_ppm: Drift in parts per million (float)
-        seed: Random seed (optional)
+        h: One-dimensional array of filter coefficients.
+        x: One-dimensional array of complex input samples.
+        uprate: Number of polyphase branches.
+        drate: Nominal position increment in polyphase units.
+        jitter_ppm: Nonnegative RMS timing jitter in PPM of one input-sample
+            period.
+        drift_ppm: Signed fractional offset applied to the nominal position
+            increment, in PPM.
+        rng: Random number generator. A new generator is used when omitted.
 
     Returns:
-        Output signal with clock impairments (1D array of complex numbers)
-    """
-    # Compute taps per phase for polyphase filter bank
-    taps_per_phase = int(np.ceil(len(h) / uprate))
+        One-dimensional complex array containing the resampled signal.
 
-    # Design and partition the polyphase filter bank
+    Raises:
+        ValueError: If an argument is invalid or the drift produces a
+            nonpositive sampling increment.
+        RuntimeError: If the output exceeds its defensive capacity limit.
+    """
+    if not isinstance(uprate, (int, np.integer)) or uprate <= 0:
+        raise ValueError("uprate must be a positive integer")
+    if not np.isfinite(drate) or drate <= 0.0:
+        raise ValueError("drate must be finite and positive")
+    if not np.isfinite(jitter_ppm) or jitter_ppm < 0.0:
+        raise ValueError("jitter_ppm must be finite and nonnegative")
+    if not np.isfinite(drift_ppm):
+        raise ValueError("drift_ppm must be finite")
+
+    nominal_position_increment = drate * (1.0 + drift_ppm * 1e-6)
+    if not np.isfinite(nominal_position_increment) or nominal_position_increment <= 0.0:
+        raise ValueError("drift_ppm produces a nonfinite or nonpositive sampling-position increment")
+
+    rng = np.random.default_rng() if rng is None else rng
+
+    # Construct the polyphase filter bank.
+    taps_per_phase = int(np.ceil(len(h) / uprate))
     h_pfb = partition_polyphase(h, uprate, taps_per_phase)
 
-    # Zero-pad the input samples
+    # Pad both ends so the filter can process the signal boundaries.
     padded_len = len(x) + 2 * taps_per_phase - 1
     input_padded = np.zeros(padded_len, dtype=TorchSigComplexDataType)
-    start = taps_per_phase - 1
-    end = start + len(x)
-    input_padded[start:end] = x
+    input_start = taps_per_phase - 1
+    input_padded[input_start : input_start + len(x)] = x
 
-    # Initialize variables
-    q_step = uprate / drate
-    num_output_samples = int(np.ceil(len(input_padded) * uprate / drate)) + 1
-    output_samples = np.zeros(num_output_samples, dtype=TorchSigComplexDataType)
-    input_idx = 0
+    max_input_idx = len(input_padded) - taps_per_phase
+    max_sample_position = max_input_idx * uprate + (uprate - 1)
+
+    # Preserve the legacy one-commutator-step initial alignment.
+    nominal_position = uprate / drate
+    jitter_std = uprate * jitter_ppm * 1e-6
+
+    estimated_output_size = int(np.ceil(len(input_padded) * uprate / nominal_position_increment)) + 1
+    output_samples = np.zeros(
+        estimated_output_size,
+        dtype=TorchSigComplexDataType,
+    )
+    max_output_samples = estimated_output_size * 16
     output_idx = 0
-    clock_drift = 0.0
 
-    # Generate random jitter and drift
-    jitter_std = jitter_ppm * 1e-6
-    drift_std = drift_ppm * 1e-6
+    while nominal_position <= max_sample_position:
+        timing_offset = (
+            rng.normal(0.0, jitter_std)
+            if jitter_std > 0.0
+            else 0.0
+        )
 
-    # Run the resampler
-    max_start = len(input_padded) - taps_per_phase
+        # Clamp jitter at the representable padded-signal boundaries.
+        sample_position = np.clip(
+            nominal_position + timing_offset,
+            0.0,
+            max_sample_position,
+        )
 
-    while input_idx <= max_start:
-        while q_step >= uprate:
-            q_step -= uprate
-            input_idx += 1
+        input_idx, fractional_position = divmod(
+            sample_position,
+            uprate,
+        )
+        input_idx = int(input_idx)
+        phase = int(fractional_position)
 
-        if input_idx > max_start:
+        if input_idx > max_input_idx:
             break
 
-        delay_slice = input_padded[input_idx : input_idx + taps_per_phase]
+        delay_slice = input_padded[
+            input_idx : input_idx + taps_per_phase
+        ]
 
-        phase = int(q_step)
         h_phase = h_pfb[phase][:taps_per_phase]
 
-        acc_re = np.sum(h_phase * delay_slice[::-1].real)
-        acc_im = np.sum(h_phase * delay_slice[::-1].imag)
-        pfb_out = acc_re + 1j * acc_im
+        # The filter taps are real, so applying them to the complex samples
+        # directly is equivalent to filtering the real and imaginary parts
+        # separately.
+        pfb_out = np.sum(h_phase * delay_slice[::-1])
+
+        if output_idx >= len(output_samples):
+            if len(output_samples) >= max_output_samples:
+                raise RuntimeError(
+                    "sampling clock output capacity exhausted"
+                )
+
+            new_size = min(
+                2 * len(output_samples),
+                max_output_samples,
+            )
+            output_samples.resize(new_size, refcheck=False)
 
         output_samples[output_idx] = pfb_out
         output_idx += 1
 
-        if jitter_ppm != 0.0 or drift_ppm != 0.0:
-            clock_jitter = rng.normal(0.0, jitter_std)
-            clock_drift += rng.normal(0.0, drift_std)
-            q_step += drate + clock_jitter + clock_drift
-        else:
-            q_step += drate
+        # Jitter is deliberately excluded: it affects only the current sample.
+        nominal_position += nominal_position_increment
 
-    # Return properly sized output
-    return output_samples[:output_idx] if output_idx > 0 else np.array([], dtype=TorchSigComplexDataType)
+    return output_samples[:output_idx]
 
 
 def upsample(signal: np.ndarray, rate: int) -> np.ndarray:
