@@ -5,7 +5,7 @@ This code is used behind the scenes in several places, and sensitive to errors; 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 from torchsig.utils.metadata_debug_mixin import MetadataDebugMixin
 from torchsig.utils.metadata_logging import (
@@ -13,9 +13,6 @@ from torchsig.utils.metadata_logging import (
     MetadataDebugStatistics,
 )
 from torchsig.utils.random import Seedable
-
-if TYPE_CHECKING:
-    from collections.abc import KeysView
 
 __all__ = [
     "HierarchicalMetadataObject",
@@ -215,12 +212,11 @@ class HierarchicalMetadataObject(MetadataDebugMixin, Seedable):
             path=tuple(path),
         )
 
-    def keys(self) -> KeysView[str]:
-        """Get a dynamic view of the local metadata keys.
+    def keys(self) -> list[str]:
+        """Get all metadata keys.
 
         Returns:
-            Dynamic view of the local metadata keys. The view reflects later
-            additions to and removals from this object's metadata.
+            List of all metadata keys.
 
         Example:
             >>> obj = HierarchicalMetadataObject(metadata={"key1": 1, "key2": 2})
