@@ -1,0 +1,58 @@
+Thanks for documenting the metadata problems and putting forward a concrete
+design. The concerns about opaque parent traversal, late failures, and
+inconsistent error messages are valid. I reviewed the proposal against the
+metadata facilities currently on 2.2-dev and implemented a narrower version
+that addresses the highest-impact gaps without introducing a second metadata
+system.
+
+The concerns are addressed as follows:
+
+- Parent-chain opacity: missing-key errors now report the hierarchy that was
+  searched and whether a cycle was encountered. The existing
+  explain_metadata() API remains the structured way to inspect whether a key
+  is local, inherited, missing, or shadowing a parent value.
+- Explicit requirements: HierarchicalMetadataObject now provides
+  require_metadata(*keys, inherited=True). Callers can validate several keys
+  together, or pass inherited=False when a value must be defined locally.
+- Inconsistent diagnostics: existing signal-generator and transform
+  validation now attaches the same resolution context while retaining its
+  established public exception types and messages.
+- Unsafe defaults: mutable required_metadata=[] constructor defaults were
+  replaced with None.
+- Regression coverage: tests cover local and inherited values, local-only
+  requirements, missing and invalid keys, cycles, and item-lookup diagnostics.
+
+Some parts of the original proposal were deliberately not implemented:
+
+- has(*keys) was omitted because it largely duplicates the existing
+  hierarchical hasattr() behavior and does not clearly communicate whether
+  local or inherited values are acceptable. The inherited argument on
+  require_metadata() makes that distinction explicit where validation matters.
+- require() returning a dictionary was changed to require_metadata() returning
+  None. Validation and retrieval remain separate, ordinary signal[key] access
+  stays canonical, and validation does not need to construct a fully merged
+  metadata dictionary.
+- A centralized metadata_schemas.py registry was not added. Transforms already
+  expose required_metadata and generators expose required_metadata_fields.
+  Mirroring those declarations in a separate registry would create two sources
+  of truth that could drift. If optional or produced metadata becomes useful
+  to a concrete consumer, those declarations should live beside the component
+  that owns them.
+- Transform.__call__ was not rewritten around a new _transform protocol.
+  Transform validation already exists, and changing the lifecycle would add
+  migration and regression risk without being necessary to improve metadata
+  errors.
+- General construction-time pipeline validation was not added. Datasets
+  already perform generator validation during initialization, while some
+  metadata is generated conditionally or by earlier transforms. A global
+  preflight validator would therefore be incomplete or could reject valid
+  dynamic pipelines.
+- Available metadata keys are not dumped into every exception. Large wideband
+  hierarchies could make those errors noisy. The searched path plus
+  explain_metadata() provides focused diagnostics without exposing or
+  formatting large metadata structures.
+
+This keeps the change backward compatible and focused on the demonstrated
+debugging problem. A broader contract or pipeline-analysis system can still be
+added later if there is a specific consumer and a reliable model for dynamic
+metadata production.

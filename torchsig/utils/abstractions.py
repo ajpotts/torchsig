@@ -243,6 +243,25 @@ class HierarchicalMetadataObject(MetadataDebugMixin, Seedable):
             path=tuple(path),
         )
 
+    def require_metadata(self, *keys: str, inherited: bool = True) -> None:
+        """Require metadata keys to be defined on this object or its parents.
+
+        Args:
+            *keys: Metadata keys that must be present.
+            inherited: Whether definitions inherited from parents satisfy the
+                requirement. Defaults to ``True``.
+
+        Raises:
+            TypeError: If any key is not a string.
+            MetadataAttributeError: If a key is missing or, when ``inherited``
+                is ``False``, is only defined by a parent.
+        """
+        for key in keys:
+            resolution = self.explain_metadata(key)
+            if not resolution.found or (not inherited and resolution.source != "local"):
+                requirement = "locally defined metadata" if not inherited else "metadata"
+                raise MetadataAttributeError(f"required {requirement} key {key!r} was not found; searched: {' -> '.join(resolution.path)}; cycle detected: {resolution.cycle_detected}")
+
     def keys(self) -> KeysView[str]:
         """Get a dynamic view of the local metadata keys.
 
@@ -343,7 +362,8 @@ class HierarchicalMetadataObject(MetadataDebugMixin, Seedable):
             if key in current._metadata:
                 return current._metadata[key]
             current = current.parent
-        raise MetadataAttributeError("key: '" + str(key) + "' could not be found in metadata")
+        resolution = self.explain_metadata(key)
+        raise MetadataAttributeError(f"key: {key!r} could not be found in metadata; searched: {' -> '.join(resolution.path)}; cycle detected: {resolution.cycle_detected}")
 
     def __setitem__(self, key: str, value: Any) -> None:
         """Set a metadata value by key.

@@ -1,0 +1,60 @@
+Title: Improve hierarchical metadata validation and diagnostics
+
+Summary
+
+This MR improves metadata validation without replacing TorchSIG's existing
+hierarchical metadata model or transform lifecycle.
+
+Missing metadata errors now identify the requested key, the object hierarchy
+that was searched, and whether a parent cycle was detected. A new
+HierarchicalMetadataObject.require_metadata() method provides explicit,
+reusable validation for one or more metadata keys. It supports both normal
+hierarchical lookup and local-only requirements.
+
+The existing signal-generator and transform validation paths use the new
+diagnostics. Their public behavior is preserved: generators and transforms
+continue to raise ValueError for invalid inputs, with the underlying
+MetadataAttributeError chained for additional context. Transform validation
+also continues to accept derived Signal properties such as start, rather than
+restricting requirements to keys stored directly in _metadata.
+
+This MR also replaces mutable required_metadata=[] constructor defaults with
+None in the transform base classes.
+
+Changes
+
+- Add require_metadata(*keys, inherited=True) to
+  HierarchicalMetadataObject.
+- Include the searched parent chain and cycle status in missing-key errors.
+- Add resolution context to existing generator and transform validation
+  errors.
+- Preserve inherited metadata and derived Signal-property behavior.
+- Remove mutable default lists from transform constructors.
+- Add deterministic tests for local, inherited, local-only, missing,
+  non-string, and cyclic metadata requirements, as well as enhanced item
+  lookup errors.
+
+Scope decisions
+
+This MR intentionally does not add a centralized metadata-schema registry,
+rewrite Transform.__call__, or introduce whole-pipeline construction-time
+validation. TorchSIG already has required_metadata on transforms,
+required_metadata_fields on generators, initialization validation for
+datasets, and explain_metadata() for hierarchy inspection. Adding parallel
+systems would create duplicate sources of truth and a larger migration burden.
+
+Construction-time validation is also unable to fully describe metadata that
+is produced conditionally or dynamically by earlier pipeline stages. This MR
+therefore improves the existing validation points instead of adding a
+potentially incomplete preflight system.
+
+Validation
+
+- pytest -q tests/utils/test_abstractions.py tests/signals/test_builder.py
+  tests/transforms/test_metadata_transforms.py
+  tests/transforms/test_transforms.py
+- Result: 205 passed, 1 environment warning about NVML initialization.
+- ruff format completed successfully for all changed Python files.
+- git diff --check completed successfully.
+
+No dependencies or public API removals are introduced.

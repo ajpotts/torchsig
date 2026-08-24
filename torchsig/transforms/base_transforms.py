@@ -29,7 +29,7 @@ class Transform(ABC, Seedable):
     All transforms should inherit from this class and implement the required methods.
     """
 
-    def __init__(self, required_metadata: list[str] = [], **kwargs):
+    def __init__(self, required_metadata: list[str] | None = None, **kwargs):
         """Transform initialization as Seedable.
 
         Args:
@@ -37,7 +37,7 @@ class Transform(ABC, Seedable):
             **kwargs: Additional keyword arguments passed to the parent class.
         """
         # what metadata fields are requried for target transform to be applied
-        self.required_metadata = required_metadata
+        self.required_metadata = [] if required_metadata is None else required_metadata
 
         Seedable.__init__(self, **kwargs)
 

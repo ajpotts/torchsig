@@ -71,7 +71,7 @@ class MetadataTransform(Transform):
         __repr__(): Returns a detailed string representation of the transform object.
     """
 
-    def __init__(self, required_metadata: list[str] = [], **kwargs) -> None:
+    def __init__(self, required_metadata: list[str] | None = None, **kwargs) -> None:
         """Initialize the MetadataTransform.
 
         Args:
@@ -96,7 +96,10 @@ class MetadataTransform(Transform):
             raise TypeError(f"input ({type(signal)}) is not a Signal object.")
         for required_metadatum in self.required_metadata:
             if not hasattr(signal, required_metadatum):
-                raise ValueError(f"key: {required_metadatum} is missing from signal metadata, but is required by {self.__class__.__name__}")
+                try:
+                    signal.require_metadata(required_metadatum)
+                except AttributeError as err:
+                    raise ValueError(f"key: {required_metadatum} is missing from signal metadata, but is required by {self.__class__.__name__}. Resolution: {err}") from err
         return signal
 
     def __call__(self, signal: Signal) -> Signal:
