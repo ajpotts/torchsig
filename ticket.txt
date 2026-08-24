@@ -1,0 +1,20 @@
+Proposal for better metadata validation
+Open
+On the heels of the center_freq discussion, it's quite currently to track down metadata, especially in places when it's required. I've examined some common access patterns and generated a proposal. The problem statement is below, but see the attached for the full document with proposed solution:
+
+NOTE: Post-facto, I discovered MetadataTransform in torchsig/transforms/metadata_transforms.py, which uses hasattr() for validation. The proposed pattern extends this concept to support hierarchical metadata traversal.
+
+METADATA_CHECKING_PROPOSAL.md
+
+Current State
+TorchSig uses a HierarchicalMetadataObject base class that provides dictionary-style metadata access with parent chain traversal. While powerful, this design has several issues:
+
+Silent Parent Traversal: When you write signal["key"], it automatically searches up the parent chain. This is non-obvious and can lead to bugs where metadata appears to exist but is actually inherited from an unexpected ancestor.
+Late Error Detection: Metadata requirements are only checked when a transform tries to access a missing key. For a complex pipeline, this means errors surface far from where the problem originated.
+Scattered Documentation: Metadata requirements are documented in docstrings for each transform, but there's no centralized schema or way to programmatically query what metadata a transform needs.
+Inconsistent Validation: Each transform implements its own validation logic, leading to duplicated code and inconsistent error messages.
+Impact
+Debugging Difficulty: When metadata is missing, error messages often don't indicate what keys are available or where in the hierarchy the lookup failed
+Development Velocity: Developers must manually trace through parent chains to understand where metadata comes from
+LLM Confusion: AI assistants frequently misunderstand that signal["key"] traverses parents, leading to incorrect code suggestions
+Maintenance Burden: Adding new metadata fields requires updating validation in multiple places

@@ -171,7 +171,7 @@ class SignalTransform(Transform):
 
     def __init__(
         self,
-        required_metadata: list[str] = [],
+        required_metadata: list[str] | None = None,
         data_dtype: npt.DTypeLike = None,
         precise: bool = False,
         **kwargs,
@@ -212,12 +212,12 @@ class SignalTransform(Transform):
             raise TypeError(f"Must be Signal class for transform {self.__class__.__name__}, signal is {type(signal)}.")
 
         # check signal and all components have required metadata
-        for rm in self.required_metadata:
-            # for each required metdata
-            # check signal metadata has required fields
-            if not hasattr(signal, rm):
-                # throw error if not
-                raise ValueError(f"Signal missing {rm} in metadata: {signal}.")
+        for required_metadatum in self.required_metadata:
+            if not hasattr(signal, required_metadatum):
+                try:
+                    signal.require_metadata(required_metadatum)
+                except AttributeError as err:
+                    raise ValueError(f"Signal missing {required_metadatum} in metadata: {signal}. Resolution: {err}") from err
 
         # signal has all required metadata
         return signal

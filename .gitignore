@@ -13,6 +13,8 @@ dist/
 *.p
 *.png
 *.txt
+!MR_DESCRIPTION.txt
+!PROPOSAL_COMMENT.txt
 *.npy
 *.jpg
 *.pt*

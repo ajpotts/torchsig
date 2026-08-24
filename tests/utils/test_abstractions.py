@@ -368,6 +368,67 @@ def test_explain_metadata_rejects_non_string_key():
         obj.explain_metadata(123)
 
 
+def test_require_metadata_accepts_local_and_inherited_keys():
+    parent = ExampleMetadataObject(metadata={"inherited": "value"})
+    child = HierarchicalMetadataObject(
+        parent=parent,
+        metadata={"local": "value"},
+    )
+
+    assert child.require_metadata("local", "inherited") is None
+
+
+def test_require_metadata_can_require_local_definition():
+    parent = ExampleMetadataObject(metadata={"field": "value"})
+    child = HierarchicalMetadataObject(parent=parent)
+
+    with pytest.raises(
+        MetadataAttributeError,
+        match="required locally defined metadata key 'field' was not found",
+    ):
+        child.require_metadata("field", inherited=False)
+
+
+def test_require_metadata_reports_missing_key_and_parent_chain():
+    parent = ExampleMetadataObject(metadata={"other": "value"})
+    child = HierarchicalMetadataObject(parent=parent)
+
+    with pytest.raises(MetadataAttributeError) as exc_info:
+        child.require_metadata("missing")
+
+    message = str(exc_info.value)
+    assert "required metadata key 'missing' was not found" in message
+    assert "HierarchicalMetadataObject -> ExampleMetadataObject" in message
+    assert "cycle detected: False" in message
+
+
+def test_require_metadata_rejects_non_string_key():
+    obj = HierarchicalMetadataObject()
+
+    with pytest.raises(TypeError, match="metadata key must be a string"):
+        obj.require_metadata(123)
+
+
+def test_require_metadata_reports_parent_cycle():
+    parent = ExampleMetadataObject()
+    child = HierarchicalMetadataObject(parent=parent)
+    parent.parent = child
+
+    with pytest.raises(MetadataAttributeError, match="cycle detected: True"):
+        child.require_metadata("missing")
+
+
+def test_missing_item_error_reports_parent_chain():
+    parent = ExampleMetadataObject()
+    child = HierarchicalMetadataObject(parent=parent)
+
+    with pytest.raises(MetadataAttributeError) as exc_info:
+        _ = child["missing"]
+
+    assert "key: 'missing' could not be found in metadata" in str(exc_info.value)
+    assert "HierarchicalMetadataObject -> ExampleMetadataObject" in str(exc_info.value)
+
+
 def test_metadata_debug_is_disabled_by_default(caplog):
     caplog.set_level(logging.DEBUG, logger="torchsig.metadata")
     obj = HierarchicalMetadataObject(metadata={"field": "value"})
