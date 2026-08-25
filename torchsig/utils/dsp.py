@@ -818,6 +818,7 @@ def sampling_clock_impairments(
     jitter_ppm: float,
     drift_ppm: float,
     rng: np.random.Generator | None = None,
+    initial_phase: float = 0.0,
 ) -> np.ndarray:
     """Apply sampling-clock offset and jitter using polyphase filtering.
 
@@ -840,6 +841,8 @@ def sampling_clock_impairments(
         drift_ppm: Signed fractional offset applied to the nominal position
             increment, in PPM.
         rng: Random number generator. A new generator is used when omitted.
+        initial_phase: Initial sampling phase in input-sample periods. Must be
+            in the half-open interval ``[0, 1)``. Defaults to 0.
 
     Returns:
         One-dimensional complex array containing the resampled signal.
@@ -857,6 +860,8 @@ def sampling_clock_impairments(
         raise ValueError("jitter_ppm must be finite and nonnegative")
     if not np.isfinite(drift_ppm):
         raise ValueError("drift_ppm must be finite")
+    if not np.isfinite(initial_phase) or not 0.0 <= initial_phase < 1.0:
+        raise ValueError("initial_phase must be finite and in the interval [0, 1)")
 
     nominal_position_increment = drate * (1.0 + drift_ppm * 1e-6)
     if not np.isfinite(nominal_position_increment) or nominal_position_increment <= 0.0:
@@ -877,8 +882,9 @@ def sampling_clock_impairments(
     max_input_idx = len(input_padded) - taps_per_phase
     max_sample_position = max_input_idx * uprate + (uprate - 1)
 
-    # Preserve the legacy one-commutator-step initial alignment.
-    nominal_position = uprate / drate
+    # Add the receiver's initial fractional sampling phase to the legacy
+    # one-commutator-step filter alignment.
+    nominal_position = uprate / drate + uprate * initial_phase
     jitter_std = uprate * jitter_ppm * 1e-6
 
     estimated_output_size = int(np.ceil(len(input_padded) * uprate / nominal_position_increment)) + 1

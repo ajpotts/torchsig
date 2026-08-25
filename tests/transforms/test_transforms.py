@@ -505,6 +505,34 @@ def test_ClockDrift(signal: Signal, params: dict, is_error: bool) -> None:
         assert signal.data.dtype == TorchSigComplexDataType
 
 
+def test_clock_drift_defaults_model_signed_offset_and_random_phase() -> None:
+    transform = ClockDrift(seed=42)
+
+    assert transform.drift_ppm == (-10, 10)
+    assert transform.drift_sampling == "linear"
+    assert transform.initial_phase == (0.0, 1.0)
+    assert -10 <= transform.drift_ppm_distribution() <= 10
+    assert 0 <= transform.initial_phase_distribution() < 1
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"drift_sampling": "invalid"}, "drift_sampling"),
+        (
+            {"drift_ppm": (-10, 10), "drift_sampling": "log10"},
+            "positive drift_ppm bounds",
+        ),
+        ({"initial_phase": (-0.1, 0.5)}, "initial_phase bounds"),
+        ({"initial_phase": (0.5, 1.1)}, "initial_phase bounds"),
+        ({"initial_phase": (1.0, 1.0)}, "values below 1"),
+    ],
+)
+def test_clock_drift_rejects_invalid_initialization(kwargs, match) -> None:
+    with pytest.raises(ValueError, match=match):
+        ClockDrift(**kwargs)
+
+
 @pytest.mark.parametrize(
     "signal, params, is_error",
     [

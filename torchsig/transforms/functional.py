@@ -222,6 +222,7 @@ def clock_drift(
     data: np.ndarray,
     drift_ppm: float = 10,
     rng: np.random.Generator | None = None,
+    initial_phase: float = 0.0,
 ) -> np.ndarray:
     """Apply a fixed sampling-clock rate offset.
 
@@ -232,6 +233,8 @@ def clock_drift(
         data: Complex valued IQ data samples.
         drift_ppm: Signed sampling-clock rate offset in PPM. Default 10.
         rng: Random number generator. Defaults to np.random.default_rng(seed=None).
+        initial_phase: Initial sampling phase in input-sample periods. Must be
+            in the half-open interval ``[0, 1)``. Defaults to 0.
 
     Returns:
         Data with LO drift applied.
@@ -252,7 +255,16 @@ def clock_drift(
     pfb_prototype_filter = pfb_prototype_filter.astype(TorchSigRealDataType)
 
     # call the impairment
-    data_with_drift = _sampling_clock_impairments(h=pfb_prototype_filter, x=data, uprate=uprate, drate=downrate, jitter_ppm=0, drift_ppm=drift_ppm, rng=rng)
+    data_with_drift = _sampling_clock_impairments(
+        h=pfb_prototype_filter,
+        x=data,
+        uprate=uprate,
+        drate=downrate,
+        jitter_ppm=0,
+        drift_ppm=drift_ppm,
+        rng=rng,
+        initial_phase=initial_phase,
+    )
 
     # discard extra samples from resampling process, or zero-pad if too short
     num_samples_to_discard = len(data_with_drift) - len(data)
