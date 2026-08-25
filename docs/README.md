@@ -1,15 +1,15 @@
 # TorchSig Documentation
 ---
 
-Install additional dependencies for documentation generation:
+From the repository root, install the documentation profile:
 
 ```
-pip install -r docs-requirements.txt
+pip install -e ".[docs]"
 ```
 
-Then, to build the HTML documentation run:
+Then build the HTML documentation:
 ```
-make html
+make docs
 ```
 
-Navigate to `build/html/index.html` for the generated HTML documenation.
+Navigate to `docs/build/html/index.html` for the generated HTML documentation.

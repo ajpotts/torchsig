@@ -32,6 +32,9 @@ pip install -e .
 # Full development environment (for contributors)
 pip install -e .[dev]
 
+# Documentation build environment
+pip install -e ".[docs]"
+
 # To run the notebooks
 pip install -e .[notebooks]
 
@@ -45,7 +48,10 @@ pip install -e .[examples]
   Use this if you just want to run the library in your own projects.
 
 * `pip install -e .[dev]` — adds the extra **dev** group, installing testing, linting, and coverage tools.  
-  Choose this when you plan to develop, run the test suite, or contribute code back to the project.
+  It also includes the documentation dependencies. Choose this when you plan to develop, run the test suite, build the documentation, or contribute code back to the project.
+
+* `pip install -e .[docs]` — installs the Sphinx documentation toolchain without the testing and linting tools.
+  Choose this when you only need to build the documentation.
  
 * `pip install -e .[notebooks]` — adds the extra **notebook** group, jupyter notebook tools.
   Choose this when you plan to develop or run notebooks for the project.
@@ -147,10 +153,9 @@ TorchSig provides many useful tools to facilitate and accelerate research on sig
 # Documentation
 Documentation can be found [online](https://torchsig.readthedocs.io/latest/) or built locally by following the instructions below.
 ```
-cd docs
-pip install -r docs-requirements.txt
-make html
-firefox build/html/index.html
+pip install -e ".[docs]"
+make docs
+firefox docs/build/html/index.html
 ```
 
 ## 🛠️ Development Workflow
