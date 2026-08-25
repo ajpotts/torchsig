@@ -120,7 +120,8 @@ def sampling_clock_impairments_numba_wrapper(
     drate,
     jitter_ppm,
     drift_ppm,
-    rng,
+    rng=None,
+    initial_phase=0.0,
 ):
     """Apply sampling-clock offset and jitter using the Numba implementation.
 
@@ -140,6 +141,8 @@ def sampling_clock_impairments_numba_wrapper(
         raise ValueError("jitter_ppm must be finite and nonnegative")
     if not np.isfinite(drift_ppm):
         raise ValueError("drift_ppm must be finite")
+    if not np.isfinite(initial_phase) or not 0.0 <= initial_phase < 1.0:
+        raise ValueError("initial_phase must be finite and in the interval [0, 1)")
 
     nominal_position_increment = drate * (1.0 + drift_ppm * 1e-6)
     if not np.isfinite(nominal_position_increment) or nominal_position_increment <= 0.0:
@@ -161,8 +164,9 @@ def sampling_clock_impairments_numba_wrapper(
     max_input_idx = padded_len - taps_per_phase
     max_sample_position = max_input_idx * uprate + (uprate - 1)
 
-    # Preserve the legacy initial alignment used by the NumPy implementation.
-    initial_position = uprate / drate
+    # Add the receiver's initial fractional sampling phase to the legacy
+    # alignment used by the NumPy implementation.
+    initial_position = uprate / drate + uprate * initial_phase
 
     if initial_position <= max_sample_position:
         nominal_output_samples = int(np.floor((max_sample_position - initial_position) / nominal_position_increment)) + 1
