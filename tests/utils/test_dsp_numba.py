@@ -284,6 +284,28 @@ def test_sampling_clock_implementations_match_with_fixed_rate_offset_and_jitter(
     np.testing.assert_allclose(actual, reference, rtol=1e-6, atol=1e-6)
 
 
+def test_sampling_clock_implementations_match_with_initial_phase():
+    kwargs = {
+        "h": np.array([1.0, 0.5, -0.25, 0.125], dtype=np.float32),
+        "x": np.arange(32, dtype=np.float32).astype(np.complex64),
+        "uprate": 4,
+        "drate": 4.0,
+        "jitter_ppm": 0.0,
+        "drift_ppm": 0.0,
+        "initial_phase": 0.75,
+    }
+
+    reference = sampling_clock_impairments(rng=np.random.default_rng(123), **kwargs)
+    actual = sampling_clock_impairments_numba_wrapper(rng=np.random.default_rng(123), **kwargs)
+
+    np.testing.assert_allclose(actual, reference, rtol=1e-6, atol=1e-6)
+    legacy = sampling_clock_impairments(
+        **{**kwargs, "initial_phase": 0.0},
+        rng=np.random.default_rng(123),
+    )
+    assert not np.array_equal(reference, legacy)
+
+
 @pytest.mark.parametrize(
     ("overrides", "match"),
     [
@@ -294,6 +316,9 @@ def test_sampling_clock_implementations_match_with_fixed_rate_offset_and_jitter(
         ({"uprate": 0}, "uprate must be a positive integer"),
         ({"drate": 0.0}, "drate must be finite and positive"),
         ({"drate": np.nan}, "drate must be finite and positive"),
+        ({"initial_phase": -0.1}, "initial_phase"),
+        ({"initial_phase": 1.0}, "initial_phase"),
+        ({"initial_phase": np.nan}, "initial_phase"),
     ],
 )
 @pytest.mark.parametrize(
