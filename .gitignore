@@ -54,6 +54,9 @@ examples/datasets/
 !examples/transforms/*.ipynb
 !examples/*.py
 !examples/*.yaml
+!examples/scripts/
+examples/scripts/*
+!examples/scripts/*.py
 
 # Pytest Files
 *.coverage
