@@ -1476,10 +1476,7 @@ def test_static_dataset_uses_native_contiguous_batch_reader():
 
         def read_signals_batch(self, start, stop):
             self.batch_calls.append((start, stop))
-            return [
-                Signal(data=np.full(4, idx, dtype=np.complex64), index=idx)
-                for idx in range(start, stop)
-            ]
+            return [Signal(data=np.full(4, idx, dtype=np.complex64), index=idx) for idx in range(start, stop)]
 
         def read(self, idx):
             self.read_calls.append(idx)
@@ -1818,3 +1815,67 @@ def test_iterable_dataset_accepts_explicit_transform_lists():
 
     assert dataset.transforms == [transform]
     assert dataset.component_transforms == [component_transform]
+
+
+def test_string_signal_generators_support_class_name_grouping():
+    dataset_metadata = TorchSigDefaults().default_dataset_metadata
+
+    grouping = {
+        "source": "class_name",
+        "groups": [
+            {
+                "name": "psk",
+                "values": ["bpsk", "qpsk"],
+            },
+            {
+                "name": "fsk",
+                "values": ["2fsk", "4fsk"],
+            },
+        ],
+    }
+
+    dataset = TorchSigIterableDataset(
+        metadata=dataset_metadata,
+        signal_generators=["bpsk", "qpsk", "2fsk", "4fsk"],
+        sampling_grouping=grouping,
+    )
+
+    assert dataset.class_names == [
+        "bpsk",
+        "qpsk",
+        "2fsk",
+        "4fsk",
+    ]
+    np.testing.assert_allclose(
+        dataset.signal_probabilities,
+        [0.25, 0.25, 0.25, 0.25],
+    )
+
+
+def test_string_lookup_expands_concat_signal_generator():
+    grouping = {
+        "source": "class_name",
+        "groups": [
+            {
+                "name": "analog",
+                "values": ["fm"],
+            },
+            {
+                "name": "digital",
+                "values": ["bpsk"],
+            },
+        ],
+    }
+
+    dataset = TorchSigIterableDataset(
+        metadata=TorchSigDefaults().default_dataset_metadata,
+        signal_generators=["fm", "bpsk"],
+        sampling_grouping=grouping,
+    )
+
+    assert [generator.class_name for generator in dataset.signal_generators] == ["fm", "bpsk"]
+
+    np.testing.assert_allclose(
+        dataset.signal_probabilities,
+        [0.5, 0.5],
+    )

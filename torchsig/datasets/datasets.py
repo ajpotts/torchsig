@@ -378,9 +378,14 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
             TypeError: If the signal_generator is neither a string nor a callable.
         """
         if isinstance(signal_generator, str):
-            self.add_signal_generator(lookup_signal_generator_by_string(signal_generator))
-        else:
-            self.add_signal_generator(signal_generator)
+            signal_generator = lookup_signal_generator_by_string(signal_generator)
+
+        if isinstance(signal_generator, ConcatSignalGenerator):
+            for child_generator in signal_generator.signal_generators:
+                self.init_signal_generator(child_generator)
+            return
+
+        self.add_signal_generator(signal_generator)
 
     def add_signal_generator(
         self,
