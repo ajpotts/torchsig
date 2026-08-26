@@ -14,6 +14,8 @@ dist/
 *.png
 *.txt
 !tickets/*.txt
+!tickets/documentation/
+!tickets/documentation/*.txt
 *.npy
 *.jpg
 *.pt*

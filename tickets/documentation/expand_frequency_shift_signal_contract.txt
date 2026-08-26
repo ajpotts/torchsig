@@ -1,0 +1,33 @@
+Title: Document the full frequency_shift_signal contract
+
+Summary
+
+The `frequency_shift_signal` docstring says that it shifts a signal to a new
+center frequency, but it does not fully describe input assumptions, mutation,
+requested-versus-realized centers, or edge filtering.
+
+This documentation should be finalized with the implementation ticket for
+supporting non-baseband inputs so it does not preserve an accidental behavior as
+a public contract.
+
+Proposed documentation
+
+Update the public docstring to state:
+
+- Whether the sampled value is a target center or an incremental offset.
+- Whether input signals may already have a nonzero `center_freq`.
+- That the input `Signal` is mutated and returned.
+- That all frequency arguments use the same units as `sample_rate`.
+- How `frequency_min` and `frequency_max` constrain occupied edges.
+- That anti-alias filtering may change the requested center and bandwidth.
+- That returned metadata describes the retained, non-aliased region.
+
+Acceptance criteria
+
+- The documented contract matches behavior for both zero- and nonzero-centered
+  inputs.
+- Mutation and return behavior are explicit.
+- Requested and realized center frequencies are clearly distinguished.
+- Filtering side effects on data and metadata are documented.
+- Generated API documentation renders the updated contract correctly.
+

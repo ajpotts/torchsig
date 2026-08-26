@@ -1,0 +1,35 @@
+Title: Document the component frequency-placement lifecycle
+
+Summary
+
+The order in which TorchSIG generates, transforms, places, filters, and labels a
+component determines the meaning of its frequency metadata. This lifecycle is
+currently only discoverable by reading the implementation.
+
+Proposed documentation
+
+Add an overview to the dataset generation documentation showing this sequence:
+
+    generate a baseband component at 0 Hz
+    -> apply component transforms
+    -> update SNR and bandwidth metadata
+    -> sample and apply a center-frequency placement
+    -> filter energy outside configured frequency bounds if necessary
+    -> update final center and bandwidth metadata
+    -> insert the component into the wideband sample
+    -> apply dataset-level transforms
+    -> produce labels
+
+Explain which stages operate on component IQ, composite IQ, component metadata,
+and parent sample metadata. Cross-reference the frequency-coordinate guide and
+transform documentation rather than duplicating their full content.
+
+Acceptance criteria
+
+- The lifecycle identifies when `center_freq` changes from generator baseband
+  zero to its placed value.
+- Component-level and dataset-level transforms are clearly distinguished.
+- The documentation notes that edge filtering can change final metadata.
+- Label generation is shown after all relevant metadata-changing operations.
+- The source documentation builds without warnings.
+
