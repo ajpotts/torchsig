@@ -1,0 +1,42 @@
+Title: Correct frequency coordinates used for wideband overlap detection
+
+Summary
+
+Wideband overlap detection maps each component signal into a time-frequency
+rectangle. The frequency edges in `_map_to_coordinates` currently use
+`center_freq +/- bandwidth`, even though TorchSIG defines bandwidth as the full
+two-sided bandwidth and derives signal edges as
+`center_freq +/- bandwidth / 2`.
+
+The frequency normalization also divides by `sample_rate / 2` before scaling by
+`fft_size`. Mapping the Nyquist interval `[-sample_rate / 2, sample_rate / 2]`
+to FFT bins `[0, fft_size]` requires division by `sample_rate`.
+
+Impact
+
+The resulting rectangles are wider than the component signals and their bin
+coordinates can extend to approximately twice the FFT size. When co-channel
+overlap is disabled or probabilistic, signals that do not overlap can be
+incorrectly rejected.
+
+Proposed change
+
+- Calculate the lower and upper edges using the canonical `lower_freq` and
+  `upper_freq` properties, or explicitly use `center_freq +/- bandwidth / 2`.
+- Normalize an edge with `(edge + sample_rate / 2) / sample_rate`.
+- Keep the existing time-coordinate behavior unless separate testing identifies
+  a time-mapping problem.
+
+Acceptance criteria
+
+- A signal spanning the complete Nyquist interval maps to bins 0 through
+  `fft_size`.
+- A zero-centered signal with bandwidth `sample_rate / 2` maps to bins
+  `fft_size / 4` through `3 * fft_size / 4`, subject to rounding.
+- Signals whose canonical frequency intervals do not intersect are not marked
+  as overlapping solely because of inflated frequency rectangles.
+- Signals whose time and canonical frequency intervals intersect are marked as
+  overlapping.
+- Focused tests cover positive, negative, and zero center frequencies and the
+  Nyquist boundaries.
+

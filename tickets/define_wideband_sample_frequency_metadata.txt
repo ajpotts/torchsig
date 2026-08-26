@@ -1,0 +1,41 @@
+Title: Define and correct aggregate frequency metadata for wideband samples
+
+Summary
+
+A generated wideband sample currently receives `center_freq=0` and a bandwidth
+equal to the maximum bandwidth of any individual component. For components at
+different center frequencies, this does not describe either the full capture
+bandwidth or the occupied frequency span.
+
+For example, two 1 MHz components centered at -3 MHz and +3 MHz produce parent
+metadata with a bandwidth of 1 MHz even though the occupied span is 7 MHz.
+Consequently, parent-level `lower_freq`, `upper_freq`, and `oversampling_rate`
+are misleading, and transforms that update parent frequency metadata operate on
+an incorrect starting value.
+
+Proposed change
+
+First define the intended meaning of frequency metadata on a composite sample:
+
+1. Capture semantics: use `center_freq=0` and `bandwidth=sample_rate` to describe
+   the complete IQ capture; or
+2. Occupancy semantics: calculate the union bounds from the minimum component
+   `lower_freq` and maximum component `upper_freq`, then derive the parent center
+   and bandwidth from those bounds.
+
+Capture semantics are recommended because the parent object represents the
+sampled channel while component metadata already describes occupied regions.
+The selected convention must be documented so consumers do not interpret the
+parent as another component label.
+
+Acceptance criteria
+
+- The meaning of parent `center_freq` and `bandwidth` is documented for
+  composite signals.
+- Parent frequency metadata is valid for zero, one, and multiple components.
+- Components separated in frequency cannot produce parent metadata narrower
+  than the documented quantity.
+- Existing component-level labels and YOLO targets remain unchanged.
+- Tests cover empty samples and multiple components with unequal bandwidths and
+  asymmetric center frequencies.
+
