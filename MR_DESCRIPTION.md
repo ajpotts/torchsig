@@ -33,13 +33,25 @@ selection inside the baseband modulator.
 - `pulse_shape_name`: Either `"srrc"` or `"rectangular"`.
 - `alpha_rolloff`: The generated SRRC roll-off factor, or `None` for a
   rectangular pulse shape.
+- `pulse_shape_index`: Tensor-ready pulse-shape class (`0` for rectangular,
+  `1` for SRRC).
+- `alpha_rolloff_target`: Numeric roll-off target, using `0.0` when roll-off
+  does not apply.
 
 ## Training example
 
-`examples/scripts/train_modrec_metadata_targets.py` builds a deliberately
-constrained, clean dataset from `OFDMSignalGenerator` and
-`ConstellationSignalGenerator`. It reads targets directly from the returned
-`Signal` metadata and trains a compact shared MLP with separate output heads.
+`examples/scripts/train_modrec_metadata_targets.py` builds deliberately
+constrained `TorchSigIterableDataset` instances and consumes them through
+seeded `WorkerSeedingDataLoader` instances. The training loops receive the
+features and targets directly from each loader:
+
+```python
+spectrogram, (has_cp, cp_len) = next(ofdm_batches)
+spectrogram, (pulse_shape, alpha) = next(constellation_batches)
+```
+
+The example does not manually generate signals, inspect component metadata, or
+materialize an intermediate dataset.
 
 The example uses masked losses because some targets are conditional:
 
@@ -47,10 +59,9 @@ The example uses masked losses because some targets are conditional:
 - Pulse-shape targets apply only to constellation signals.
 - Roll-off regression applies only to SRRC-shaped constellation signals.
 
-Spectrum and autocorrelation features keep the demonstration fast and make the
-cyclic-prefix structure visible to a small model. Waveform type is included as
-an auxiliary prediction so the example can select the applicable target heads
-at inference time.
+TorchSIG's `Spectrogram` transform supplies model features within the dataset
+pipeline. Two small two-head models demonstrate the OFDM and constellation
+targets independently.
 
 Run the complete example from the repository root:
 
@@ -61,22 +72,17 @@ python examples/scripts/train_modrec_metadata_targets.py
 For a quick smoke run:
 
 ```bash
-python examples/scripts/train_modrec_metadata_targets.py \
-    --train-samples 64 \
-    --validation-samples 32 \
-    --epochs 1 \
-    --batch-size 16
+python examples/scripts/train_modrec_metadata_targets.py --steps 2
 ```
 
-The default configuration completes in approximately seven seconds in the
+The default configuration completes in approximately ten seconds in the
 development environment. One representative run produced:
 
 ```text
-waveform type accuracy: 100.0%
-cyclic prefix accuracy: 96.9%
-cyclic prefix length MAE: 1.26 samples
+cyclic prefix accuracy: 93.0%
+cyclic prefix length MAE: 2.16 samples
 pulse shape accuracy: 100.0%
-alpha roll-off MAE: 0.050
+alpha roll-off MAE: 0.035
 ```
 
 These figures demonstrate the example rather than establishing a model-quality

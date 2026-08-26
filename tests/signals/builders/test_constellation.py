@@ -893,6 +893,8 @@ def test_constellation_signal_generator_generate_with_srrc():
         bandwidth=800,
         pulse_shape_name="srrc",
         alpha_rolloff=0.25,
+        pulse_shape_index=1,
+        alpha_rolloff_target=0.25,
     )
 
     assert result is expected_signal
@@ -955,6 +957,8 @@ def test_constellation_signal_generator_generate_with_rectangular():
         bandwidth=1_500,
         pulse_shape_name="rectangular",
         alpha_rolloff=None,
+        pulse_shape_index=0,
+        alpha_rolloff_target=0.0,
     )
 
     assert result is expected_signal

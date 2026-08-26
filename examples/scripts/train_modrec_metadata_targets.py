@@ -1,12 +1,8 @@
-"""Train a small multi-task model on the detailed modulation labels.
+"""Train small models directly from TorchSIG target-label batches.
 
-The example deliberately uses a clean, constrained dataset so it demonstrates
-that the labels added by the signal generators are learnable without turning
-into a large model-training exercise. Run it from the repository root:
+Run from the repository root:
 
     python examples/scripts/train_modrec_metadata_targets.py
-
-Use ``--train-samples 64 --validation-samples 32 --epochs 1`` for a smoke run.
 """
 
 # ruff: noqa: INP001
@@ -14,251 +10,198 @@ Use ``--train-samples 64 --validation-samples 32 --epochs 1`` for a smoke run.
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 
-import numpy as np
 import torch
 from torch import nn
-from torch.utils.data import DataLoader, TensorDataset
 
+from torchsig.datasets.datasets import TorchSigIterableDataset
 from torchsig.signals.builders.constellation import ConstellationSignalGenerator
 from torchsig.signals.builders.ofdm import OFDMSignalGenerator
+from torchsig.transforms.transforms import Spectrogram
+from torchsig.utils.data_loading import WorkerSeedingDataLoader
+from torchsig.utils.defaults import TorchSigDefaults
 
-NUM_IQ_SAMPLES = 2048
+FFT_SIZE = 32
+NUM_IQ_SAMPLES = FFT_SIZE**2
 NUM_SUBCARRIERS = 32
 MAX_CYCLIC_PREFIX_LEN = NUM_SUBCARRIERS // 2 - 1
-NUM_FEATURE_BINS = 256
-MIN_DATASET_SAMPLES = 2
+BATCH_SIZE = 16
 
 
-@dataclass(frozen=True)
-class DatasetTensors:
-    """Feature and target tensors used by the training example."""
-
-    features: torch.Tensor
-    waveform_type: torch.Tensor
-    has_cyclic_prefix: torch.Tensor
-    cyclic_prefix_len: torch.Tensor
-    pulse_shape: torch.Tensor
-    alpha_rolloff: torch.Tensor
-
-    def as_dataset(self) -> TensorDataset:
-        """Return tensors in the order expected by the training loop."""
-        return TensorDataset(
-            self.features,
-            self.waveform_type,
-            self.has_cyclic_prefix,
-            self.cyclic_prefix_len,
-            self.pulse_shape,
-            self.alpha_rolloff,
-        )
-
-
-class MetadataTargetModel(nn.Module):
-    """Small shared MLP with one output head for each metadata target."""
+class TwoHeadModel(nn.Module):
+    """Small classifier/regressor sharing one feature network."""
 
     def __init__(self) -> None:
         super().__init__()
-        self.shared = nn.Sequential(
-            nn.Linear(NUM_FEATURE_BINS * 2, 192),
+        self.features = nn.Sequential(
+            nn.Linear(FFT_SIZE**2, 128),
             nn.ReLU(),
-            nn.LayerNorm(192),
-            nn.Linear(192, 96),
+            nn.Linear(128, 64),
             nn.ReLU(),
         )
-        self.waveform_type = nn.Linear(96, 1)
-        self.has_cyclic_prefix = nn.Linear(96, 1)
-        self.cyclic_prefix_len = nn.Linear(96, 1)
-        self.pulse_shape = nn.Linear(96, 1)
-        self.alpha_rolloff = nn.Linear(96, 1)
+        self.classification_head = nn.Linear(64, 1)
+        self.regression_head = nn.Linear(64, 1)
 
-    def forward(self, features: torch.Tensor) -> dict[str, torch.Tensor]:
-        """Predict all five targets from one feature batch."""
-        hidden = self.shared(features)
-        return {
-            "waveform_type": self.waveform_type(hidden).squeeze(1),
-            "has_cyclic_prefix": self.has_cyclic_prefix(hidden).squeeze(1),
-            "cyclic_prefix_len": self.cyclic_prefix_len(hidden).squeeze(1),
-            "pulse_shape": self.pulse_shape(hidden).squeeze(1),
-            "alpha_rolloff": self.alpha_rolloff(hidden).squeeze(1),
+    def forward(self, spectrogram: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return binary-classification logits and a regression prediction."""
+        features = spectrogram.float().flatten(start_dim=1)
+        features = (features - features.mean(dim=1, keepdim=True)) / features.std(dim=1, keepdim=True).clamp_min(1e-6)
+        features = self.features(features)
+        return (
+            self.classification_head(features).squeeze(1),
+            self.regression_head(features).squeeze(1),
+        )
+
+
+def dataset_metadata() -> dict:
+    """Return lightweight metadata for a clean training example."""
+    metadata = TorchSigDefaults().default_dataset_metadata
+    metadata.update(
+        {
+            "num_iq_samples_dataset": NUM_IQ_SAMPLES,
+            "num_signals_min": 1,
+            "num_signals_max": 1,
+            "fft_size": FFT_SIZE,
+            "fft_stride": FFT_SIZE,
+            "sample_rate": 4096,
+            "noise_power_db": 0.0,
+            "snr_db_min": 40.0,
+            "snr_db_max": 40.0,
+            "signal_duration_in_samples_min": NUM_IQ_SAMPLES,
+            "signal_duration_in_samples_max": NUM_IQ_SAMPLES,
+            "bandwidth_min": 1024,
+            "bandwidth_max": 1024,
+            "signal_center_freq_min": 0.0,
+            "signal_center_freq_max": 0.0,
+            "frequency_min": -2048.0,
+            "frequency_max": 2047.0,
         }
+    )
+    return metadata
 
 
-def generator_metadata() -> dict[str, int]:
-    """Return fixed signal parameters that keep the learning problem small."""
-    return {
-        "sample_rate": 8192,
-        "bandwidth_min": 2048,
-        "bandwidth_max": 2048,
-        "signal_duration_in_samples_min": NUM_IQ_SAMPLES,
-        "signal_duration_in_samples_max": NUM_IQ_SAMPLES,
-    }
-
-
-def extract_features(iq: np.ndarray) -> np.ndarray:
-    """Return normalized spectral and autocorrelation features."""
-    iq = np.asarray(iq, dtype=np.complex64)
-    rms = np.sqrt(np.mean(np.abs(iq) ** 2))
-    iq = iq / max(float(rms), 1e-8)
-
-    spectrum = np.log1p(np.abs(np.fft.fftshift(np.fft.fft(iq))))
-    spectrum = spectrum.reshape(NUM_FEATURE_BINS, -1).mean(axis=1)
-    spectrum = (spectrum - spectrum.mean()) / max(float(spectrum.std()), 1e-8)
-
-    fft_length = 2 * len(iq)
-    iq_fft = np.fft.fft(iq, n=fft_length)
-    autocorrelation = np.abs(np.fft.ifft(iq_fft * np.conj(iq_fft)))
-    autocorrelation = autocorrelation[:NUM_FEATURE_BINS]
-    autocorrelation /= max(float(autocorrelation[0]), 1e-8)
-
-    return np.concatenate((spectrum, autocorrelation)).astype(np.float32)
-
-
-def build_dataset(num_samples: int, seed: int) -> DatasetTensors:
-    """Generate examples and read targets from the new Signal metadata."""
-    if num_samples < MIN_DATASET_SAMPLES:
-        raise ValueError(f"num_samples must be at least {MIN_DATASET_SAMPLES}")
-
-    metadata = generator_metadata()
-    ofdm_generator = OFDMSignalGenerator(
-        **metadata,
-        num_subcarriers=NUM_SUBCARRIERS,
+def build_dataloader(
+    generator: OFDMSignalGenerator | ConstellationSignalGenerator,
+    target_labels: list[str],
+    seed: int,
+) -> WorkerSeedingDataLoader:
+    """Build a TorchSIG loader that returns the requested labels as tensors."""
+    dataset = TorchSigIterableDataset(
+        signal_generators=[generator],
+        metadata=dataset_metadata(),
+        transforms=[Spectrogram(fft_size=FFT_SIZE)],
+        target_labels=target_labels,
+    )
+    return WorkerSeedingDataLoader(
+        dataset,
         seed=seed,
-    )
-    constellation_generator = ConstellationSignalGenerator(
-        **metadata,
-        constellation_name="qpsk",
-        seed=seed + 1,
-    )
-
-    features: list[np.ndarray] = []
-    waveform_types: list[float] = []
-    has_cyclic_prefixes: list[float] = []
-    cyclic_prefix_lengths: list[float] = []
-    pulse_shapes: list[float] = []
-    alpha_rolloffs: list[float] = []
-
-    for sample_index in range(num_samples):
-        is_ofdm = sample_index % 2 == 0
-        signal = ofdm_generator.generate() if is_ofdm else constellation_generator.generate()
-        features.append(extract_features(signal.data))
-        waveform_types.append(float(is_ofdm))
-
-        if is_ofdm:
-            has_cyclic_prefixes.append(float(signal.has_cyclic_prefix))
-            cyclic_prefix_lengths.append(float(signal.cyclic_prefix_len) / MAX_CYCLIC_PREFIX_LEN)
-            pulse_shapes.append(0.0)
-            alpha_rolloffs.append(0.0)
-        else:
-            is_srrc = signal.pulse_shape_name == "srrc"
-            has_cyclic_prefixes.append(0.0)
-            cyclic_prefix_lengths.append(0.0)
-            pulse_shapes.append(float(is_srrc))
-            alpha_rolloffs.append(float(signal.alpha_rolloff) if is_srrc else 0.0)
-
-    def tensor(values: list[float] | list[np.ndarray]) -> torch.Tensor:
-        return torch.from_numpy(np.asarray(values, dtype=np.float32))
-
-    return DatasetTensors(
-        features=tensor(features),
-        waveform_type=tensor(waveform_types),
-        has_cyclic_prefix=tensor(has_cyclic_prefixes),
-        cyclic_prefix_len=tensor(cyclic_prefix_lengths),
-        pulse_shape=tensor(pulse_shapes),
-        alpha_rolloff=tensor(alpha_rolloffs),
+        batch_size=BATCH_SIZE,
+        num_workers=0,
     )
 
 
-def multitask_loss(
-    predictions: dict[str, torch.Tensor],
-    targets: tuple[torch.Tensor, ...],
-) -> torch.Tensor:
-    """Compute losses only where a target applies to the waveform."""
-    waveform_type, has_cp, cp_len, pulse_shape, alpha = targets
-    ofdm_mask = waveform_type.bool()
-    constellation_mask = ~ofdm_mask
-    srrc_mask = constellation_mask & pulse_shape.bool()
-
-    loss = nn.functional.binary_cross_entropy_with_logits(predictions["waveform_type"], waveform_type)
-    loss += nn.functional.binary_cross_entropy_with_logits(predictions["has_cyclic_prefix"][ofdm_mask], has_cp[ofdm_mask])
-    loss += nn.functional.mse_loss(predictions["cyclic_prefix_len"][ofdm_mask], cp_len[ofdm_mask])
-    loss += nn.functional.binary_cross_entropy_with_logits(
-        predictions["pulse_shape"][constellation_mask],
-        pulse_shape[constellation_mask],
+def build_ofdm_dataloader(seed: int) -> WorkerSeedingDataLoader:
+    """Return spectrogram, has_cyclic_prefix, and cyclic_prefix_len batches."""
+    metadata = dataset_metadata()
+    return build_dataloader(
+        OFDMSignalGenerator(**metadata, num_subcarriers=NUM_SUBCARRIERS),
+        ["has_cyclic_prefix", "cyclic_prefix_len"],
+        seed,
     )
-    if srrc_mask.any():
-        loss += nn.functional.mse_loss(predictions["alpha_rolloff"][srrc_mask], alpha[srrc_mask])
-    return loss
 
 
-def train_model(
-    dataset: TensorDataset,
-    epochs: int,
-    batch_size: int,
-) -> MetadataTargetModel:
-    """Train and return the multi-task model."""
-    torch.manual_seed(0)
-    model = MetadataTargetModel()
+def build_constellation_dataloader(seed: int) -> WorkerSeedingDataLoader:
+    """Return spectrogram and tensor-ready pulse-shape target batches."""
+    metadata = dataset_metadata()
+    return build_dataloader(
+        ConstellationSignalGenerator(**metadata, constellation_name="qpsk"),
+        ["pulse_shape_index", "alpha_rolloff_target"],
+        seed,
+    )
+
+
+def train_ofdm(steps: int) -> TwoHeadModel:
+    """Train directly on OFDM targets returned by the loader."""
+    model = TwoHeadModel()
     optimizer = torch.optim.Adam(model.parameters(), lr=2e-3)
-    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-
-    for epoch in range(epochs):
-        model.train()
-        total_loss = 0.0
-        for features, *targets in loader:
-            predictions = model(features)
-            loss = multitask_loss(predictions, tuple(targets))
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            total_loss += loss.detach().item() * len(features)
-        print(f"epoch={epoch + 1:02d} loss={total_loss / len(dataset):.4f}")
-
+    batches = iter(build_ofdm_dataloader(seed=123))
+    for _ in range(steps):
+        spectrogram, (has_cp, cp_len) = next(batches)
+        has_cp_logits, cp_len_prediction = model(spectrogram)
+        loss = nn.functional.binary_cross_entropy_with_logits(has_cp_logits, has_cp.float())
+        loss += nn.functional.mse_loss(
+            cp_len_prediction,
+            cp_len.float() / MAX_CYCLIC_PREFIX_LEN,
+        )
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
     return model
 
 
-def evaluate_model(model: MetadataTargetModel, dataset: TensorDataset) -> None:
-    """Print validation metrics for each applicable target."""
-    features, waveform_type, has_cp, cp_len, pulse_shape, alpha = dataset.tensors
-    model.eval()
+def train_constellation(steps: int) -> TwoHeadModel:
+    """Train directly on constellation targets returned by the loader."""
+    model = TwoHeadModel()
+    optimizer = torch.optim.Adam(model.parameters(), lr=2e-3)
+    batches = iter(build_constellation_dataloader(seed=456))
+    for _ in range(steps):
+        spectrogram, (pulse_shape, alpha) = next(batches)
+        pulse_logits, alpha_prediction = model(spectrogram)
+        loss = nn.functional.binary_cross_entropy_with_logits(pulse_logits, pulse_shape.float())
+        srrc = pulse_shape.bool()
+        if srrc.any():
+            loss += nn.functional.mse_loss(alpha_prediction[srrc], alpha.float()[srrc])
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+    return model
+
+
+def evaluate_ofdm(model: TwoHeadModel, steps: int = 8) -> None:
+    """Report metrics from fresh OFDM loader batches."""
+    batches = iter(build_ofdm_dataloader(seed=789))
+    correct = total = 0
+    length_error = 0.0
     with torch.no_grad():
-        predictions = model(features)
-
-    ofdm_mask = waveform_type.bool()
-    constellation_mask = ~ofdm_mask
-    srrc_mask = constellation_mask & pulse_shape.bool()
-    type_prediction = (predictions["waveform_type"] >= 0).float()
-    cp_prediction = (predictions["has_cyclic_prefix"] >= 0).float()
-    pulse_prediction = (predictions["pulse_shape"] >= 0).float()
-    cp_len_prediction = (predictions["cyclic_prefix_len"].clamp(0, 1) * MAX_CYCLIC_PREFIX_LEN).round()
-    cp_len_target = (cp_len * MAX_CYCLIC_PREFIX_LEN).round()
-
-    print(f"waveform type accuracy: {(type_prediction == waveform_type).float().mean():.1%}")
-    print(f"cyclic prefix accuracy: {(cp_prediction[ofdm_mask] == has_cp[ofdm_mask]).float().mean():.1%}")
-    print(f"cyclic prefix length MAE: {(cp_len_prediction[ofdm_mask] - cp_len_target[ofdm_mask]).abs().float().mean():.2f} samples")
-    print(f"pulse shape accuracy: {(pulse_prediction[constellation_mask] == pulse_shape[constellation_mask]).float().mean():.1%}")
-    if srrc_mask.any():
-        print(f"alpha roll-off MAE: {(predictions['alpha_rolloff'][srrc_mask] - alpha[srrc_mask]).abs().mean():.3f}")
+        for _ in range(steps):
+            spectrogram, (has_cp, cp_len) = next(batches)
+            logits, length = model(spectrogram)
+            correct += int(((logits >= 0) == has_cp.bool()).sum())
+            total += len(has_cp)
+            predicted = (length.clamp(0, 1) * MAX_CYCLIC_PREFIX_LEN).round()
+            length_error += (predicted - cp_len).abs().sum().item()
+    print(f"cyclic prefix accuracy: {correct / total:.1%}")
+    print(f"cyclic prefix length MAE: {length_error / total:.2f} samples")
 
 
-def parse_args() -> argparse.Namespace:
-    """Parse command-line settings for dataset size and training."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--train-samples", type=int, default=768)
-    parser.add_argument("--validation-samples", type=int, default=256)
-    parser.add_argument("--epochs", type=int, default=15)
-    parser.add_argument("--batch-size", type=int, default=32)
-    return parser.parse_args()
+def evaluate_constellation(model: TwoHeadModel, steps: int = 8) -> None:
+    """Report metrics from fresh constellation loader batches."""
+    batches = iter(build_constellation_dataloader(seed=987))
+    correct = total = alpha_total = 0
+    alpha_error = 0.0
+    with torch.no_grad():
+        for _ in range(steps):
+            spectrogram, (pulse_shape, alpha) = next(batches)
+            logits, predicted_alpha = model(spectrogram)
+            correct += int(((logits >= 0) == pulse_shape.bool()).sum())
+            total += len(pulse_shape)
+            srrc = pulse_shape.bool()
+            alpha_error += (predicted_alpha[srrc] - alpha.float()[srrc]).abs().sum().item()
+            alpha_total += int(srrc.sum())
+    print(f"pulse shape accuracy: {correct / total:.1%}")
+    print(f"alpha roll-off MAE: {alpha_error / alpha_total:.3f}")
 
 
 def main() -> None:
-    """Generate labeled signals, train the model, and report its metrics."""
-    args = parse_args()
-    print("Generating training signals and reading targets from Signal metadata...")
-    training = build_dataset(args.train_samples, seed=123)
-    validation = build_dataset(args.validation_samples, seed=456)
-    model = train_model(training.as_dataset(), args.epochs, args.batch_size)
-    evaluate_model(model, validation.as_dataset())
+    """Train both models using only TorchSIG loader outputs."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--steps", type=int, default=120)
+    args = parser.parse_args()
+    torch.manual_seed(0)
+    print("Training OFDM targets from target_labels...")
+    evaluate_ofdm(train_ofdm(args.steps))
+    print("Training constellation targets from target_labels...")
+    evaluate_constellation(train_constellation(args.steps))
 
 
 if __name__ == "__main__":
