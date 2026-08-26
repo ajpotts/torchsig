@@ -1,0 +1,34 @@
+Title: Standardize documentation of transform frequency parameter units
+
+Summary
+
+Frequency-like transform parameters do not consistently state whether values
+are in Hz, in the same units as `sample_rate`, cycles per sample, or normalized
+to the sample rate. The adjacent-channel interference documentation currently
+describes normalized frequency while its implementation treats the parameter as
+a physical frequency. Other APIs, such as spurs, use similarly named parameters
+with different conventions.
+
+Proposed documentation
+
+- Inventory public transform and functional parameters containing `freq` or
+  `frequency`.
+- Give every parameter an explicit unit and valid interval.
+- Use consistent terminology for physical offsets and normalized frequencies.
+- Resolve the adjacent-channel interference implementation decision before
+  publishing corrected documentation.
+- Add migration notes if correcting units changes existing behavior.
+
+Where possible, use the TorchSIG convention that frequency offsets are in the
+same units as `sample_rate`. If normalized values remain necessary, include
+"normalized" in the parameter name or make the convention prominent.
+
+Acceptance criteria
+
+- Adjacent-channel interference documentation agrees with its implementation.
+- Spurs and other frequency-producing transforms state their units and valid
+  ranges explicitly.
+- Defaults include enough context to interpret their physical location.
+- Examples use a sample rate other than one to expose unit mistakes.
+- Generated API documentation contains no contradictory unit descriptions.
+

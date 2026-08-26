@@ -1,0 +1,34 @@
+Title: Audit examples for clear and consistent frequency configuration
+
+Summary
+
+Some examples configure positive-only usable-frequency and center-frequency
+ranges without explaining the capture origin or the interaction between center
+positions and occupied bandwidth. Such examples can reinforce the mistaken idea
+that `center_freq` is an absolute RF value and can also trigger boundary
+filtering unexpectedly.
+
+Proposed documentation
+
+- Review notebooks and scripts that set `sample_rate`, `frequency_min`,
+  `frequency_max`, `signal_center_freq_min`, `signal_center_freq_max`, or
+  bandwidth bounds.
+- Prefer symmetric baseband configurations in introductory material.
+- Where an asymmetric or positive-only interval is intentional, explain the
+  frequency origin and why that interval is selected.
+- Ensure component edges fit the configured usable interval unless the example
+  is specifically demonstrating boundary filtering.
+- Add a short explanation to `examples/classifier_example.ipynb` or replace its
+  configuration with a clearer introductory configuration.
+
+Acceptance criteria
+
+- Introductory examples do not imply that `center_freq` is an absolute RF
+  carrier.
+- Center and bandwidth bounds are mathematically consistent with usable limits.
+- Any example that invokes anti-alias filtering does so intentionally and says
+  that final metadata may change.
+- Notebook outputs are refreshed only according to the repository's established
+  notebook workflow.
+- Documentation and example checks pass.
+

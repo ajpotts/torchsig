@@ -1,0 +1,35 @@
+Title: Document YOLO time-frequency label coordinates
+
+Summary
+
+`YOLOLabel` currently documents that it creates a tuple, but it does not fully
+explain the tuple order, coordinate orientation, normalization interval, or
+which signal metadata should be labeled.
+
+Proposed documentation
+
+Expand the `YOLOLabel` class documentation and the metadata-transform guide to
+define:
+
+- Tuple order: `(class_id, time_center, frequency_center, time_width,
+  frequency_height)`.
+- Time coordinates normalized by the dataset duration.
+- Frequency coordinates normalized over the full Nyquist interval
+  `[-sample_rate/2, sample_rate/2]`.
+- `frequency_height = bandwidth / sample_rate`.
+- Positive frequency appears toward the top because image coordinates increase
+  downward.
+- Detection labels normally describe component signals rather than aggregate
+  parent metadata.
+
+Include a numerical example for a component with a nonzero center frequency and
+show the corresponding bounding-box edges.
+
+Acceptance criteria
+
+- Every tuple element, unit, normalization, and axis direction is documented.
+- A worked example agrees with the implementation.
+- The documentation states the expected behavior at the Nyquist boundaries.
+- Component-versus-parent usage is explicit.
+- The source documentation builds without warnings.
+

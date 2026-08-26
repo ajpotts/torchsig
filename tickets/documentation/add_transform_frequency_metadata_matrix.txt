@@ -1,0 +1,32 @@
+Title: Add a transform frequency-metadata behavior matrix
+
+Summary
+
+Transforms can mirror, scale, broaden, or otherwise alter a signal spectrum.
+Some transforms update `center_freq` and `bandwidth`, while others intentionally
+retain nominal metadata. Users currently need to inspect each implementation to
+understand whether labels remain nominal or describe transformed IQ.
+
+Proposed documentation
+
+Add a table to `docs/transforms.rst` with columns for:
+
+- Transform name.
+- Spectral effect on IQ data.
+- Effect on parent `center_freq` and `bandwidth`.
+- Effect on component metadata.
+- Whether resulting metadata is nominal or intended to describe measured
+  post-transform values.
+
+At minimum cover ChannelSwap, SpectralInversion, TimeReversal, Doppler,
+ClockDrift, ClockJitter, and transforms that can alter occupied bandwidth.
+Explain TimeReversal's optional spectral-inversion behavior explicitly.
+
+Acceptance criteria
+
+- Every transform that changes spectral position or scale is included.
+- Parent and component behavior are distinguished.
+- Nominal metadata behavior is identified rather than implied.
+- Table entries agree with implementation and focused transform tests.
+- The source RST builds without warnings.
+
