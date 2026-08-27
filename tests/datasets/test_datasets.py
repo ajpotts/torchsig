@@ -748,6 +748,88 @@ def test_choose_start_sample_warns_when_signal_is_too_large():
     assert start_sample == 0
 
 
+@pytest.mark.parametrize(
+    ("center_freq", "bandwidth", "expected_start_bin", "expected_stop_bin"),
+    [
+        (0.0, 16.0, 0.0, 4.0),
+        (0.0, 8.0, 1.0, 3.0),
+        (-4.0, 8.0, 0.0, 2.0),
+        (4.0, 8.0, 2.0, 4.0),
+    ],
+)
+def test_map_to_coordinates_uses_canonical_frequency_edges(
+    center_freq,
+    bandwidth,
+    expected_start_bin,
+    expected_stop_bin,
+):
+    dataset = TorchSigIterableDataset(
+        metadata=_small_metadata(),
+        signal_generators=[],
+        validate_init=False,
+    )
+    signal = Signal(
+        data=np.zeros(4, dtype=np.complex64),
+        center_freq=center_freq,
+        bandwidth=bandwidth,
+    )
+
+    rectangle = dataset._map_to_coordinates(signal, start_sample=0)
+
+    assert rectangle.coord_lower_left.y == expected_start_bin
+    assert rectangle.coord_upper_right.y == expected_stop_bin
+
+
+def test_map_to_coordinates_does_not_create_false_frequency_overlap():
+    metadata = _small_metadata()
+    metadata["fft_size"] = 16
+    dataset = TorchSigIterableDataset(
+        metadata=metadata,
+        signal_generators=[],
+        validate_init=False,
+    )
+    lower_signal = Signal(
+        data=np.zeros(16, dtype=np.complex64),
+        center_freq=-3.0,
+        bandwidth=4.0,
+    )
+    upper_signal = Signal(
+        data=np.zeros(16, dtype=np.complex64),
+        center_freq=3.0,
+        bandwidth=4.0,
+    )
+
+    lower_rectangle = dataset._map_to_coordinates(lower_signal, start_sample=0)
+    upper_rectangle = dataset._map_to_coordinates(upper_signal, start_sample=0)
+
+    assert not dataset._check_if_overlap(upper_rectangle, [lower_rectangle])
+
+
+def test_map_to_coordinates_detects_canonical_frequency_overlap():
+    metadata = _small_metadata()
+    metadata["fft_size"] = 16
+    dataset = TorchSigIterableDataset(
+        metadata=metadata,
+        signal_generators=[],
+        validate_init=False,
+    )
+    outer_signal = Signal(
+        data=np.zeros(16, dtype=np.complex64),
+        center_freq=0.0,
+        bandwidth=4.0,
+    )
+    inner_signal = Signal(
+        data=np.zeros(16, dtype=np.complex64),
+        center_freq=0.0,
+        bandwidth=2.0,
+    )
+
+    outer_rectangle = dataset._map_to_coordinates(outer_signal, start_sample=0)
+    inner_rectangle = dataset._map_to_coordinates(inner_signal, start_sample=0)
+
+    assert dataset._check_if_overlap(inner_rectangle, [outer_rectangle])
+
+
 def test_generate_new_signal_sets_component_start_and_clips_duration(monkeypatch):
     dataset = TorchSigIterableDataset(
         metadata=_small_metadata(),

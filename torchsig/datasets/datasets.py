@@ -852,10 +852,11 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         # calculate start and stop time in terms of FFT number
         fft_start_time = np.round(start_sample / self["fft_size"])
         fft_stop_time = np.round((start_sample + len(new_signal.data)) / self["fft_size"])
-        # calculate bin position in FFT
+        # Map the canonical occupied frequency edges from the Nyquist interval
+        # [-fs / 2, fs / 2] to normalized FFT coordinates [0, 1].
         fs = self["sample_rate"]
-        fft_start_bin_norm = ((new_signal.center_freq - new_signal.bandwidth) + (fs / 2)) / (fs / 2)
-        fft_stop_bin_norm = ((new_signal.center_freq + new_signal.bandwidth) + (fs / 2)) / (fs / 2)
+        fft_start_bin_norm = (new_signal.lower_freq + (fs / 2)) / fs
+        fft_stop_bin_norm = (new_signal.upper_freq + (fs / 2)) / fs
         fft_start_bin_index = np.round(fft_start_bin_norm * self["fft_size"])
         fft_stop_bin_index = np.round(fft_stop_bin_norm * self["fft_size"])
         # map the position into retangle coordinates
