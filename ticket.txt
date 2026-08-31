@@ -1,14 +1,99 @@
-Want to include labels such that mod-rec can be trained to report:
+Summary
+A completed-metadata snapshot from the default clean wideband pipeline exposed component bandwidths that exceed the configured range and cached frequency edges that do not agree with the components' center frequency and bandwidth. This can make frequency-localization metadata and derived labels incorrect.
+Observed configuration
 
 
         
-      cyclic prefix yes/no for OFDM
+      Config: wideband_clean_train_all.yaml
 
         
-      cyclic prefix length for OFDM
+      Sample rate: 10,000,000 Hz
 
         
-      pulse shaping filter for constellation waveforms
+      Configured component bandwidth range: 62,500 to 1,000,000 Hz
 
         
-      puslse shaping roll-off factor for constellation waveforms
+      Dataset frequency range: -5,000,000 to 4,999,999 Hz
+
+Observed metadata
+Two generated 802.11a RTS components reported bandwidths of approximately 6,061,140 Hz and 7,228,571 Hz, substantially above the configured bandwidth_max of 1,000,000 Hz. A BPSK component reported approximately 1,503,906 Hz, which also exceeded the configured limit.
+Some cached frequency edges were inconsistent with the corresponding center frequency and bandwidth:
+
+
+        
+      Component with center frequency -1,969,429.90 Hz and bandwidth 6,061,140.20 Hz:
+
+
+        
+      Expected full-bandwidth edges: approximately [-5,000,000.00, 1,061,140.20] Hz
+
+        
+      Stored edges: approximately [-8,929,094.18, 1,061,140.20] Hz
+
+
+
+        
+      Component with center frequency 1,385,713.27 Hz and bandwidth 7,228,571.47 Hz:
+
+
+        
+      Expected full-bandwidth edges: approximately [-2,228,572.47, 5,000,000.00] Hz
+
+        
+      Stored edges: approximately [-2,228,572.47, 7,761,661.91] Hz
+
+
+
+In both examples one cached edge agrees with the center/bandwidth calculation while the other does not. This suggests that _lower_frequency or _upper_frequency may remain stale after a center-frequency or bandwidth update. The unexpectedly large bandwidths may be a separate issue involving protocol-specific generators, bandwidth measurement, clipping, or enforcement of dataset bandwidth constraints.
+Impact
+
+
+        
+      Frequency bounds exposed through signal metadata may be incorrect.
+
+        
+      YOLO and other localization labels derived from these fields may describe an invalid or unexpectedly large occupied band.
+
+        
+      Components may extend beyond the configured dataset frequency range.
+
+        
+      Training data may not honor the configured component bandwidth distribution.
+
+Requested investigation
+
+
+        
+      Determine where the configured bandwidth is replaced or recalculated for protocol-specific and constellation generators.
+
+        
+      Confirm whether bandwidth consistently means full two-sided occupied bandwidth throughout generation, placement, measurement, and labeling.
+
+        
+      Audit invalidation/recalculation of _lower_frequency and _upper_frequency whenever center frequency or bandwidth changes.
+
+        
+      Verify whether clipping at the dataset frequency limits should modify center frequency, bandwidth, cached edges, or all three.
+
+        
+      Confirm that derived YOLO labels use the final, mutually consistent values.
+
+Acceptance criteria
+
+
+        
+      Final component bandwidths follow the documented configuration semantics, or protocol-specific exceptions are explicitly documented and validated.
+
+        
+      lower_freq and upper_freq agree with the final center_freq and bandwidth within an appropriate numerical tolerance.
+
+        
+      Final frequency edges remain within the configured dataset bounds unless an explicitly supported behavior says otherwise.
+
+        
+      Cached frequency-derived metadata cannot remain stale after placement or bandwidth updates.
+
+        
+      Deterministic tests cover a protocol waveform, a constellation waveform, frequency shifting, boundary clipping, and derived localization labels.
+
+
