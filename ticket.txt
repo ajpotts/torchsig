@@ -1,14 +1,125 @@
-Want to include labels such that mod-rec can be trained to report:
+Issue:
+The current file handler pipeline is fragile and inefficient for large-scale ML training. We need to move away from fixed-length assumptions and "whole-file" reads to support efficient dataset shuffling.
+Todo List:
+1. Metadata & Flexibility
 
 
         
-      cyclic prefix yes/no for OFDM
+      
+ Switch metadata.csv to header-based reading (avoid column-order bugs).   
+        Task actions
+            
+      Convert to child item
+     
+      Disable list item
+      Delete 
 
         
-      cyclic prefix length for OFDM
+      
+ Support variable-length signals (store offsets instead of idx * length).   
+        Task actions
+            
+      Convert to child item
+     
+      Disable list item
+      Delete 
 
         
-      pulse shaping filter for constellation waveforms
+      
+ Make info.json more flexible/optional.   
+        Task actions
+            
+      Convert to child item
+     
+      Disable list item
+      Delete 
+
+2. Random Access Performance (Training Optimization)
+
 
         
-      puslse shaping roll-off factor for constellation waveforms
+      
+ Implement partial reads (use sf seeking) to avoid loading whole files when accessing random indices.   
+        Task actions
+            
+      Convert to child item
+     
+      Disable list item
+      Delete 
+
+        
+      
+ Implement a file-handle cache to speed up random access during shuffled training.   
+        Task actions
+            
+      Convert to child item
+     
+      Disable list item
+      Delete 
+
+        
+      
+ Benchmark DataLoader shuffle performance to ensure I/O isn't bottling the GPU.   
+        Task actions
+            
+      Convert to child item
+     
+      Disable list item
+      Delete 
+
+3. Signal Fidelity
+
+
+        
+      
+ Add validation for sample rates and stereo channel counts.   
+        Task actions
+            
+      Convert to child item
+     
+      Disable list item
+      Delete 
+
+        
+      
+ Add signal power normalization.   
+        Task actions
+            
+      Convert to child item
+     
+      Disable list item
+      Delete 
+
+        
+      
+ Add RF impairments to IQDatasetGenerator (frequency offset, phase noise, fading).   
+        Task actions
+            
+      Convert to child item
+     
+      Disable list item
+      Delete 
+
+4. Tooling
+
+
+        
+      
+ Parallelize IQDatasetGenerator using multiprocessing.   
+        Task actions
+            
+      Convert to child item
+     
+      Disable list item
+      Delete 
+
+        
+      
+ Transition print statements to logging.   
+        Task actions
+            
+      Convert to child item
+     
+      Disable list item
+      Delete 
+ 
