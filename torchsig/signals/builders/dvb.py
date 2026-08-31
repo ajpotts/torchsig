@@ -323,6 +323,7 @@ class DVBS2SignalGenerator(BaseSignalGenerator):
 
         Args:
             **kwargs: Metadata parameters including:
+
                 - sample_rate: Sampling rate (Hz)
                 - bandwidth_min: Minimum bandwidth (Hz)
                 - bandwidth_max: Maximum bandwidth (Hz)

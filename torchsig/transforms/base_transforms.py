@@ -276,7 +276,7 @@ class RandomApply(Transform):
 class RandAugment(Transform):
     """RandAugment transform loosely based on:
     `"RandAugment: Practical automated data augmentation with a reduced search space"
-      <https://arxiv.org/pdf/1909.13719.pdf>`_.
+    <https://arxiv.org/pdf/1909.13719.pdf>`_.
 
     This transform randomly selects and applies a subset of transforms from a list.
 

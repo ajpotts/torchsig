@@ -15,9 +15,7 @@ def test_metadata_codec_encoding_is_deterministic() -> None:
     second = HierarchicalMetadataObject(metadata={"a": "value", "z": 1})
 
     assert encode_metadata(first) == encode_metadata(second)
-    assert encode_metadata(first) == (
-        '{"__torchsig_type__":"dict","items":{"a":"value","z":1}}'
-    )
+    assert encode_metadata(first) == ('{"__torchsig_type__":"dict","items":{"a":"value","z":1}}')
 
 
 def test_metadata_codec_decodes_utf8_bytes() -> None:

@@ -760,9 +760,7 @@ def test_split_datamodule_smoke(tmp_path, split_configs):
     [([], 1), ([Spectrogram(fft_size=64)], 2)],
     ids=["iq", "spectrogram"],
 )
-def test_torchsig_datamodule_infers_packed_reader_end_to_end(
-    tmp_path, transforms, expected_ndim
-):
+def test_torchsig_datamodule_infers_packed_reader_end_to_end(tmp_path, transforms, expected_ndim):
     metadata = TorchSigDefaults().default_dataset_metadata.copy()
     metadata.update(
         {
@@ -812,14 +810,8 @@ def test_torchsig_datamodule_infers_packed_reader_end_to_end(
         assert not handle["data/0"].shuffle
         assert not handle["data/0"].fletcher32
     writer_info = (tmp_path / "writer_info.yaml").read_text()
-    assert (
-        "torchsig.utils.file_handlers.packed_hdf5.PackedHDF5Writer"
-        in writer_info
-    )
-    assert (
-        "torchsig.utils.file_handlers.packed_hdf5.PackedHDF5Reader"
-        in writer_info
-    )
+    assert "torchsig.utils.file_handlers.packed_hdf5.PackedHDF5Writer" in writer_info
+    assert "torchsig.utils.file_handlers.packed_hdf5.PackedHDF5Reader" in writer_info
 
 
 @pytest.mark.parametrize("num_workers", [0, 2])
@@ -893,9 +885,7 @@ def test_torchsig_datamodule_infers_homogeneous_reader_end_to_end(
         (PackedHDF5Writer, HomogeneousHDF5Reader),
     ],
 )
-def test_torchsig_datamodule_rejects_incompatible_handler_pair(
-    tmp_path, file_writer, file_reader
-):
+def test_torchsig_datamodule_rejects_incompatible_handler_pair(tmp_path, file_writer, file_reader):
     with pytest.raises(ValueError, match="Incompatible file handler pair"):
         TorchSigDataModule(
             root=tmp_path,
@@ -910,9 +900,7 @@ def test_torchsig_datamodule_rejects_incompatible_handler_pair(
     "file_writer_kwargs",
     [{"unknown_option": True}, ["not", "a", "dictionary"]],
 )
-def test_torchsig_datamodule_rejects_invalid_writer_options(
-    tmp_path, file_writer_kwargs
-):
+def test_torchsig_datamodule_rejects_invalid_writer_options(tmp_path, file_writer_kwargs):
     with pytest.raises(TypeError, match="file_writer_kwargs|Invalid options"):
         TorchSigDataModule(
             root=tmp_path,
@@ -923,9 +911,7 @@ def test_torchsig_datamodule_rejects_invalid_writer_options(
         )
 
 
-def test_split_datamodule_infers_packed_reader_end_to_end(
-    tmp_path, split_configs
-):
+def test_split_datamodule_infers_packed_reader_end_to_end(tmp_path, split_configs):
     train_cfg, val_cfg, test_cfg = split_configs
     dm = SplitTorchSigDataModule(
         train_cfg=train_cfg,

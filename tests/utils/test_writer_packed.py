@@ -175,8 +175,4 @@ def test_dataset_creator_normalizes_legacy_writer_alias_and_class_option(
     ]
     writer_info = yaml.safe_load((tmp_path / "writer_info.yaml").read_text())
     assert writer_info["file_handler"] == "_OptionRecordingWriter"
-    assert writer_info["file_handler_kwargs"] == {
-        "required_option": (
-            "torchsig.utils.file_handlers.packed_hdf5.PackedHDF5Writer"
-        )
-    }
+    assert writer_info["file_handler_kwargs"] == {"required_option": ("torchsig.utils.file_handlers.packed_hdf5.PackedHDF5Writer")}

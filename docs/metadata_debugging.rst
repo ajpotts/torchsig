@@ -1,7 +1,7 @@
 Metadata Debugging
 ==================
 
-TorchSIG provides opt-in diagnostics for hierarchical metadata. Debugging is
+TorchSig provides opt-in diagnostics for hierarchical metadata. Debugging is
 disabled by default and uses the ``torchsig.metadata`` Python logger. Applications
 are responsible for configuring a logging handler and enabling the ``DEBUG``
 level.

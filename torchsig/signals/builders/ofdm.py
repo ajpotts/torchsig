@@ -63,11 +63,7 @@ def ofdm_modulator_baseband(
     cyclic_prefix_probability = 0.50
     cp_len = cyclic_prefix_len
     if cp_len is None:
-        cp_len = (
-            0
-            if rng.uniform(0, 1) < cyclic_prefix_probability
-            else rng.integers(2, int(num_subcarriers / 2))
-        )
+        cp_len = 0 if rng.uniform(0, 1) < cyclic_prefix_probability else rng.integers(2, int(num_subcarriers / 2))
     cp_len_oversampled = cp_len * oversampling_rate_nominal
 
     # Calculate OFDM symbol lengths
@@ -236,11 +232,7 @@ class OFDMSignalGenerator(BaseSignalGenerator):
         num_subcarriers = self["num_subcarriers"]
 
         has_cyclic_prefix = bool(self.random_generator.uniform(0, 1) >= 0.50)
-        cyclic_prefix_len = (
-            int(self.random_generator.integers(2, int(num_subcarriers / 2)))
-            if has_cyclic_prefix
-            else 0
-        )
+        cyclic_prefix_len = int(self.random_generator.integers(2, int(num_subcarriers / 2))) if has_cyclic_prefix else 0
 
         # Generate signal
         signal_data = ofdm_modulator(

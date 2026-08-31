@@ -66,9 +66,7 @@ def _encode_flat_metadata(signal: Signal) -> str:
     while current is not None:
         identity = id(current)
         if identity in active:
-            raise ValueError(
-                "Homogeneous HDF5 parent metadata cycle detected"
-            )
+            raise ValueError("Homogeneous HDF5 parent metadata cycle detected")
         active.add(identity)
         chain.append(current)
         current = current.parent
@@ -659,9 +657,7 @@ class HomogeneousHDF5Reader(FileReader):
         component range are each fetched with one contiguous HDF5 read.
         """
         if start < 0 or stop < start or stop > len(self):
-            raise IndexError(
-                f"Homogeneous HDF5 batch range out of bounds: [{start}, {stop})"
-            )
+            raise IndexError(f"Homogeneous HDF5 batch range out of bounds: [{start}, {stop})")
         if start == stop:
             return []
 
@@ -672,9 +668,7 @@ class HomogeneousHDF5Reader(FileReader):
         components = self._read_components(component_start, int(offsets[-1]))
 
         signals = []
-        for batch_idx, (signal_data, signal_metadata) in enumerate(
-            zip(data, metadata, strict=True)
-        ):
+        for batch_idx, (signal_data, signal_metadata) in enumerate(zip(data, metadata, strict=True)):
             local_start = int(offsets[batch_idx]) - component_start
             local_stop = int(offsets[batch_idx + 1]) - component_start
             signals.append(

@@ -145,9 +145,7 @@ class TestDataModuleCreation:
 
     def test_from_config_forwards_packed_writer_options(self, tmp_path):
         """Packed writer configuration survives the config constructor."""
-        config = load_config_from_yaml(
-            CONFIGS_DIR / "narrowband_toy_dataset.yaml"
-        )
+        config = load_config_from_yaml(CONFIGS_DIR / "narrowband_toy_dataset.yaml")
         options = {
             "compression": None,
             "shuffle": False,
@@ -173,9 +171,7 @@ class TestDataModuleCreation:
         self,
         tmp_path,
     ):
-        config = load_config_from_yaml(
-            CONFIGS_DIR / "narrowband_toy_dataset.yaml"
-        )
+        config = load_config_from_yaml(CONFIGS_DIR / "narrowband_toy_dataset.yaml")
         options = {
             "compression": None,
             "shuffle": False,

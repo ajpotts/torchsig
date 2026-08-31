@@ -41,6 +41,7 @@ dependencies = [
 # === OPTIONAL DEVELOPMENT DEPENDENCIES (What developers need) ===
 [project.optional-dependencies]
 dev = [
+    "torchsig[docs]",
     # Testing & Linting
     "pytest",
     "pylint",
@@ -50,6 +51,15 @@ dev = [
     "ruff",
     "pygal",
     "pre-commit",
+]
+
+docs = [
+    "Sphinx>=8.2,<10",
+    "sphinx-rtd-theme>=3.1,<4",
+    "sphinxcontrib-jquery>=4,<5",
+    "six==1.17.0",
+    "numba==0.67.0",
+    "better-apidoc>=0.3.2"
 ]
 
 notebooks = [
@@ -179,4 +189,3 @@ docstring-code-line-length = "dynamic"
     "ARG001",  # Unused function argument
     "D102",  # Missing docstring in public function
 ]
-

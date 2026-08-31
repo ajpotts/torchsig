@@ -118,12 +118,12 @@ test-cov:
 HAS_GPU := $(shell python3 -c "import torch; print(int(torch.cuda.is_available()))")
 
 ifeq ($(HAS_GPU),1)
-NOTEBOOKS := $(wildcard examples/*.ipynb examples/transforms/*.ipynb)
+NOTEBOOKS := $(wildcard examples/*.ipynb examples/*/*.ipynb)
 else
 NOTEBOOKS := $(filter-out \
 	examples/classifier_example.ipynb \
 	examples/create_dataset_example.ipynb, \
-	$(wildcard examples/*.ipynb examples/transforms/*.ipynb))
+	$(wildcard examples/*.ipynb examples/*/*.ipynb))
 endif
 EXECUTED_STAMPS  := $(patsubst %.ipynb,%.executed,$(NOTEBOOKS))
 

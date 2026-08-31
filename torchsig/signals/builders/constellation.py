@@ -255,4 +255,6 @@ class ConstellationSignalGenerator(BaseSignalGenerator):
             bandwidth=bandwidth,
             pulse_shape_name=pulse_shape_name,
             alpha_rolloff=alpha_rolloff,
+            pulse_shape_index=int(pulse_shape_name == "srrc"),
+            alpha_rolloff_target=(float(alpha_rolloff) if alpha_rolloff is not None else 0.0),
         )

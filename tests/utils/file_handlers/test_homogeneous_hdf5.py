@@ -370,9 +370,7 @@ def test_homogeneous_hdf5_reads_contiguous_signal_batch(tmp_path) -> None:
         for actual_signal, expected_signal in zip(actual, signals, strict=True):
             np.testing.assert_array_equal(actual_signal.data, expected_signal.data)
             assert actual_signal.metadata == expected_signal.metadata
-            assert len(actual_signal.component_signals) == len(
-                expected_signal.component_signals
-            )
+            assert len(actual_signal.component_signals) == len(expected_signal.component_signals)
             for actual_component, expected_component in zip(
                 actual_signal.component_signals,
                 expected_signal.component_signals,

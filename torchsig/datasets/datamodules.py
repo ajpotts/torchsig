@@ -89,10 +89,7 @@ def _resolve_file_reader(file_writer, file_reader):
     if file_reader is None:
         return expected_reader or HDF5Reader
     if expected_reader is not None and file_reader is not expected_reader:
-        raise ValueError(
-            f"Incompatible file handler pair: {file_writer.__name__} requires "
-            f"{expected_reader.__name__}, got {file_reader.__name__}"
-        )
+        raise ValueError(f"Incompatible file handler pair: {file_writer.__name__} requires {expected_reader.__name__}, got {file_reader.__name__}")
     return file_reader
 
 
@@ -108,9 +105,7 @@ def _validate_file_writer_kwargs(file_writer, options):
     except ValueError:
         return result
     except TypeError as error:
-        raise TypeError(
-            f"Invalid options for {file_writer.__name__}: {error}"
-        ) from error
+        raise TypeError(f"Invalid options for {file_writer.__name__}: {error}") from error
     return result
 
 
@@ -345,9 +340,7 @@ class TorchSigDataModule(pl.LightningDataModule):
         self.create_num_workers = create_num_workers
         self.file_writer = file_writer
         self.file_reader = _resolve_file_reader(file_writer, file_reader)
-        self.file_writer_kwargs = _validate_file_writer_kwargs(
-            file_writer, file_writer_kwargs
-        )
+        self.file_writer_kwargs = _validate_file_writer_kwargs(file_writer, file_writer_kwargs)
         self.overwrite = overwrite
 
         # ---- placeholders ------------------------------------------------
@@ -648,9 +641,7 @@ class SplitTorchSigDataModule(pl.LightningDataModule):
 
         self.file_writer = file_writer
         self.file_reader = _resolve_file_reader(file_writer, file_reader)
-        self.file_writer_kwargs = _validate_file_writer_kwargs(
-            file_writer, file_writer_kwargs
-        )
+        self.file_writer_kwargs = _validate_file_writer_kwargs(file_writer, file_writer_kwargs)
         self.overwrite = overwrite
 
         self.shuffle = shuffle

@@ -1419,6 +1419,7 @@ def update_signal_snr_bandwidth(dataset: "TorchSigIterableDataset", new_signal: 
     """Updates the SNR and bandwidth of a signal based on dataset parameters.
 
     This function performs two main operations:
+
     1. Corrects the SNR of the signal by comparing the estimated SNR from the signal's
        spectrogram with the target SNR range defined in the signal metadata.
     2. Updates the signal's bandwidth metadata to better fit the bounding box by

@@ -46,10 +46,7 @@ def _resolve_file_reader(file_writer, file_reader):
     if file_reader is None:
         return expected_reader
     if expected_reader is not None and file_reader is not expected_reader:
-        raise ValueError(
-            f"Incompatible file handler pair: {file_writer.__name__} requires "
-            f"{expected_reader.__name__}, got {file_reader.__name__}"
-        )
+        raise ValueError(f"Incompatible file handler pair: {file_writer.__name__} requires {expected_reader.__name__}, got {file_reader.__name__}")
     return file_reader
 
 
@@ -62,10 +59,7 @@ def _yaml_safe_value(value: Any) -> Any:
     if isinstance(value, type):
         return f"{value.__module__}.{value.__qualname__}"
     if isinstance(value, dict):
-        return {
-            str(key): _yaml_safe_value(item)
-            for key, item in value.items()
-        }
+        return {str(key): _yaml_safe_value(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_yaml_safe_value(item) for item in value]
     try:
@@ -201,10 +195,7 @@ class DatasetCreator:
         legacy_file_writer = kwargs.pop("file_writer", _MISSING)
         if legacy_file_writer is not _MISSING:
             if file_handler is not HDF5Writer and file_handler is not legacy_file_writer:
-                raise TypeError(
-                    "DatasetCreator received conflicting file_handler and "
-                    "file_writer arguments"
-                )
+                raise TypeError("DatasetCreator received conflicting file_handler and file_writer arguments")
             file_handler = legacy_file_writer
         self.file_handler = file_handler
         self.file_reader = _resolve_file_reader(file_handler, file_reader)
@@ -305,11 +296,7 @@ class DatasetCreator:
             "num_workers": None if self.num_workers is None else int(self.num_workers),
             "file_handler": getattr(self.file_handler, "__name__", str(self.file_handler)),
             "file_handler_qualified": _qualified_name(self.file_handler),
-            "file_reader_qualified": (
-                None
-                if self.file_reader is None
-                else _qualified_name(self.file_reader)
-            ),
+            "file_reader_qualified": (None if self.file_reader is None else _qualified_name(self.file_reader)),
             "file_handler_kwargs": self.writer_info_kwargs,
             "multithreading": bool(self.multithreading),
             "dataset_length_requested": int(self.dataset_length_requested),
@@ -328,13 +315,8 @@ class DatasetCreator:
         with open(self.writer_info_filepath) as f:
             writer_disk = yaml.safe_load(f) or {}
         complete = bool(writer_disk.get("complete", False))
-        expected_handler = getattr(
-            self.file_handler, "__name__", str(self.file_handler)
-        )
-        if (
-            "file_handler" in writer_disk
-            and writer_disk["file_handler"] != expected_handler
-        ):
+        expected_handler = getattr(self.file_handler, "__name__", str(self.file_handler))
+        if "file_handler" in writer_disk and writer_disk["file_handler"] != expected_handler:
             differences.append(
                 (
                     "file_handler",
@@ -342,12 +324,9 @@ class DatasetCreator:
                     expected_handler,
                 )
             )
-        if (
-            "file_handler_kwargs" in writer_disk
-            and not _deep_equal(
-                writer_disk["file_handler_kwargs"],
-                self.writer_info_kwargs,
-            )
+        if "file_handler_kwargs" in writer_disk and not _deep_equal(
+            writer_disk["file_handler_kwargs"],
+            self.writer_info_kwargs,
         ):
             differences.append(
                 (
@@ -425,15 +404,9 @@ class DatasetCreator:
                 print(f"Dataset already exists in {self.root}. Not regenerating.")
                 return
             if not complete:
-                raise RuntimeError(
-                    f"Dataset only partially exists in {self.root}. "
-                    "Regenerate by setting overwrite=True."
-                )
+                raise RuntimeError(f"Dataset only partially exists in {self.root}. Regenerate by setting overwrite=True.")
             if any(key == "file_handler" for key, _, _ in diffs):
-                raise RuntimeError(
-                    f"Dataset at {self.root} was created with a different "
-                    "file handler. Regenerate by setting overwrite=True."
-                )
+                raise RuntimeError(f"Dataset at {self.root} was created with a different file handler. Regenerate by setting overwrite=True.")
             print(f"Dataset exists at {self.root} but differs from current dataset config. Using dataset on disk.")
             for k, disk_v, cur_v in diffs:
                 print(f"\t{k}: disk={disk_v} current={cur_v}")
@@ -445,7 +418,10 @@ class DatasetCreator:
             self.items_written = 0
             self._msg_timer = time()
 
-            with self.file_handler(root=self.root, **self.kwargs) as writer:
+            with self.file_handler(
+                root=self.root,
+                **self.kwargs,
+            ) as writer:
                 # Write initial YAMLs
                 write_dict_to_yaml(
                     self.dataset_info_filepath,

@@ -58,6 +58,7 @@ def transform_crash_logger(transform_func, data, **kwargs):
     and save complete state upon failure for debugging and reproduction of errors.
 
     This function performs the following:
+
     1. Creates a dedicated random number generator (RNG) with a known seed for each call,
        ensuring reproducible stochastic behavior.
     2. Adds the RNG to the provided kwargs (overwriting any existing 'rng' parameter).
@@ -72,8 +73,8 @@ def transform_crash_logger(transform_func, data, **kwargs):
     Parameters
     ----------
     transform_func : callable
-        The transformation function to execute (e.g., `F.clock_drift`). Must accept
-        `data` as the first argument and `**kwargs` where an 'rng' parameter will be
+        The transformation function to execute (e.g., ``F.clock_drift``). Must accept
+        `data` as the first argument and ``**kwargs`` where an 'rng' parameter will be
         provided.
     data : array-like
         The input data to transform (typically a numpy array or torch tensor).
@@ -112,15 +113,19 @@ def transform_crash_logger(transform_func, data, **kwargs):
     ...         return signal
 
     When a failure occurs:
+
     - A file like "crash_clock_drift_1678901234567.npz" is created containing:
+
       * data: The original input tensor
       * seed: The exact random seed used
       * kwargs: Including drift_ppm and all other parameters
+
     - The original exception is re-raised to stop the pipeline
 
     Notes
     -----
     To reproduce a saved failure:
+
     >>> with np.load("crash_clock_drift_1678901234567.npz") as f:
     ...     data = f["data"]
     ...     seed = f["seed"]
@@ -1493,14 +1498,18 @@ class PatchShuffle(SignalTransform):
 
     Attributes:
          patch_size: patch_size sets the size of each patch to shuffle
+
             * If int or float, patch_size is fixed at the value provided.
             * If list, patch_size is any element in the list.
             * If tuple, patch_size is in range of (tuple[0], tuple[1]).
+
         patch_size_distribution: Random draw from patch_size distribution.
         shuffle_ratio: shuffle_ratio sets the ratio of the patches to shuffle
+
             * If int or float, shuffle_ratio is fixed at the value provided.
             * If list, shuffle_ratio is any element in the list.
             * If tuple, shuffle_ratio is in range of (tuple[0], tuple[1]).
+
         shuffle_ratio_distribution: Random draw from shuffle_ratio distribution.
     """
 
@@ -1606,27 +1615,34 @@ class Quantize(SignalTransform):
 class RandomDropSamples(SignalTransform):
     """Randomly drop IQ samples from the input data of specified durations and
     with specified fill techniques:
-        * `ffill` (front fill): replace drop samples with the last previous value.
-        * `bfill` (back fill): replace drop samples with the next value.
-        * `mean`: replace drop samples with the mean value of the full data.
-        * `zero`: replace drop samples with zeros.
-    Transform is based off of the
-    `TSAug Dropout Transform <https://github.com/arundo/tsaug/blob/master/src/tsaug/_augmenter/dropout.py>`_.
+
+    * `ffill` (front fill): replace drop samples with the last previous value.
+    * `bfill` (back fill): replace drop samples with the next value.
+    * `mean`: replace drop samples with the mean value of the full data.
+    * `zero`: replace drop samples with zeros.
+
+    Transform is based off of the `TSAug Dropout Transform <https://github.com/arundo/tsaug/blob/master/src/tsaug/_augmenter/dropout.py>`_.
 
     Attributes:
-        drop_rate: drop_rate sets the rate at which to drop samples
+        drop_rate: drop_rate sets the rate at which to drop samples.
+
             * If int or float, drop_rate is fixed at the value provided.
             * If list, drop_rate is any element in the list.
             * If tuple, drop_rate is in range of (tuple[0], tuple[1]).
+
         drop_rate_distribution: Random draw from drop_rate distribution.
-        size: size sets the size of each instance of dropped samples
+        size: size sets the size of each instance of dropped samples.
+
             * If int or float, size is fixed at the value provided.
             * If list, size is any element in the list.
             * If tuple, size is in range of (tuple[0], tuple[1]).
+
         size_distribution: Random draw from size distribution.
-        fill: fill sets the method of how the dropped samples should be filled
+        fill: fill sets the method of how the dropped samples should be filled.
+
             * If list, fill is any element in the list.
             * If str, fill is fixed at the method provided.
+
         fill_distribution: Random draw from fill distribution.
     """
 
@@ -1825,18 +1841,24 @@ class SpectrogramDropSamples(SignalTransform):
 
     Attributes:
         drop_rate: drop_rate sets the rate at which to drop samples
+
             * If int or float, drop_rate is fixed at the value provided.
             * If list, drop_rate is any element in the list.
             * If tuple, drop_rate is in range of (tuple[0], tuple[1]).
+
         drop_rate_distribution: Random draw from drop_rate distribution.
         size: size sets the size of each instance of dropped samples
+
             * If int or float, size is fixed at the value provided.
             * If list, size is any element in the list.
             * If tuple, size is in range of (tuple[0], tuple[1]).
+
         size_distribution: Random draw from size distribution.
         fill: fill sets the method of how the dropped samples should be filled
+
             * If list, fill is any element in the list.
             * If str, fill is fixed at the method provided.
+
         fill_distribution: Random draw from fill distribution.
     """
 

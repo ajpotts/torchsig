@@ -86,10 +86,7 @@ class PackedHDF5Schema:
                 schema_minor=int(value["schema_minor"]),
                 required_features=tuple(value["required_features"]),
                 datasets=datasets,
-                sentinels={
-                    str(name): int(sentinel)
-                    for name, sentinel in value["sentinels"].items()
-                },
+                sentinels={str(name): int(sentinel) for name, sentinel in value["sentinels"].items()},
             )
         except (KeyError, TypeError, ValueError) as error:
             raise ValueError("Invalid packed HDF5 schema document") from error
@@ -109,9 +106,7 @@ def default_packed_schema() -> PackedHDF5Schema:
             "hierarchical_metadata",
         ),
         datasets={
-            "index": DatasetSpec(
-                path="/index", dtype="uint64", role="top_level_record_ids"
-            ),
+            "index": DatasetSpec(path="/index", dtype="uint64", role="top_level_record_ids"),
             "records": DatasetSpec(
                 path="/records",
                 role="signal_record_table",
@@ -127,12 +122,8 @@ def default_packed_schema() -> PackedHDF5Schema:
                 },
             ),
             "data": DatasetSpec(path="/data", role="dtype_stream_group"),
-            "dtypes": DatasetSpec(
-                path="/dtypes", dtype="utf8", role="numpy_dtype_descriptors"
-            ),
-            "shapes": DatasetSpec(
-                path="/shapes", dtype="uint64", role="flattened_record_shapes"
-            ),
+            "dtypes": DatasetSpec(path="/dtypes", dtype="utf8", role="numpy_dtype_descriptors"),
+            "shapes": DatasetSpec(path="/shapes", dtype="uint64", role="flattened_record_shapes"),
             "components": DatasetSpec(
                 path="/components",
                 dtype="uint64",
@@ -185,22 +176,12 @@ def read_schema(file: h5py.File) -> PackedHDF5Schema:
     if schema.format != SUPPORTED_FORMAT:
         raise ValueError(f"Unsupported HDF5 format: {schema.format!r}")
     if schema.schema_major != SUPPORTED_SCHEMA_MAJOR:
-        raise ValueError(
-            "Unsupported packed HDF5 schema major version: "
-            f"{schema.schema_major}; supported: {SUPPORTED_SCHEMA_MAJOR}"
-        )
+        raise ValueError(f"Unsupported packed HDF5 schema major version: {schema.schema_major}; supported: {SUPPORTED_SCHEMA_MAJOR}")
     unsupported_features = set(schema.required_features) - SUPPORTED_FEATURES
     if unsupported_features:
-        raise ValueError(
-            "Unsupported required packed HDF5 features: "
-            f"{sorted(unsupported_features)}"
-        )
+        raise ValueError(f"Unsupported required packed HDF5 features: {sorted(unsupported_features)}")
     for logical_name in ("metadata", "parent_metadata"):
         encoding = schema.datasets.get(logical_name, DatasetSpec("", "")).encoding
-        if encoding is None or (encoding.name, encoding.version) not in (
-            SUPPORTED_METADATA_ENCODINGS
-        ):
-            raise ValueError(
-                f"Unsupported metadata encoding for {logical_name}: {encoding}"
-            )
+        if encoding is None or (encoding.name, encoding.version) not in (SUPPORTED_METADATA_ENCODINGS):
+            raise ValueError(f"Unsupported metadata encoding for {logical_name}: {encoding}")
     return schema

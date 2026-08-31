@@ -1,5 +1,6 @@
 """Collate function and DataLoader with worker seeding for TorchSig.
 Provides:
+
     - metadata_padding_collate_fn: pads variable-length metadata in each batch.
     - WorkerSeedingDataLoader: seeds each worker process differently for reproducibility.
 """

@@ -42,12 +42,7 @@ def pytest_collection_modifyitems(session, config, items):
                 item.add_marker(skip_slow_no_gpu)
 
     # Define the priority order for test files
-    priority_order = [
-        "tests/signals",
-        "tests/transforms",
-        "tests/utils",
-        "tests/datasets",
-    ]
+    priority_order = ["tests/signals", "tests/transforms", "tests/utils", "tests/datasets", "tests/geo"]
     # Individual test files
     #     "test_datasets.py",
     #     "test_datamodules.py",

@@ -188,7 +188,7 @@ def awgn(data: np.ndarray, noise_power_db: float, rng: np.random.Generator | Non
 
     Args:
         data: (batch_size, vector_length, ...)-sized data.
-        noise_power_db: Defined as 10*log10(E[|n|^2]).
+        noise_power_db: Defined as 10*log10(``E[|n|^2]``).
         random_generator: Random Generator to use. Defaults to None (new generator created internally).
 
     Returns:

@@ -93,9 +93,7 @@ def test_DatasetCreator_overwrite_false_skips_when_matching(tmp_path):
     assert sentinel.read_text() == "do not delete"
 
 
-def test_DatasetCreator_overwrite_false_reports_changed_writer_options(
-    tmp_path, capsys
-):
+def test_DatasetCreator_overwrite_false_reports_changed_writer_options(tmp_path, capsys):
     ds = default_dataset(num_signals_max=1, num_signals_min=1)
     dl = WorkerSeedingDataLoader(ds, seed=42, batch_size=2)
     DatasetCreator(

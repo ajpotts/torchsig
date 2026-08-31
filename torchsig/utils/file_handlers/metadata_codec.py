@@ -35,10 +35,7 @@ def _pack_value(value: Any) -> Any:  # noqa: PLR0911
     if isinstance(value, dict):
         non_string_keys = [key for key in value if not isinstance(key, str)]
         if non_string_keys:
-            raise TypeError(
-                "TorchSig metadata dictionary keys must be strings; "
-                f"got {type(non_string_keys[0]).__name__}"
-            )
+            raise TypeError(f"TorchSig metadata dictionary keys must be strings; got {type(non_string_keys[0]).__name__}")
         return {
             "__torchsig_type__": "dict",
             "items": {key: _pack_value(item) for key, item in value.items()},
@@ -78,9 +75,7 @@ def _unpack_value(value: Any) -> Any:  # noqa: PLR0911
     if value_type == "complex":
         return complex(value["real"], value["imag"])
     if value_type == "dict":
-        return {
-            key: _unpack_value(item) for key, item in value["items"].items()
-        }
+        return {key: _unpack_value(item) for key, item in value["items"].items()}
     return {key: _unpack_value(item) for key, item in value.items()}
 
 
