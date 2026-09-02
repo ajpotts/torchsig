@@ -190,11 +190,11 @@ def test_yolo_label_initializes_expected_metadata_fields():
     assert transform.required_metadata == [
         "class_index",
         "start",
-        "estimated_occupied_bandwidth",
+        "bandwidth",
         "center_freq",
         "dataset_metadata",
     ]
-    assert transform.bandwidth_key == "estimated_occupied_bandwidth"
+    assert transform.bandwidth_key == "bandwidth"
     assert transform.class_index_field == "class_index"
     assert transform.targets_metadata == ["yolo_label"]
 
@@ -211,7 +211,7 @@ def test_yolo_label_adds_expected_label_to_component_signal(parent_signal):
             0.5,  # start + duration / 2
             0.4,  # 1 - ((sample_rate / 2 + center_freq) / sample_rate)
             0.5,  # duration
-            0.1,  # estimated_occupied_bandwidth / sample_rate
+            0.2,  # bandwidth / sample_rate
         )
     )
 
@@ -222,16 +222,16 @@ def test_yolo_label_apply_returns_component_signal(component_signal):
     transformed_component = transform.__apply__(component_signal)
 
     assert transformed_component is component_signal
-    assert transformed_component.yolo_label == pytest.approx((3, 0.5, 0.4, 0.5, 0.1))
+    assert transformed_component.yolo_label == pytest.approx((3, 0.5, 0.4, 0.5, 0.2))
 
 
-def test_yolo_label_can_use_canonical_bandwidth(component_signal):
-    transform = YOLOLabel(bandwidth_key="bandwidth")
+def test_yolo_label_can_use_estimated_occupied_bandwidth(component_signal):
+    transform = YOLOLabel(bandwidth_key="estimated_occupied_bandwidth")
 
     transformed_component = transform(component_signal)
 
-    assert transform.required_metadata[2] == "bandwidth"
-    assert transformed_component.yolo_label == pytest.approx((3, 0.5, 0.4, 0.5, 0.2))
+    assert transform.required_metadata[2] == "estimated_occupied_bandwidth"
+    assert transformed_component.yolo_label == pytest.approx((3, 0.5, 0.4, 0.5, 0.1))
 
 
 def test_yolo_label_rejects_invalid_bandwidth_key():
@@ -252,7 +252,7 @@ def test_yolo_label_requires_selected_bandwidth(component_signal):
         ValueError,
         match="estimated_occupied_bandwidth is missing",
     ):
-        YOLOLabel()(component_signal)
+        YOLOLabel(bandwidth_key="estimated_occupied_bandwidth")(component_signal)
 
 
 def test_yolo_label_can_use_family_index_from_grouping(parent_signal):
@@ -283,7 +283,7 @@ def test_yolo_label_can_use_custom_group_index(parent_signal):
     grouping(parent_signal)
     transformed = YOLOLabel(class_index_field="kind_index")(parent_signal)
 
-    assert transformed.component_signals[0].yolo_label == pytest.approx((1, 0.5, 0.4, 0.5, 0.1))
+    assert transformed.component_signals[0].yolo_label == pytest.approx((1, 0.5, 0.4, 0.5, 0.2))
 
 
 def test_yolo_label_requires_selected_class_index_field(component_signal):
@@ -292,6 +292,35 @@ def test_yolo_label_requires_selected_class_index_field(component_signal):
         match="key: family_index is missing from signal metadata",
     ):
         YOLOLabel(class_index_field="family_index")(component_signal)
+
+
+def test_yolo_label_uses_final_clipped_frequency_interval(component_signal):
+    component_signal["center_freq"] = 450.0
+    component_signal["bandwidth"] = 100.0
+    component_signal["dataset_metadata"] = {
+        "sample_rate": 1000.0,
+        "frequency_min": -500.0,
+        "frequency_max": 500.0,
+    }
+
+    transformed = YOLOLabel()(component_signal)
+
+    assert transformed.lower_freq == pytest.approx(400.0)
+    assert transformed.upper_freq == pytest.approx(500.0)
+    assert transformed.yolo_label == pytest.approx((3, 0.5, 0.05, 0.5, 0.1))
+
+
+def test_yolo_label_rejects_out_of_bounds_frequency_interval(component_signal):
+    component_signal["center_freq"] = 475.0
+    component_signal["bandwidth"] = 100.0
+    component_signal["dataset_metadata"] = {
+        "sample_rate": 1000.0,
+        "frequency_min": -500.0,
+        "frequency_max": 500.0,
+    }
+
+    with pytest.raises(ValueError, match="above frequency_max"):
+        YOLOLabel()(component_signal)
 
 
 def test_grouping_label_uses_exact_value_rules(parent_signal):

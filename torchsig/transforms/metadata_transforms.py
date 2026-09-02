@@ -240,9 +240,9 @@ class YOLOLabel(MetadataTransform):
     """Add a YOLO label to a signal.
 
     The label is a tuple of ``(cid, cx, cy, width, height)``. By default, its
-    frequency-axis height uses the signal's threshold-based
-    ``estimated_occupied_bandwidth``. Set ``bandwidth_key="bandwidth"`` to use
-    the generator-selected canonical bandwidth instead.
+    frequency-axis height uses the generator-selected canonical ``bandwidth``.
+    Set ``bandwidth_key="estimated_occupied_bandwidth"`` to use the optional
+    threshold-based diagnostic estimate instead.
 
     Args:
         bandwidth_key: Signal metadata field used for the box height. Must be
@@ -257,7 +257,7 @@ class YOLOLabel(MetadataTransform):
 
     def __init__(
         self,
-        bandwidth_key: str = "estimated_occupied_bandwidth",
+        bandwidth_key: str = "bandwidth",
         class_index_field: str = "class_index",
         **kwargs,
     ) -> None:
@@ -303,6 +303,13 @@ class YOLOLabel(MetadataTransform):
         """
         if not hasattr(signal, self.bandwidth_key):
             raise ValueError(f"key: {self.bandwidth_key} is missing from signal metadata, but is required by {self.__class__.__name__}.")
+        metadata = signal.get_full_metadata()
+        dataset_metadata = metadata.get("dataset_metadata", {})
+        signal.validate_frequency_interval(
+            frequency_min=metadata.get("frequency_min", dataset_metadata.get("frequency_min")),
+            frequency_max=metadata.get("frequency_max", dataset_metadata.get("frequency_max")),
+        )
+
         if not hasattr(signal, self.class_index_field):
             raise ValueError(f"key: {self.class_index_field} is missing from signal metadata, but is required by {self.__class__.__name__}.")
         class_index = signal[self.class_index_field]
