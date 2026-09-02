@@ -266,6 +266,8 @@ class SignalMetadataObject(HierarchicalMetadataObject):
             "dataset_metadata",
             "_dataset_metadata",
             "_center_freq_set",
+            "_lower_frequency",
+            "_upper_frequency",
         }
 
         metadata = dict(self.metadata)

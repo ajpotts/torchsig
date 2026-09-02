@@ -181,20 +181,28 @@ def test_signal_metadata_to_dict_excludes_internal_fields():
     metadata = SignalMetadataObject(
         class_name="qpsk",
         class_index=34,
+        center_freq=1000.0,
+        bandwidth=200.0,
         applied_transforms=["transform"],
         dataset_metadata={"a": 1},
         _dataset_metadata={"b": 2},
         _center_freq_set=True,
+        _lower_frequency=-999.0,
+        _upper_frequency=999.0,
     )
 
     result = metadata.to_dict()
 
     assert result["class_name"] == "qpsk"
     assert result["class_index"] == 34
+    assert result["center_freq"] == pytest.approx(1000.0)
+    assert result["bandwidth"] == pytest.approx(200.0)
     assert "applied_transforms" not in result
     assert "dataset_metadata" not in result
     assert "_dataset_metadata" not in result
     assert "_center_freq_set" not in result
+    assert "_lower_frequency" not in result
+    assert "_upper_frequency" not in result
 
 
 def test_signal_initializes_empty_data_when_data_is_none():
