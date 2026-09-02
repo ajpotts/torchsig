@@ -177,6 +177,36 @@ def test_signal_metadata_oversampling_rate():
     assert metadata.oversampling_rate == pytest.approx(5.0)
 
 
+def test_signal_metadata_validates_frequency_interval():
+    metadata = SignalMetadataObject(center_freq=10.0, bandwidth=20.0)
+
+    metadata.validate_frequency_interval(frequency_min=0.0, frequency_max=20.0)
+
+
+@pytest.mark.parametrize(
+    ("center_freq", "bandwidth", "frequency_min", "frequency_max", "message"),
+    [
+        (np.nan, 20.0, None, None, "center_freq must be finite"),
+        (0.0, 0.0, None, None, "bandwidth must be finite and positive"),
+        (0.0, np.inf, None, None, "bandwidth must be finite and positive"),
+        (0.0, 20.0, -9.0, None, "below frequency_min"),
+        (0.0, 20.0, None, 9.0, "above frequency_max"),
+        (0.0, 20.0, 1.0, -1.0, "exceeds frequency_max"),
+    ],
+)
+def test_signal_metadata_rejects_invalid_frequency_interval(
+    center_freq,
+    bandwidth,
+    frequency_min,
+    frequency_max,
+    message,
+):
+    metadata = SignalMetadataObject(center_freq=center_freq, bandwidth=bandwidth)
+
+    with pytest.raises(ValueError, match=message):
+        metadata.validate_frequency_interval(frequency_min, frequency_max)
+
+
 def test_signal_metadata_to_dict_excludes_internal_fields():
     metadata = SignalMetadataObject(
         class_name="qpsk",
