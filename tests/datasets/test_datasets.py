@@ -129,6 +129,104 @@ def _small_metadata():
     return metadata
 
 
+@pytest.mark.parametrize("bandwidth", [0.0, -1.0, np.nan, np.inf, 5.0])
+def test_generated_component_bandwidth_must_be_valid_and_configured(bandwidth):
+    """Non-tone generators cannot return invalid or out-of-range bandwidths."""
+    generator = SimpleNamespace(
+        bandwidth_min=1.0,
+        bandwidth_max=4.0,
+        required_metadata_fields=["bandwidth_min", "bandwidth_max"],
+    )
+    signal = Signal(
+        data=np.ones(8, dtype=np.complex64),
+        center_freq=0.0,
+        bandwidth=bandwidth,
+        class_name="qpsk",
+    )
+
+    with pytest.raises(ValueError, match="bandwidth"):
+        TorchSigIterableDataset._validate_generated_bandwidth(signal, generator)
+
+
+def test_generated_component_bandwidth_accepts_configured_value():
+    """A generator-selected bandwidth inside its range is accepted."""
+    generator = SimpleNamespace(
+        bandwidth_min=1.0,
+        bandwidth_max=4.0,
+        required_metadata_fields=["bandwidth_min", "bandwidth_max"],
+    )
+    signal = Signal(
+        data=np.ones(8, dtype=np.complex64),
+        center_freq=0.0,
+        bandwidth=2.5,
+        class_name="qpsk",
+    )
+
+    TorchSigIterableDataset._validate_generated_bandwidth(signal, generator)
+
+
+@pytest.mark.parametrize("bandwidth", [0.5, 2.0])
+def test_generated_tone_requires_documented_fixed_bandwidth(bandwidth):
+    """The tone exception accepts exactly its documented 1 Hz width."""
+    generator = MagicMock()
+    signal = Signal(
+        data=np.ones(8, dtype=np.complex64),
+        center_freq=0.0,
+        bandwidth=bandwidth,
+        class_name="tone",
+    )
+
+    with pytest.raises(ValueError, match="documented 1 Hz"):
+        TorchSigIterableDataset._validate_generated_bandwidth(signal, generator)
+
+
+def test_generated_tone_accepts_documented_fixed_bandwidth():
+    """Tone bypasses configured ranges only for its fixed 1 Hz width."""
+    signal = Signal(
+        data=np.ones(8, dtype=np.complex64),
+        center_freq=0.0,
+        bandwidth=1.0,
+        class_name="tone",
+    )
+
+    TorchSigIterableDataset._validate_generated_bandwidth(signal, MagicMock())
+
+
+@pytest.mark.parametrize("generator_name", ["80211a_rts", "bpsk"])
+def test_protocol_and_constellation_keep_generated_bandwidth(generator_name):
+    """Spectral diagnostics cannot replace configured generator bandwidth."""
+    metadata = TorchSigDefaults().default_dataset_metadata.copy()
+    metadata.update(
+        {
+            "sample_rate": 1_000_000,
+            "frequency_min": -500_000,
+            "frequency_max": 499_999,
+            "signal_center_freq_min": 0,
+            "signal_center_freq_max": 0,
+            "bandwidth_min": 62_500,
+            "bandwidth_max": 100_000,
+            "signal_duration_in_samples_min": 4096,
+            "signal_duration_in_samples_max": 4096,
+            "num_iq_samples_dataset": 4096,
+            "fft_size": 64,
+            "fft_stride": 64,
+            "num_signals_min": 1,
+            "num_signals_max": 1,
+        }
+    )
+    dataset = TorchSigIterableDataset(
+        metadata=metadata,
+        signal_generators=[generator_name],
+        seed=9,
+    )
+
+    signal = dataset._generate_component_signal(dataset.signal_generators[0])
+
+    assert signal.bandwidth == pytest.approx(78_308)
+    assert metadata["bandwidth_min"] <= signal.bandwidth <= metadata["bandwidth_max"]
+    assert hasattr(signal, "estimated_occupied_bandwidth")
+
+
 def test_per_signal_metadata_overrides_dataset_ranges():
     metadata = _small_metadata()
     metadata.update(
