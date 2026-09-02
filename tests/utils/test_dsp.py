@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 import torch
 
+from torchsig.signals.signal_types import Signal
 from torchsig.utils import dsp
 from torchsig.utils.dsp import (
     TorchSigComplexDataType,
@@ -14,6 +15,56 @@ from torchsig.utils.dsp import (
 
 FFT_SIZE = 64
 ZEROS = np.zeros(512, dtype=TorchSigComplexDataType)
+
+
+def test_update_signal_snr_bandwidth_preserves_canonical_bandwidth(monkeypatch):
+    """A wide threshold estimate is diagnostic and cannot replace bandwidth."""
+    dataset = Mock(
+        fft_size=4,
+        fft_stride=4,
+        noise_power_db=0.0,
+        sample_rate=100.0,
+        frequency_min=-50.0,
+        frequency_max=50.0,
+        random_generator=Mock(uniform=Mock(return_value=40.0)),
+    )
+    signal = Signal(
+        data=np.ones(8, dtype=np.complex64),
+        center_freq=0.0,
+        bandwidth=10.0,
+        snr_db_min=40.0,
+        snr_db_max=40.0,
+    )
+    spectrogram_db = np.array(
+        [
+            [0.0, 0.0],
+            [10.0, 10.0],
+            [0.0, 0.0],
+            [10.0, 10.0],
+        ],
+        dtype=np.float32,
+    )
+    monkeypatch.setattr(dsp, "compute_spectrogram", lambda *_args: spectrogram_db.copy())
+
+    dsp.update_signal_snr_bandwidth(dataset, signal)
+
+    assert signal.bandwidth == pytest.approx(10.0)
+    assert signal.estimated_occupied_bandwidth == pytest.approx(87.5)
+    assert signal.snr_db == pytest.approx(40.0)
+
+
+def test_estimate_occupied_bandwidth_returns_none_without_exceedance():
+    """The diagnostic is absent when no bin exceeds its threshold."""
+    dataset = Mock(
+        fft_size=4,
+        noise_power_db=0.0,
+        sample_rate=100.0,
+        frequency_min=-50.0,
+        frequency_max=50.0,
+    )
+    spectrogram_db = np.full((4, 2), 3.0, dtype=np.float32)
+
+    assert dsp.estimate_occupied_bandwidth(dataset, spectrogram_db) is None
 
 
 def _tone(bin_index, num_samples=512, fft_size=FFT_SIZE, amplitude=1.0):

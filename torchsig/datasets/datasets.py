@@ -830,6 +830,7 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         for component_transform in self.component_transforms:
             signal = component_transform(signal)
 
+        self._validate_generated_bandwidth(signal, generator)
         update_signal_snr_bandwidth(self, signal)
 
         return frequency_shift_signal(
@@ -841,6 +842,46 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
             frequency_min=self["frequency_min"],
             random_generator=self.random_generator,
         )
+
+    @staticmethod
+    def _validate_generated_bandwidth(
+        signal: Signal,
+        generator: BaseSignalGenerator,
+    ) -> None:
+        """Validate a generated component's canonical bandwidth.
+
+        All generators that accept configured bandwidth bounds must return a
+        finite bandwidth within those bounds. A tone is the explicit exception:
+        it represents an ideal single-frequency component with a fixed 1 Hz
+        metadata width and does not consume the dataset bandwidth distribution.
+
+        Args:
+            signal: Generated component after component transforms.
+            generator: Generator that produced the component.
+
+        Raises:
+            ValueError: If the component bandwidth is non-finite, non-positive,
+                or outside the generator's configured range.
+        """
+        bandwidth = float(signal.bandwidth)
+        class_name = str(signal.class_name) if hasattr(signal, "class_name") else type(generator).__name__
+
+        if not np.isfinite(bandwidth) or bandwidth <= 0:
+            raise ValueError(f"Generated {class_name!r} signal has invalid bandwidth {bandwidth}")
+
+        if class_name == "tone":
+            if bandwidth != 1.0:
+                raise ValueError(f"Generated 'tone' signal must have its documented 1 Hz bandwidth, got {bandwidth}")
+            return
+
+        required_fields = set(getattr(generator, "required_metadata_fields", []))
+        if not {"bandwidth_min", "bandwidth_max"}.issubset(required_fields):
+            return
+
+        bandwidth_min = float(generator.bandwidth_min)
+        bandwidth_max = float(generator.bandwidth_max)
+        if not bandwidth_min <= bandwidth <= bandwidth_max:
+            raise ValueError(f"Generated {class_name!r} signal bandwidth {bandwidth} is outside configured range [{bandwidth_min}, {bandwidth_max}]")
 
     def _choose_start_sample(
         self,

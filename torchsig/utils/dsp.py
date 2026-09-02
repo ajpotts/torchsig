@@ -29,6 +29,7 @@ __all__ = [
     "convolve",
     "design_half_band_filter",
     "estimate_filter_length",
+    "estimate_occupied_bandwidth",
     "estimate_tone_bandwidth",
     "frequency_shift",
     "gaussian_taps",
@@ -56,6 +57,7 @@ __all__ = [
     "slice_tail_to_length",
     "srrc_taps",
     "upconversion_anti_aliasing_filter",
+    "update_signal_snr",
     "update_signal_snr_bandwidth",
     "upper_freq_from_center_freq_bandwidth",
     "upsample",
@@ -1415,15 +1417,8 @@ def noise_generator(
     return np.sqrt(power / est_power) * noise
 
 
-def update_signal_snr_bandwidth(dataset: "TorchSigIterableDataset", new_signal: "Signal") -> None:
-    """Updates the SNR and bandwidth of a signal based on dataset parameters.
-
-    This function performs two main operations:
-
-    1. Corrects the SNR of the signal by comparing the estimated SNR from the signal's
-       spectrogram with the target SNR range defined in the signal metadata.
-    2. Updates the signal's bandwidth metadata to better fit the bounding box by
-       estimating the 99% bandwidth from the signal's spectral content.
+def update_signal_snr(dataset: "TorchSigIterableDataset", new_signal: "Signal") -> np.ndarray:
+    """Adjust a signal to a sampled target SNR without changing its bandwidth.
 
     Args:
         dataset (TorchSigIterableDataset): The dataset object containing FFT parameters, noise floor information,
@@ -1432,10 +1427,10 @@ def update_signal_snr_bandwidth(dataset: "TorchSigIterableDataset", new_signal: 
             - data: The time-domain signal data
             - snr_db_min: Minimum target SNR in dB
             - snr_db_max: Maximum target SNR in dB
-            - bandwidth: Current bandwidth value (will be updated)
+            - bandwidth: Canonical full bandwidth, which is not modified
 
     Returns:
-        None: The function modifies the new_signal object in place.
+        The adjusted signal spectrogram in dB, for optional diagnostics.
 
     Notes:
         The SNR correction is performed by:
@@ -1444,13 +1439,8 @@ def update_signal_snr_bandwidth(dataset: "TorchSigIterableDataset", new_signal: 
         3. Calculating a correction factor to match the target SNR
         4. Applying this correction to the signal data
 
-        The bandwidth update is performed by:
-        1. Finding frequency bins where the signal exceeds the noise floor by 3dB
-        2. Determining the frequency range of these bins
-        3. Widening this range by half the FFT frequency resolution
-        4. Updating the signal's bandwidth metadata with this new range
-
-        The signal data itself is not resampled - only the metadata is updated.
+        The signal data and ``snr_db`` metadata are updated in place. The
+        generator-selected canonical ``bandwidth`` is preserved.
     """
     # corrects snr of signal according to dataset
     snr_db = np.round(dataset.random_generator.uniform(new_signal.snr_db_min, new_signal.snr_db_max), 1)
@@ -1477,41 +1467,69 @@ def update_signal_snr_bandwidth(dataset: "TorchSigIterableDataset", new_signal: 
     signal_spectrogram_db += correction_db
     new_signal["snr_db"] = snr_db
 
-    # updating for better bounding box
+    return signal_spectrogram_db
+
+
+def estimate_occupied_bandwidth(
+    dataset: "TorchSigIterableDataset",
+    signal_spectrogram_db: np.ndarray,
+) -> float | None:
+    """Estimate a diagnostic threshold-span bandwidth from a spectrogram.
+
+    This estimate spans the first and last max-hold FFT bins more than 3 dB
+    above the configured noise floor. It is sensitive to sidelobes and isolated
+    spectral bins and is therefore not a 99%-power bandwidth. It must not be
+    used to replace a signal's configured canonical ``bandwidth``.
+
+    Args:
+        dataset: Dataset providing FFT and frequency-bound metadata.
+        signal_spectrogram_db: Signal spectrogram after SNR adjustment.
+
+    Returns:
+        Estimated threshold-span bandwidth in Hz, or ``None`` when no FFT bin
+        exceeds the threshold.
+    """
+    # Compute a max hold for bandwidth estimation.
     # Compute max hold for bandwidth estimation
     signal_max_fft_db = np.max(signal_spectrogram_db, axis=1)
     relative_threshold_db = 3
     bandwidth_estimation_threshold_db = dataset.noise_power_db + relative_threshold_db
     exceedance_indices = np.where(signal_max_fft_db > bandwidth_estimation_threshold_db)[0]
 
-    # Determine if bandwidth needs updating
-    update_bandwidth = False
     if len(exceedance_indices) == 1:
         # Single threshold exceedance - bandwidth equals 1 FFT bin width
         lower_edge_index = upper_edge_index = exceedance_indices[0]
-        update_bandwidth = True
     elif len(exceedance_indices) > 1:
         # Multiple exceedances - compute bandwidth
         lower_edge_index = exceedance_indices[0]
         upper_edge_index = exceedance_indices[-1]
-        update_bandwidth = True
+    else:
+        return None
 
-    if update_bandwidth:
-        # Create frequency vector for the FFT
-        f = np.linspace(-0.5, 0.5 - (1 / dataset.fft_size), dataset.fft_size) * dataset.sample_rate
+    f = np.linspace(-0.5, 0.5 - (1 / dataset.fft_size), dataset.fft_size) * dataset.sample_rate
+    upper_freq = f[upper_edge_index]
+    lower_freq = f[lower_edge_index]
 
-        # Determine estimated frequency bounds
-        upper_freq = f[upper_edge_index]
-        lower_freq = f[lower_edge_index]
+    widen_bandwidth_value = dataset.sample_rate / dataset.fft_size / 2
+    lower_freq = max(lower_freq - widen_bandwidth_value, dataset.frequency_min)
+    upper_freq = min(upper_freq + widen_bandwidth_value, dataset.frequency_max)
 
-        # Widen bandwidth by a small proportion
-        fft_frequency_resolution = dataset.sample_rate / dataset.fft_size
-        widen_bandwidth_value = fft_frequency_resolution / 2
-        lower_freq = max(lower_freq - widen_bandwidth_value, dataset.frequency_min)
-        upper_freq = min(upper_freq + widen_bandwidth_value, dataset.frequency_max)
+    return float(upper_freq - lower_freq)
 
-        # Compute 99% bandwidth
-        bandwidth99 = upper_freq - lower_freq
 
-        # Update metadata bandwidth (cannot resample tone signal)
-        new_signal["bandwidth"] = bandwidth99
+def update_signal_snr_bandwidth(dataset: "TorchSigIterableDataset", new_signal: "Signal") -> None:
+    """Adjust signal SNR and store a noncanonical bandwidth diagnostic.
+
+    This compatibility wrapper retains its existing public name while
+    separating SNR adjustment from occupied-bandwidth estimation. The estimate
+    is stored as ``estimated_occupied_bandwidth`` and never replaces the
+    generator-selected canonical ``bandwidth``.
+
+    Args:
+        dataset: Dataset metadata and random source used for adjustment.
+        new_signal: Signal to update in place.
+    """
+    signal_spectrogram_db = update_signal_snr(dataset, new_signal)
+    estimated_bandwidth = estimate_occupied_bandwidth(dataset, signal_spectrogram_db)
+    if estimated_bandwidth is not None:
+        new_signal["estimated_occupied_bandwidth"] = estimated_bandwidth
