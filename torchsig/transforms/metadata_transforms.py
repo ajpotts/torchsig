@@ -270,6 +270,13 @@ class YOLOLabel(MetadataTransform):
         Returns:
             The transformed signal with YOLO_label added.
         """
+        metadata = signal.get_full_metadata()
+        dataset_metadata = metadata.get("dataset_metadata", {})
+        signal.validate_frequency_interval(
+            frequency_min=metadata.get("frequency_min", dataset_metadata.get("frequency_min")),
+            frequency_max=metadata.get("frequency_max", dataset_metadata.get("frequency_max")),
+        )
+
         class_index = signal.class_index
         # normalized to width of sample
         width = signal.duration

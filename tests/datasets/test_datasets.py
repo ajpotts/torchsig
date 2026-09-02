@@ -949,6 +949,53 @@ def test_insert_component_signal_does_not_truncate_when_signal_fits():
     assert signal.duration_in_samples == 3
 
 
+def test_map_to_coordinates_uses_full_bandwidth_edges_once():
+    """Overlap geometry maps canonical lower and upper edges to FFT bins."""
+    metadata = _small_metadata()
+    metadata["fft_size"] = 8
+    dataset = TorchSigIterableDataset(
+        metadata=metadata,
+        signal_generators=[],
+        validate_init=False,
+    )
+    signal = Signal(
+        data=np.ones(8, dtype=np.complex64),
+        center_freq=0.0,
+        bandwidth=4.0,
+    )
+
+    rectangle = dataset._map_to_coordinates(signal, start_sample=0)
+
+    assert rectangle.coord_lower_left.y == pytest.approx(3.0)
+    assert rectangle.coord_upper_right.y == pytest.approx(5.0)
+
+
+@pytest.mark.parametrize(
+    ("first_center", "second_center", "expected_overlap"),
+    [(-2.0, 2.0, False), (-1.0, 1.0, True), (-0.5, 0.5, True)],
+)
+def test_overlap_detection_uses_canonical_frequency_intervals(
+    first_center,
+    second_center,
+    expected_overlap,
+):
+    """Separated, touching, and intersecting full-bandwidth intervals differ."""
+    metadata = _small_metadata()
+    metadata["fft_size"] = 16
+    dataset = TorchSigIterableDataset(
+        metadata=metadata,
+        signal_generators=[],
+        validate_init=False,
+    )
+    first = Signal(data=np.ones(16), center_freq=first_center, bandwidth=2.0)
+    second = Signal(data=np.ones(16), center_freq=second_center, bandwidth=2.0)
+
+    first_rectangle = dataset._map_to_coordinates(first, start_sample=0)
+    second_rectangle = dataset._map_to_coordinates(second, start_sample=0)
+
+    assert dataset._check_if_overlap(second_rectangle, [first_rectangle]) is expected_overlap
+
+
 def test_choose_start_sample_warns_when_signal_is_too_large():
     dataset = TorchSigIterableDataset(
         metadata=_small_metadata(),

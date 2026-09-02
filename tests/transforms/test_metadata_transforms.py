@@ -222,6 +222,35 @@ def test_yolo_label_apply_returns_component_signal(component_signal):
     assert transformed_component.yolo_label == pytest.approx((3, 0.5, 0.4, 0.5, 0.2))
 
 
+def test_yolo_label_uses_final_clipped_frequency_interval(component_signal):
+    component_signal["center_freq"] = 450.0
+    component_signal["bandwidth"] = 100.0
+    component_signal["dataset_metadata"] = {
+        "sample_rate": 1000.0,
+        "frequency_min": -500.0,
+        "frequency_max": 500.0,
+    }
+
+    transformed = YOLOLabel()(component_signal)
+
+    assert transformed.lower_freq == pytest.approx(400.0)
+    assert transformed.upper_freq == pytest.approx(500.0)
+    assert transformed.yolo_label == pytest.approx((3, 0.5, 0.05, 0.5, 0.1))
+
+
+def test_yolo_label_rejects_out_of_bounds_frequency_interval(component_signal):
+    component_signal["center_freq"] = 475.0
+    component_signal["bandwidth"] = 100.0
+    component_signal["dataset_metadata"] = {
+        "sample_rate": 1000.0,
+        "frequency_min": -500.0,
+        "frequency_max": 500.0,
+    }
+
+    with pytest.raises(ValueError, match="above frequency_max"):
+        YOLOLabel()(component_signal)
+
+
 def test_grouping_label_uses_exact_value_rules(parent_signal):
     parent_signal.component_signals[0]["class_name"] = "bpsk"
     transform = GroupingLabel(

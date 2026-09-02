@@ -833,7 +833,7 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         self._validate_generated_bandwidth(signal, generator)
         update_signal_snr_bandwidth(self, signal)
 
-        return frequency_shift_signal(
+        signal = frequency_shift_signal(
             signal,
             center_freq_min=self["signal_center_freq_min"],
             center_freq_max=self["signal_center_freq_max"],
@@ -842,6 +842,11 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
             frequency_min=self["frequency_min"],
             random_generator=self.random_generator,
         )
+        signal.validate_frequency_interval(
+            frequency_min=self["frequency_min"],
+            frequency_max=self["frequency_max"],
+        )
+        return signal
 
     @staticmethod
     def _validate_generated_bandwidth(
@@ -976,10 +981,10 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         # calculate start and stop time in terms of FFT number
         fft_start_time = np.round(start_sample / self["fft_size"])
         fft_stop_time = np.round((start_sample + len(new_signal.data)) / self["fft_size"])
-        # calculate bin position in FFT
+        # Calculate bin positions from the canonical full-bandwidth edges.
         fs = self["sample_rate"]
-        fft_start_bin_norm = ((new_signal.center_freq - new_signal.bandwidth) + (fs / 2)) / (fs / 2)
-        fft_stop_bin_norm = ((new_signal.center_freq + new_signal.bandwidth) + (fs / 2)) / (fs / 2)
+        fft_start_bin_norm = (new_signal.lower_freq + (fs / 2)) / fs
+        fft_stop_bin_norm = (new_signal.upper_freq + (fs / 2)) / fs
         fft_start_bin_index = np.round(fft_start_bin_norm * self["fft_size"])
         fft_stop_bin_index = np.round(fft_stop_bin_norm * self["fft_size"])
         # map the position into retangle coordinates
