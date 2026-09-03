@@ -41,6 +41,7 @@ You can also customise every parameter:
 # ----------------------------------------------------------------------
 # Imports
 # ----------------------------------------------------------------------
+import csv
 import json
 import os
 from math import gcd
@@ -59,10 +60,11 @@ from scipy.io import wavfile
 def _default_modulations() -> dict[str, np.ndarray]:
     """Return the three constellations used in the original script."""
     return {
-        "BPSK": np.array([1 + 0j, -1 + 0j]),                               # 2-PSK
+        "BPSK": np.array([1 + 0j, -1 + 0j]),  # 2-PSK
         "QPSK": np.array([1 + 1j, -1 + 1j, -1 - 1j, 1 - 1j]) / np.sqrt(2),  # 4-PSK
-        "8PSK": np.exp(1j * np.arange(8) * 2 * np.pi / 8),                # 8-PSK
+        "8PSK": np.exp(1j * np.arange(8) * 2 * np.pi / 8),  # 8-PSK
     }
+
 
 # ----------------------------------------------------------------------
 class IQDatasetGenerator:
@@ -165,8 +167,8 @@ class IQDatasetGenerator:
         # ------------------------------------------------------------------
         # 0) Determine how many bits each symbol carries for this modulation
         # ------------------------------------------------------------------
-        constel = self.modulations[mod_name]                     # np.ndarray of complex points
-        bits_per_symbol = int(np.ceil(np.log2(constel.size)))    # 1 for BPSK, 2 for QPSK, 3 for 8PSK …
+        constel = self.modulations[mod_name]  # np.ndarray of complex points
+        bits_per_symbol = int(np.ceil(np.log2(constel.size)))  # 1 for BPSK, 2 for QPSK, 3 for 8PSK …
 
         # ------------------------------------------------------------------
         # 1) deterministic random bits -- make the seed depend on (mod, snr)
@@ -174,7 +176,7 @@ class IQDatasetGenerator:
         # Using a distinct seed for each (mod, snr) pair gives a different
         # bit-stream while still being reproducible if the same arguments are
         # used again.
-        seed_for_this_call = self.seed + hash((mod_name, snr_db)) & 0xffffffff
+        seed_for_this_call = self.seed + hash((mod_name, snr_db)) & 0xFFFFFFFF
         np.random.seed(seed_for_this_call)
 
         # Number of *symbols* we need to fill the requested audio duration:
@@ -208,10 +210,10 @@ class IQDatasetGenerator:
         # 5) Resample 1 MS/s → audio_rate (reduce fraction to avoid GCD warning)
         # ------------------------------------------------------------------
         interp = self.audio_rate
-        decim  = self.base_rate
+        decim = self.base_rate
         g = gcd(interp, decim)
         interp //= g
-        decim  //= g
+        decim //= g
         resamp = filter.rational_resampler_ccc(
             interpolation=interp,
             decimation=decim,
@@ -232,7 +234,7 @@ class IQDatasetGenerator:
         # ------------------------------------------------------------------
         # 8) Trim to exactly the number of audio samples we need
         # ------------------------------------------------------------------
-        expected_len = int(self.audio_rate * self.duration_s)   # samples per channel
+        expected_len = int(self.audio_rate * self.duration_s)  # samples per channel
         head_i = blocks.head(gr.sizeof_float, expected_len)
         head_q = blocks.head(gr.sizeof_float, expected_len)
 
@@ -302,10 +304,7 @@ class IQDatasetGenerator:
             data_path = out_path
             meta_path = data_path.with_suffix(".sigmf-meta")
 
-            complex_iq = (
-                i_samples.astype(np.float32)
-                + 1j * q_samples.astype(np.float32)
-            ).astype(np.complex64)
+            complex_iq = (i_samples.astype(np.float32) + 1j * q_samples.astype(np.float32)).astype(np.complex64)
             complex_iq.tofile(data_path)
 
             sigmf_meta = {
@@ -313,9 +312,7 @@ class IQDatasetGenerator:
                     "core:datatype": "cf32_le",
                     "core:sample_rate": self.audio_rate,
                     "core:version": "1.0.0",
-                    "core:description": (
-                        "GNU Radio generated TorchSig-compatible IQ recording"
-                    ),
+                    "core:description": ("GNU Radio generated TorchSig-compatible IQ recording"),
                     "torchsig:label": mod_name,
                     "torchsig:modcod": self.modcod_map[mod_name],
                     "torchsig:snr_db": snr_db,
@@ -352,7 +349,7 @@ class IQDatasetGenerator:
         # Ensure the root folder exists
         self.root.mkdir(parents=True, exist_ok=True)
 
-        self.metadata_rows.clear()   # reset in case user calls “generate” twice
+        self.metadata_rows.clear()  # reset in case user calls “generate” twice
 
         global_idx = 0
 
@@ -375,12 +372,12 @@ class IQDatasetGenerator:
                 # Build a CSV row (the four mandatory columns + two optional)
                 # ------------------------------------------------------
                 row = [
-                    str(global_idx),                     # index (zero-based)
-                    mod_name,                            # label (human readable)
-                    str(self.modcod_map[mod_name]),      # integer modcod
-                    str(self.audio_rate),                # sample_rate (Hz)
-                    str(snr),                            # optional -- SNR in dB
-                    str(self.seed),                      # optional -- seed used
+                    str(global_idx),  # index (zero-based)
+                    mod_name,  # label (human readable)
+                    str(self.modcod_map[mod_name]),  # integer modcod
+                    str(self.audio_rate),  # sample_rate (Hz)
+                    str(snr),  # optional -- SNR in dB
+                    str(self.seed),  # optional -- seed used
                 ]
                 self.metadata_rows.append(row)
                 global_idx += 1
@@ -388,11 +385,12 @@ class IQDatasetGenerator:
         # ------------------------------------------------------------------
         # Write side-car files
         # ------------------------------------------------------------------
-        # 1) metadata.csv (no header)
+        # 1) metadata.csv (versioned header-based sidecar schema)
         csv_path = self.root / "metadata.csv"
         with csv_path.open("w", newline="") as f:
-            for row in self.metadata_rows:
-                f.write(",".join(row) + "\n")
+            writer = csv.writer(f)
+            writer.writerow(["index", "label", "modcod", "sample_rate", "snr_db", "seed"])
+            writer.writerows(self.metadata_rows)
 
         # 2) info.json (TorchSig expects the key “size”, not “dataset_size”)
         self.info = {
@@ -403,6 +401,7 @@ class IQDatasetGenerator:
             "sample_rate": self.audio_rate,
             "output_format": self.output_format,
             "datatype": "cf32_le" if self.output_format == "sigmf" else "float32_stereo",
+            "sidecar_schema_version": "1.0",
         }
         json_path = self.root / "info.json"
         with json_path.open("w") as f:
@@ -479,9 +478,7 @@ class IQDatasetGenerator:
         # overlay the ideal constellation for the requested modulation
         ideal = self._ideal_constellation(mod)
         if ideal is not None:
-            plt.scatter(ideal.real, ideal.imag,
-                        marker="x", s=80, c="red", linewidths=2,
-                        label=f"Ideal {mod}")
+            plt.scatter(ideal.real, ideal.imag, marker="x", s=80, c="red", linewidths=2, label=f"Ideal {mod}")
             plt.legend()
 
         plt.tight_layout()
@@ -545,6 +542,7 @@ def _load_iq_file(out_path: str | Path, sample_rate: int | None = None) -> tuple
 
     raise TypeError(f"Unsupported IQ file type: {out_path}")
 
+
 def plot_iq(out_path: str) -> None:
     """Show a short I-trace and the full IQ constellation.
 
@@ -562,7 +560,7 @@ def plot_iq(out_path: str) -> None:
     # 1) short I-trace (first ~2 ms)
     # --------------------------------------------------------------
     t = np.arange(len(i)) / sr
-    n_plot = int(0.002 * sr)          # ~2 ms
+    n_plot = int(0.002 * sr)  # ~2 ms
     plt.figure(figsize=(12, 4))
 
     plt.subplot(1, 2, 1)
@@ -593,13 +591,12 @@ def plot_iq(out_path: str) -> None:
             break
     if mod_guess:
         ideal = _default_modulations()[mod_guess]
-        plt.scatter(ideal.real, ideal.imag,
-                    marker="x", s=80, c="red", linewidths=2,
-                    label=f"Ideal {mod_guess}")
+        plt.scatter(ideal.real, ideal.imag, marker="x", s=80, c="red", linewidths=2, label=f"Ideal {mod_guess}")
         plt.legend()
 
     plt.tight_layout()
     plt.show()
+
 
 # ----------------------------------------------------------------------
 # If you run this file directly (e.g. ``python gnuradio_iq_dataset.py``)

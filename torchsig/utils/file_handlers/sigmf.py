@@ -57,14 +57,6 @@ class SigMFReader(MetadataReader):
 
         self.meta_files = {path.with_suffix(".sigmf-data"): path for path in self.root.rglob("*.sigmf-meta")}
 
-        csv_path = self.root / "metadata.csv"
-        if csv_path.exists():
-            with open(csv_path) as f:
-                rows = [line for line in f if line.strip()]
-            self.dataset_size = len(rows)
-            if hasattr(self, "metadata_rows"):
-                self.metadata_rows = rows
-
         self.sigmf_metadata = [self._load_sigmf_meta(path) for path in self.data_files]
         self.sample_dtype = self._resolve_dtype()
         self.numpy_dtype = self._numpy_dtype(self.sample_dtype)
@@ -99,7 +91,8 @@ class SigMFReader(MetadataReader):
             cum += elements_in_file
 
         self.total_elements = cum
-        self.dataset_size = max(self.dataset_size, self.total_elements)
+        if self.dataset_size != self.total_elements:
+            raise ValueError(f"Metadata contains {self.dataset_size} elements, but SigMF files contain {self.total_elements}.")
 
     def read(self, idx: int) -> Signal:
         """Read one dataset element by global element index."""

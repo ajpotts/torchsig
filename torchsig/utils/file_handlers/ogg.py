@@ -27,9 +27,9 @@ class OGGReader(MetadataReader):
       the *right* channel as the **Q** (quadrature) component, so the audio
       stream is effectively a *pair of interleaved real-valued tracks*.
 
-    * ``metadata.csv`` - one row **per element** (not per frame).  The row
-      supplies the label, modcod, sample-rate, etc.  No header is expected
-      because :class:`OGGReader` supplies the field names internally.
+    * ``metadata.csv`` - one row **per element** (not per frame), preferably
+      using the versioned header-based sidecar schema. Legacy headerless rows
+      remain readable.
 
     * Optional ``info.json`` - must contain the keys ``num_iq_samples`` and
       ``elements_per_file`` (or they can be inferred from the first OGG file).

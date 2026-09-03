@@ -10,7 +10,6 @@ import pytest
 import soundfile as sf
 
 from torchsig.signals.signal_types import Signal
-from torchsig.utils.file_handlers.metadata_reader import MetadataIndexError
 from torchsig.utils.file_handlers.ogg import OGGReader
 
 
@@ -412,10 +411,8 @@ def test_read_out_of_range(dataset_dir: Path, bad_idx, monkeypatch):
     assert f"index {bad_idx}" in str(excinfo.value)
 
 
-def test_read_row_out_of_range(dataset_dir: Path, monkeypatch):
-    """When the global frame index points to a valid audio frame but there is no
-    matching CSV row, ``load_row`` must raise ``MetadataIndexError``.
-    """
+def test_init_rejects_missing_metadata_rows(dataset_dir: Path, monkeypatch):
+    """Reject a metadata row count that contradicts ``info.json``."""
     # --------------------------------------------------------------
     # 1️⃣  Keep only one CSV row (index 0). The second row will be missing.
     # --------------------------------------------------------------
@@ -448,23 +445,11 @@ def test_read_row_out_of_range(dataset_dir: Path, monkeypatch):
     )
 
     # --------------------------------------------------------------
-    # 5️⃣  Build the reader and manually set the dataset size (so we do
-    #     not need a real info.json at construction time).
+    # 5️⃣  Construction rejects the contradiction before reads can return
+    #     waveform data without corresponding metadata.
     # --------------------------------------------------------------
-    reader = OGGReader(dataset_dir)
-    reader.dataset_size = 4  # override -- we already know the size
-
-    # --------------------------------------------------------------
-    # 6️⃣  The first element (index 0) works because a CSV row exists.
-    # --------------------------------------------------------------
-    _ = reader.read(0)
-
-    # --------------------------------------------------------------
-    # 7️⃣  Index 2 lives in the *second* OGG file, but there is no CSV row
-    #     for element 1 → ``MetadataIndexError`` must be raised.
-    # --------------------------------------------------------------
-    with pytest.raises(MetadataIndexError):
-        reader.read(2)
+    with pytest.raises(ValueError, match=r"reports 4 elements.*contains 1 rows"):
+        OGGReader(dataset_dir)
 
 
 def test_root_accepts_str_and_path(dataset_dir: Path, monkeypatch):
@@ -547,6 +532,7 @@ def test_infer_both_missing(empty_ogg_dir: Path, monkeypatch):
         # NOTE: *no* ``num_iq_samples`` and *no* ``elements_per_file``
     }
     (empty_ogg_dir / "info.json").write_text(json.dumps(info), encoding="utf-8")
+    write_csv(empty_ogg_dir, [(idx, "FOO", 0, 48_000.0) for idx in range(info["size"])])
 
     # --------------------------------------------------------------
     # 2️⃣  Mock ``sf.info`` so that the first OGG file reports a known
@@ -604,6 +590,7 @@ def test_infer_num_iq_samples_only(empty_ogg_dir: Path, monkeypatch):
         "elements_per_file": 2,  # explicit -- we *do not* give ``num_iq_samples``
     }
     (empty_ogg_dir / "info.json").write_text(json.dumps(info), encoding="utf-8")
+    write_csv(empty_ogg_dir, [(idx, "FOO", 0, 48_000.0) for idx in range(info["size"])])
 
     # --------------------------------------------------------------
     # 2️⃣  Mock ``sf.info`` -- each file now reports 8 frames.

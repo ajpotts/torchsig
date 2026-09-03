@@ -26,9 +26,9 @@ class WAVReader(MetadataReader):
       interprets the *left* channel as the **I** (in-phase) component and
       the *right* channel as the **Q** (quadrature) component, so the audio
       stream is effectively a *pair of interleaved real-valued tracks*.
-    * ``metadata.csv`` - one row **per element** (not per frame).  The row
-      supplies the label, modcod, sample-rate, etc.  No header is expected
-      because :class:`WAVReader` supplies the field names internally.
+    * ``metadata.csv`` - one row **per element** (not per frame), preferably
+      using the versioned header-based sidecar schema. Legacy headerless rows
+      remain readable.
     * Optional ``info.json`` - must contain the keys ``num_iq_samples`` and
       ``elements_per_file`` (or they can be inferred from the first WAV file).
       The JSON also holds the total dataset size, class list, sample-rate,
@@ -52,19 +52,6 @@ class WAVReader(MetadataReader):
         self.wav_files = sorted(list(self.root.rglob("*.wav")), key=lambda p: str(p))
         if not self.wav_files:
             raise FileNotFoundError(f"No .wav files found in {self.root}")
-
-        # ------------------------------------------------------------------
-        # Robustly recalculate dataset_size from the CSV
-        # ------------------------------------------------------------------
-        csv_path = self.root / "metadata.csv"
-        if csv_path.exists():
-            with open(csv_path) as f:
-                # Count only non-empty lines to avoid trailing newline errors
-                rows = [line for line in f if line.strip()]
-                self.dataset_size = len(rows)
-                # Also update the base class rows if it's using a different list
-                if hasattr(self, "metadata_rows"):
-                    self.metadata_rows = rows
 
         # ------------------------------------------------------------------
         # Inference of layout
@@ -93,10 +80,8 @@ class WAVReader(MetadataReader):
             cum += self.elements_per_file
         self.total_elements = cum
 
-        # FINAL SANITY CHECK:
-        # If the CSV was too short, we force dataset_size to match the files
-        # so that reader.read(idx) doesn't throw IndexError.
-        self.dataset_size = max(self.dataset_size, self.total_elements)
+        if self.dataset_size != self.total_elements:
+            raise ValueError(f"Metadata contains {self.dataset_size} elements, but WAV layout implies {self.total_elements}.")
 
     def read(self, idx: int) -> Signal:
         if idx < 0 or idx >= self.dataset_size:
