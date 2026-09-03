@@ -1,0 +1,21 @@
+Summary
+Make parent requirements explicit and prevent unbounded recursion in ordinary metadata operations.
+Problem
+The class documentation says that parent should be another HierarchicalMetadataObject, but the constructor does not enforce that requirement. Methods such as get_full_metadata() and __getitem__() recursively use the parent and can recurse indefinitely if the hierarchy contains a cycle.
+Acceptance criteria
+
+
+        
+      Decide whether invalid parent types should be rejected during initialization or treated as hierarchy termination.
+
+        
+      Detect parent cycles in ordinary inherited lookup and full-metadata collection.
+
+        
+      Raise a clear, documented exception when a cycle is encountered.
+
+        
+      Preserve existing behavior for valid acyclic hierarchies.
+
+        
+      Add tests for invalid parent types and parent cycles.
