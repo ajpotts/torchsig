@@ -543,7 +543,7 @@ class PackedHDF5Writer(FileWriter):
             def attempt_rollback(target: str, operation: Callable[[], None]) -> None:
                 try:
                     operation()
-                except Exception as rollback_error:  # noqa: BLE001  # pragma: no cover
+                except Exception as rollback_error:  # pragma: no cover
                     rollback_errors.append(f"{target}: {rollback_error}")
 
             for name, dataset in datasets.items():

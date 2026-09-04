@@ -561,7 +561,7 @@ class GroupingLabel(MetadataTransform):
 
         return expression.body
 
-    def _evaluate_formula(  # noqa: PLR0911 - one branch per allowed AST node
+    def _evaluate_formula(
         self,
         node: ast.AST,
         value: Any,

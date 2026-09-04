@@ -486,7 +486,7 @@ def test_metadata_debug_state_survives_pickle_round_trip():
         value_repr_limit=50,
     )
 
-    restored = pickle.loads(pickle.dumps(obj))  # noqa: S301
+    restored = pickle.loads(pickle.dumps(obj))
 
     assert restored.metadata_debug_enabled is True
     assert restored.metadata_debug_config == MetadataDebugConfig(

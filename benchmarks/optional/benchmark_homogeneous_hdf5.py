@@ -282,7 +282,7 @@ def _cold_reader_open_peak(
     root: Path,
 ) -> int:
     if reader_class is HomogeneousHDF5Reader:
-        homogeneous_module._VALIDATED_FILES.pop(str(root / "data.h5"), None)  # noqa: SLF001
+        homogeneous_module._VALIDATED_FILES.pop(str(root / "data.h5"), None)
     tracemalloc.start()
     try:
         _open_reader(reader_class, root)
@@ -337,7 +337,7 @@ def _first_worker_batch(
         return (len(batch), *batch[0].shape)
     finally:
         if num_workers:
-            iterator._shutdown_workers()  # noqa: SLF001
+            iterator._shutdown_workers()
 
 
 def _worker_epoch(

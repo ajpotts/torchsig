@@ -167,7 +167,7 @@ class GeoDatasetWriter(FileWriter):
             return value.item()
         return value
 
-    def write(self, batch_idx: int, data: Signal | list[Signal]) -> None:  # noqa: ARG002
+    def write(self, batch_idx: int, data: Signal | list[Signal]) -> None:
         """Write a batch of signals to disk.
 
         Args:

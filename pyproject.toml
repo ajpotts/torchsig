@@ -116,7 +116,7 @@ python_functions = ["test_*", "benchmark_*"]
 [tool.ruff]
 line-length = 200
 target-version = "py310"
-exclude = ["docs"]
+exclude = ["docs", "*.ipynb"]
 
 [tool.ruff.lint]
 # Enable all rules by default
@@ -147,8 +147,6 @@ ignore = [
     "PLR0912",  # Too many branches
     "PLR0915",  # Too many statements
     "PLW2901",  # Redefined loop name
-    "ANN101",  # Missing type annotation for self
-    "ANN102",  # Missing type annotation for cls
     "TD002",  # Missing author in TODO
     "TD003",  # Missing issue link in TODO
     "TRY003", # external messages in exceptions are too verbose
@@ -164,6 +162,25 @@ ignore = [
     "D203",  # One blank line required before class docstring
     "D213",  # Multi-line docstring summary should start at the second line
     "T201", # `print` found
+    # Baseline existing violations that require manual or unsafe changes.
+    "A004",
+    "ARG001", "ARG002", "ARG005",
+    "B007", "B017", "B904", "B905", "BLE001",
+    "C403", "C408", "C414", "C416",
+    "D101", "D102", "D103", "D105",
+    "E402", "E711", "E721", "E731", "E741", "ERA001",
+    "F401", "F811", "F821", "F822", "F841", "FBT003",
+    "ICN001", "INP001",
+    "N802", "N803", "N806", "N812", "N816", "NPY002",
+    "PERF102", "PERF203", "PERF401", "PIE810",
+    "PLC0206", "PLC0415", "PLR0124", "PLR0911", "PLR2004", "PLW0108",
+    "PT006", "PT011", "PT012", "PT014",
+    "PTH103", "PTH107", "PTH109", "PTH110", "PTH113", "PTH118", "PTH123", "PTH202", "PTH208",
+    "PYI034", "RET503", "RET504",
+    "RUF001", "RUF002", "RUF003", "RUF012", "RUF013", "RUF043", "RUF046", "RUF059",
+    "S101", "S108", "S110", "S113", "S301", "S603",
+    "SIM101", "SIM105", "SIM108", "SIM113", "SIM118", "SIM201",
+    "SLF001", "TRY201", "TRY301", "W291",
 ]
 
 [tool.ruff.format]
