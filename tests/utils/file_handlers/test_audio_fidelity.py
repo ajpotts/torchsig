@@ -139,7 +139,7 @@ def test_read_rejects_truncation_and_nonfinite_values(tmp_path: Path, monkeypatc
     _write_manifest(tmp_path, [_row(0, path, 48_000, 2)])
     reader = reader_class(tmp_path)
     monkeypatch.setattr(
-        reader._audio_handles,  # noqa: SLF001 - inject malformed decoder output
+        reader._audio_handles,
         "read",
         lambda _path, _start, _frames: returned,
     )

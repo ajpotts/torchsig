@@ -615,14 +615,14 @@ class TestGeoDatasetReader:
         """Create sample .yaml and .dat files for testing."""
         return create_sample_files(temp_dir)
 
-    def test_read_single_signal(self, temp_dir, sample_files):  # noqa: ARG002
+    def test_read_single_signal(self, temp_dir, sample_files):
         """Test reading a single signal."""
         reader = GeoDatasetReader(root=temp_dir)
         signal = reader.read(0)
         assert isinstance(signal, Signal)
         assert len(signal.data) == 4
 
-    def test_read_metadata(self, temp_dir, sample_files):  # noqa: ARG002
+    def test_read_metadata(self, temp_dir, sample_files):
         """Test reading metadata from YAML."""
         reader = GeoDatasetReader(root=temp_dir)
         signal = reader.read(0)
@@ -631,7 +631,7 @@ class TestGeoDatasetReader:
         assert signal["rx_alt"] == pytest.approx(10.0)
         assert signal["sample_rate"] == pytest.approx(1000000.0)
 
-    def test_read_iq_data(self, temp_dir, sample_files):  # noqa: ARG002
+    def test_read_iq_data(self, temp_dir, sample_files):
         """Test reading IQ data from DAT file."""
         reader = GeoDatasetReader(root=temp_dir)
         signal = reader.read(0)
@@ -651,7 +651,7 @@ class TestGeoDatasetReader:
             assert isinstance(signal, Signal)
             assert len(signal.data) == 4
 
-    def test_len(self, temp_dir, sample_files):  # noqa: ARG002
+    def test_len(self, temp_dir, sample_files):
         """Test __len__ method."""
         reader = GeoDatasetReader(root=temp_dir)
         assert len(reader) == 1

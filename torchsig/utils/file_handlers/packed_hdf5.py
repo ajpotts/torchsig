@@ -113,7 +113,7 @@ def _validate_physical_schema(file: h5py.File, schema: PackedHDF5Schema) -> None
 
     data_group = file[schema.datasets["data"].path]
     if not isinstance(data_group, h5py.Group):
-        raise ValueError(  # noqa: TRY004
+        raise ValueError(
             "Invalid packed HDF5 file: data path must be a group"
         )
 
@@ -543,7 +543,7 @@ class PackedHDF5Writer(FileWriter):
             def attempt_rollback(target: str, operation: Callable[[], None]) -> None:
                 try:
                     operation()
-                except Exception as rollback_error:  # noqa: BLE001  # pragma: no cover
+                except Exception as rollback_error:  # pragma: no cover
                     rollback_errors.append(f"{target}: {rollback_error}")
 
             for name, dataset in datasets.items():

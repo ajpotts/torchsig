@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 __all__ = ["decode_metadata", "encode_metadata"]
 
 
-def _pack_value(value: Any) -> Any:  # noqa: PLR0911
+def _pack_value(value: Any) -> Any:
     if isinstance(value, np.ndarray):
         buffer = BytesIO()
         np.save(buffer, value, allow_pickle=False)
@@ -56,7 +56,7 @@ def _pack_value(value: Any) -> Any:  # noqa: PLR0911
     raise TypeError(f"Unsupported TorchSig metadata type: {type(value).__name__}")
 
 
-def _unpack_value(value: Any) -> Any:  # noqa: PLR0911
+def _unpack_value(value: Any) -> Any:
     if isinstance(value, list):
         return [_unpack_value(item) for item in value]
     if not isinstance(value, dict):
@@ -82,7 +82,7 @@ def _unpack_value(value: Any) -> Any:  # noqa: PLR0911
 def encode_metadata(obj: HierarchicalMetadataObject) -> str:
     """Encode an object's local metadata as deterministic TorchSig JSON."""
     # HierarchicalMetadataObject is not iterable; its keys() API is required.
-    metadata = {key: obj[key] for key in obj.keys()}  # noqa: SIM118
+    metadata = {key: obj[key] for key in obj.keys()}
     return json.dumps(
         _pack_value(metadata),
         separators=(",", ":"),

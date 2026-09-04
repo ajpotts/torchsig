@@ -72,7 +72,7 @@ def _encode_flat_metadata(signal: Signal) -> str:
         current = current.parent
     values = {}
     for item in reversed(chain):
-        values.update({key: item[key] for key in item.keys()})  # noqa: SIM118
+        values.update({key: item[key] for key in item.keys()})
     metadata = HierarchicalMetadataObject(
         metadata=values,
     )
