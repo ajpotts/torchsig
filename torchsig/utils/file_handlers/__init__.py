@@ -10,8 +10,8 @@ from .homogeneous_hdf5 import (
 from .metadata_reader import MetadataIndexError, MetadataReader
 from .npy import NPYReader
 from .ogg import OGGReader
-from .sigmf import SigMFReader
 from .packed_hdf5 import PackedHDF5Reader, PackedHDF5Writer
+from .sigmf import SigMFReader
 from .wav import WAVReader
 
 __all__ = [
@@ -27,9 +27,9 @@ __all__ = [
     "MetadataReader",
     "NPYReader",
     "OGGReader",
-    "SigMFReader",
     "PackedHDF5Reader",
     "PackedHDF5Writer",
+    "SigMFReader",
     "WAVReader",
     "base_handler",
     "hdf5",

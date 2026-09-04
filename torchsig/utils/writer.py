@@ -15,13 +15,13 @@ from torch.utils.data._utils.collate import default_collate as torch_default_col
 from tqdm.auto import tqdm
 
 from torchsig.utils.file_handlers.hdf5 import HDF5Reader, HDF5Writer
-from torchsig.utils.file_handlers.packed_hdf5 import (
-    PackedHDF5Reader,
-    PackedHDF5Writer,
-)
 from torchsig.utils.file_handlers.homogeneous_hdf5 import (
     HomogeneousHDF5Reader,
     HomogeneousHDF5Writer,
+)
+from torchsig.utils.file_handlers.packed_hdf5 import (
+    PackedHDF5Reader,
+    PackedHDF5Writer,
 )
 
 if TYPE_CHECKING:

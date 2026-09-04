@@ -19,7 +19,6 @@ import pytest
 import yaml
 
 from torchsig.datasets.datasets import TorchSigIterableDataset
-
 from torchsig.geo.datasets import Receiver, TorchSigGeoDataset, Transmitter
 from torchsig.geo.types import GeoPoint
 from torchsig.geo.utils.file_handler import (
@@ -28,9 +27,7 @@ from torchsig.geo.utils.file_handler import (
     GeoDatasetWriter,
 )
 from torchsig.signals.signal_types import Signal
-from torchsig.utils.abstractions import MetadataAttributeError
 from torchsig.utils.defaults import TorchSigDefaults
-
 
 # Helper functions moved from file_handler.py since they're only used in tests
 DATA_TYPE_TO_NP_DTYPE = {
@@ -1030,9 +1027,8 @@ class TestGeoDatasetWriterValidation:
             data_type="int16",
         )
 
-        with writer:
-            with pytest.raises(ValueError, match=r"outside \[-1, 1\]"):
-                writer.write(0, signal)
+        with writer, pytest.raises(ValueError, match=r"outside \[-1, 1\]"):
+            writer.write(0, signal)
 
         assert list(tmp_path.glob("*.yaml")) == []
         assert list(tmp_path.glob("*.dat")) == []
@@ -1060,9 +1056,8 @@ class TestGeoDatasetWriterValidation:
             data_type="int16",
         )
 
-        with writer:
-            with pytest.raises(ValueError, match="finite"):
-                writer.write(0, signal)
+        with writer, pytest.raises(ValueError, match="finite"):
+            writer.write(0, signal)
 
         assert list(tmp_path.glob("*.yaml")) == []
         assert list(tmp_path.glob("*.dat")) == []
@@ -1085,9 +1080,8 @@ class TestGeoDatasetWriterValidation:
         with pytest.raises(
             FileExistsError,
             match="output directory.*not empty",
-        ):
-            with replacement:
-                pass
+        ), replacement:
+            pass
 
         # The first dataset must remain intact.
         assert (tmp_path / "0.yaml").exists()

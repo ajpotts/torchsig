@@ -14,11 +14,11 @@ The main classes are:
 
 from __future__ import annotations
 
+import hashlib
 import warnings
 from collections import Counter
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Union
-import hashlib
 
 import numpy as np
 from torch.utils.data import IterableDataset

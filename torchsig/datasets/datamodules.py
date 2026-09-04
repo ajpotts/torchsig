@@ -30,13 +30,13 @@ from torchsig.transforms.transforms import ComplexTo2D, Spectrogram
 from torchsig.utils.data_loading import WorkerSeedingDataLoader
 from torchsig.utils.defaults import TorchSigDefaults
 from torchsig.utils.file_handlers.hdf5 import HDF5Reader, HDF5Writer
-from torchsig.utils.file_handlers.packed_hdf5 import (
-    PackedHDF5Reader,
-    PackedHDF5Writer,
-)
 from torchsig.utils.file_handlers.homogeneous_hdf5 import (
     HomogeneousHDF5Reader,
     HomogeneousHDF5Writer,
+)
+from torchsig.utils.file_handlers.packed_hdf5 import (
+    PackedHDF5Reader,
+    PackedHDF5Writer,
 )
 from torchsig.utils.writer import DatasetCreator, identity_collate_fn
 from torchsig.utils.yaml import load_config_from_yaml
@@ -101,7 +101,7 @@ def _validate_file_writer_kwargs(file_writer, options):
         raise TypeError("file_writer_kwargs must be a dictionary")
     result = dict(options)
     try:
-        inspect.signature(file_writer).bind_partial(root=Path("."), **result)
+        inspect.signature(file_writer).bind_partial(root=Path(), **result)
     except ValueError:
         return result
     except TypeError as error:

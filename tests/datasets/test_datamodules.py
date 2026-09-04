@@ -8,26 +8,26 @@ import textwrap
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import h5py
 import numpy as np
 import pytest
 import torch
 from torch.utils.data import DataLoader
-import h5py
 
 from torchsig.datasets.datamodules import (
     SplitTorchSigDataModule,
     TorchSigDataModule,
 )
 from torchsig.datasets.datasets import TorchSigDatasetConfig
-from torchsig.utils.defaults import TorchSigDefaults
 from torchsig.transforms.transforms import Spectrogram
+from torchsig.utils.defaults import TorchSigDefaults
 from torchsig.utils.file_handlers import (
-    PackedHDF5Reader,
-    PackedHDF5Writer,
     HDF5Reader,
     HDF5Writer,
     HomogeneousHDF5Reader,
     HomogeneousHDF5Writer,
+    PackedHDF5Reader,
+    PackedHDF5Writer,
 )
 from torchsig.utils.writer import identity_collate_fn
 
