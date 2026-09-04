@@ -12,6 +12,7 @@ from torchsig.utils.abstractions import (
     MetadataAttributeError,
     MetadataDebugConfig,
     MetadataDebugStatistics,
+    MetadataParentCycleError,
     MetadataResolution,
 )
 
@@ -47,6 +48,15 @@ def test_initialization_without_metadata_creates_empty_metadata():
     assert dict(obj.keys()) == {}
     assert obj["metadata"] == {}
     assert obj.rng_seed == 123
+
+
+@pytest.mark.parametrize("parent", [object(), "parent", 1])
+def test_initialization_rejects_invalid_parent_type(parent):
+    with pytest.raises(
+        TypeError,
+        match="parent must be a HierarchicalMetadataObject or None",
+    ):
+        HierarchicalMetadataObject(parent=parent)
 
 
 def test_initialization_copies_metadata_values():
@@ -236,6 +246,24 @@ def test_get_full_metadata_returns_new_dictionary():
     full_metadata["field"] = "modified"
 
     assert obj["field"] == "original"
+
+
+def test_getitem_raises_clear_error_for_parent_cycle():
+    parent = HierarchicalMetadataObject()
+    child = HierarchicalMetadataObject(parent=parent)
+    parent.parent = child
+
+    with pytest.raises(MetadataParentCycleError, match="cycle detected.*missing"):
+        child["missing"]
+
+
+def test_get_full_metadata_raises_clear_error_for_parent_cycle():
+    parent = HierarchicalMetadataObject(metadata={"parent": 1})
+    child = HierarchicalMetadataObject(parent=parent, metadata={"child": 2})
+    parent.parent = child
+
+    with pytest.raises(MetadataParentCycleError, match="cycle detected"):
+        child.get_full_metadata()
 
 
 def test_explain_metadata_reports_local_key():

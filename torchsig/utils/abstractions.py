@@ -19,6 +19,7 @@ __all__ = [
     "MetadataAttributeError",
     "MetadataDebugConfig",
     "MetadataDebugStatistics",
+    "MetadataParentCycleError",
     "MetadataResolution",
 ]
 
@@ -73,13 +74,20 @@ class MetadataAttributeError(AttributeError):
         super().__init__(message, **kwargs)
 
 
+class MetadataParentCycleError(RuntimeError):
+    """Raised when metadata traversal encounters a cycle in the parent hierarchy."""
+
+
 class HierarchicalMetadataObject(MetadataDebugMixin, Seedable):
     """A class for representing objects which have metadata in a hierarchical relationship.
 
     Metadata can be accessed directly (e.g., obj["some_field"]), or through the metadata field (e.g., obj.metadata["some_field"]).
     Metadata fields can be treated as class fields for access; i.e., obj.some_field is equivalent to obj["some_field"] or obj.metadata["some_field"] as long as some_field is not already a class field of obj.
     Metadata fields are inherited in a parent/child relationship such that if parent.metadata = {"field_1":4,"field_2":5}, and child.metadata = {"field_2":6} then child.field_1==4 and child.field_2==6.
-    The parent of a HierarchicalMetadataObject (as defined in the Seedable class) should always be another HierarchicalMetadataObject.
+    The parent of a HierarchicalMetadataObject (as defined in the Seedable
+    class) must be another HierarchicalMetadataObject or ``None``. Metadata
+    traversal raises :class:`MetadataParentCycleError` if the parent hierarchy
+    contains a cycle.
 
     Attributes:
         _metadata: Dictionary containing the object's metadata.
@@ -102,7 +110,17 @@ class HierarchicalMetadataObject(MetadataDebugMixin, Seedable):
 
         Note:
             This will override fields in the object passed in with arguments directly given to the generator; useful for making multiple similar but not identical objects.
+
+        Raises:
+            TypeError: If ``parent`` is not a HierarchicalMetadataObject or
+                ``None``.
         """
+        if parent is not None and not isinstance(parent, HierarchicalMetadataObject):
+            raise TypeError(
+                "parent must be a HierarchicalMetadataObject or None, "
+                f"not {type(parent).__name__}"
+            )
+
         self._initialize_metadata_debug()
         self._metadata = {}
         Seedable.__init__(self, seed=seed, parent=parent)
@@ -120,18 +138,33 @@ class HierarchicalMetadataObject(MetadataDebugMixin, Seedable):
         Returns:
             Dictionary containing all metadata from parent and child, with child values overriding parent values in case of conflicts.
 
+        Raises:
+            MetadataParentCycleError: If the parent hierarchy contains a cycle.
+
         Example:
             >>> parent = HierarchicalMetadataObject(metadata={"field_1": 4, "field_2": 5})
             >>> child = HierarchicalMetadataObject(parent=parent, metadata={"field_2": 6})
             >>> child.get_full_metadata()
             {'field_1': 4, 'field_2': 6}
         """
+        hierarchy = []
+        visited: set[int] = set()
+        current: HierarchicalMetadataObject | None = self
+
+        while current is not None:
+            current_id = id(current)
+            if current_id in visited:
+                raise MetadataParentCycleError(
+                    "cycle detected in HierarchicalMetadataObject parent hierarchy"
+                )
+            visited.add(current_id)
+            hierarchy.append(current)
+            current = current.parent
+
         full_metadata = {}
-        if self.parent is not None:
-            for key in self.parent.get_full_metadata():
-                full_metadata[key] = self.parent[key]
-        for key in self.keys():
-            full_metadata[key] = self[key]
+        for metadata_object in reversed(hierarchy):
+            for key in metadata_object.keys():
+                full_metadata[key] = metadata_object[key]
         return full_metadata
 
     def explain_metadata(self, key: str) -> MetadataResolution:
@@ -280,6 +313,8 @@ class HierarchicalMetadataObject(MetadataDebugMixin, Seedable):
         Raises:
             KeyError: If trying to access the _metadata field directly.
             MetadataAttributeError: If the key is not found in the metadata or parent metadata.
+            MetadataParentCycleError: If inherited lookup encounters a parent
+                cycle before resolving the key.
 
         Example:
             >>> obj = HierarchicalMetadataObject(metadata={"key": "value"})
@@ -296,12 +331,22 @@ class HierarchicalMetadataObject(MetadataDebugMixin, Seedable):
         if key == "_metadata":
             raise KeyError("unknown bug occured for:" + str(self.__class__.__name__) + "  ---   " + str(self.__dict__.keys()) + "; check metadata field names?")
 
-        if key == "metadata":  # TODO: reconsider this; workaround to make getattr play nice
-            return self._metadata.copy()
-        if key in self._metadata:
-            return self._metadata[key]
-        if self.parent is not None:
-            return self.parent[key]
+        current = self
+        visited: set[int] = set()
+        while current is not None:
+            current_id = id(current)
+            if current_id in visited:
+                raise MetadataParentCycleError(
+                    "cycle detected in HierarchicalMetadataObject parent hierarchy "
+                    f"while looking up {key!r}"
+                )
+            visited.add(current_id)
+
+            if key == "metadata":  # TODO: reconsider this; workaround to make getattr play nice
+                return current._metadata.copy()
+            if key in current._metadata:
+                return current._metadata[key]
+            current = current.parent
         raise MetadataAttributeError("key: '" + str(key) + "' could not be found in metadata")
 
     def __setitem__(self, key: str, value: Any) -> None:
