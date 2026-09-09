@@ -8,6 +8,8 @@ from torchsig.utils.dsp import (
     upconversion_anti_aliasing_filter,
 )
 
+__all__ = ["dataset_yaml_name", "frequency_shift_signal", "save_type", "writer_yaml_name"]
+
 # name of yaml file where dataset information will be written
 dataset_yaml_name = "create_dataset_info.yaml"
 # name of yaml file where dataset writing information will be written
@@ -23,7 +25,13 @@ def frequency_shift_signal(
     frequency_min: float,
     random_generator: np.random.Generator | None = None,
 ) -> Signal:
-    """Randomly shifts the frequency of a signal to a new center frequency and applies aliasing filters if necessary.
+    """Shift a signal in frequency and clip any out-of-band interval.
+
+    ``center_freq`` and the full two-sided ``bandwidth`` are the canonical
+    frequency metadata. If the shifted interval exceeds a dataset frequency
+    limit, the anti-aliasing filter returns the retained interval's center and
+    bandwidth. Both canonical fields are updated so the derived lower and upper
+    edges describe the filtered data and remain within the dataset limits.
 
     Args:
         signal (Signal): The signal object to be frequency shifted.
@@ -58,15 +66,13 @@ def frequency_shift_signal(
         # wrapped around -fs/2 or fs/2. additionally, due to the filtering the
         # bandwidth changed bandwidth, and therefore changed the center frequency,
         # so update the two metadata fields accordingly
-        signal.data, signal["center_freq"], signal["bandwidth"] = (
-            upconversion_anti_aliasing_filter(
-                signal.data,
-                signal["center_freq"],
-                signal["bandwidth"],
-                sample_rate,
-                frequency_max,
-                frequency_min,
-            )
+        signal.data, signal["center_freq"], signal["bandwidth"] = upconversion_anti_aliasing_filter(
+            signal.data,
+            signal["center_freq"],
+            signal["bandwidth"],
+            sample_rate,
+            frequency_max,
+            frequency_min,
         )
     # do nothing
 
