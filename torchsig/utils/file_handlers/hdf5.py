@@ -1,6 +1,11 @@
-"""HDF5 File Handler for TorchSig datasets.
+"""Legacy object-per-record HDF5 handlers for TorchSig datasets.
 
-High-performance HDF5 storage with optimized compression and chunking.
+This module preserves TorchSig's original HDF5 layout for existing datasets.
+For newly created datasets, use
+:class:`~torchsig.utils.file_handlers.packed_hdf5.PackedHDF5Writer` when
+top-level array shapes or dtypes may vary, or
+:class:`~torchsig.utils.file_handlers.homogeneous_hdf5.HomogeneousHDF5Writer`
+when they are uniform.
 """
 
 from __future__ import annotations
@@ -14,27 +19,41 @@ import h5py
 # Third Party
 import numpy as np
 
-from torchsig import __version__ as torchsig_version
-
-# TorchSig
 from torchsig.signals.signal_types import Signal
 from torchsig.utils.abstractions import HierarchicalMetadataObject
-from torchsig.utils.file_handlers import BaseFileHandler, FileReader, FileWriter
+
+# TorchSig
+from torchsig.utils.dsp import torchsig_cache_version
+from torchsig.utils.file_handlers.base_handler import BaseFileHandler, FileReader, FileWriter
+
+__all__ = [
+    "HDF5FileHandler",
+    "HDF5Reader",
+    "HDF5Writer",
+    "fill_object_metadata_from_group_and_id",
+    "handle_bytes_as_string",
+    "load_signal_from_group_by_id",
+    "load_signal_from_group_by_index",
+    "load_value_from_group",
+    "populate_hdf5_group_with_component_signals",
+    "populate_hdf5_group_with_metadata",
+    "populate_hdf5_group_with_signal",
+    "populate_hdf5_group_with_signal_data",
+    "populate_hdf5_group_with_signals",
+]
 
 
 def _hdf5_key(obj) -> str:
     """Return the HDF5 group key to use for *obj*.
 
-    Ephemeral objects (generated Signal instances) receive a short sequential
-    integer key that is stamped onto them by ``HDF5Writer._assign_hdf5_keys``
-    immediately before writing. Persistent objects (generators, datasets)
-    that are never garbage-collected within a write session fall back to
-    ``str(id(obj))``, which is stable for the lifetime of the writer.
+    Objects written by :class:`HDF5Writer` receive a short sequential integer
+    key immediately before writing. The ``id()`` fallback supports direct use
+    of the module-level population helpers outside the writer.
 
-    Using a counter for signals avoids the id()-reuse hazard that arises when
-    CPython recycles the memory address of a freed signal and a later signal
-    lands at the same address, causing the "already exists" guard to skip the
-    write silently.
+    Using a counter for signals and their metadata parents avoids the id()-reuse
+    hazard that arises when CPython recycles the memory address of a freed
+    object and a later object lands at the same address, causing the "already
+    exists" guard to skip the write silently.
     """
     try:
         return obj._hdf5_key
@@ -43,8 +62,10 @@ def _hdf5_key(obj) -> str:
 
 
 def populate_hdf5_group_with_metadata(group, metadata_obj) -> bool:
-    """Makes sure this and all parent metadata objects are represented in the hdf5 group
-    (returns true iff a new group was added).
+    """Store an object's local metadata and recursively store its parents.
+
+    Returns ``True`` when a metadata group is created for ``metadata_obj`` and
+    ``False`` when its key already exists.
     """
     key = _hdf5_key(metadata_obj)
     # Persistent objects (generators, datasets) share a stable key across
@@ -59,17 +80,18 @@ def populate_hdf5_group_with_metadata(group, metadata_obj) -> bool:
             metadata_group.create_dataset(k, data=metadata_obj[k])
     if not metadata_obj.parent == None:
         try:
-            metadata_group.create_dataset(
-                "parent_metadata_id", data=_hdf5_key(metadata_obj.parent)
-            )
+            metadata_group.create_dataset("parent_metadata_id", data=_hdf5_key(metadata_obj.parent))
             populate_hdf5_group_with_metadata(group, metadata_obj.parent)
         except ValueError:
             print("hdf5: metadata_group create dataset ValueError")
     return True
 
+
 def populate_hdf5_group_with_signal_data(group, signal, dataset_kwargs=None):
-    """Makes sure this and all parent metadata objects are represented in the hdf5 group
-    (returns true iff a new group was added).
+    """Store one signal array under its object key.
+
+    ``dataset_kwargs`` are forwarded to :meth:`h5py.Group.create_dataset`.
+    Returns ``False`` when the signal key is already present.
     """
     key = _hdf5_key(signal)
     # Signal keys are unique counters so this check only fires for persistent
@@ -81,6 +103,7 @@ def populate_hdf5_group_with_signal_data(group, signal, dataset_kwargs=None):
     except ValueError:
         print("hdf5: signal data create dataset ValueError")
     return True
+
 
 def populate_hdf5_group_with_component_signals(group, signal):
     """Populates the HDF5 group with component signals.
@@ -113,14 +136,10 @@ def _populate_hdf5_group_with_signal(group, signal, data_dataset_kwargs=None):
         data_dataset_kwargs: Optional keyword arguments for dataset creation.
     """
     populate_hdf5_group_with_metadata(group["metadata"], signal)
-    populate_hdf5_group_with_signal_data(
-        group["data"], signal, dataset_kwargs=data_dataset_kwargs
-    )
+    populate_hdf5_group_with_signal_data(group["data"], signal, dataset_kwargs=data_dataset_kwargs)
     populate_hdf5_group_with_component_signals(group["component_signals"], signal)
     for component_signal in signal.component_signals:
-        _populate_hdf5_group_with_signal(
-            group, component_signal, data_dataset_kwargs=data_dataset_kwargs
-        )
+        _populate_hdf5_group_with_signal(group, component_signal, data_dataset_kwargs=data_dataset_kwargs)
 
 
 def populate_hdf5_group_with_signal(group, signal, index=True, data_dataset_kwargs=None):
@@ -132,13 +151,9 @@ def populate_hdf5_group_with_signal(group, signal, index=True, data_dataset_kwar
         index: Whether to index the signal.
         data_dataset_kwargs: Optional keyword arguments for dataset creation.
     """
-    _populate_hdf5_group_with_signal(
-        group, signal, data_dataset_kwargs=data_dataset_kwargs
-    )
+    _populate_hdf5_group_with_signal(group, signal, data_dataset_kwargs=data_dataset_kwargs)
     if index:
-        group["index"].create_dataset(
-            str(len(group["index"])), data=_hdf5_key(signal)
-        )  # keep track of this index in a dataset
+        group["index"].create_dataset(str(len(group["index"])), data=_hdf5_key(signal))  # keep track of this index in a dataset
 
 
 def populate_hdf5_group_with_signals(group, signals, index=True, data_dataset_kwargs=None):
@@ -151,13 +166,16 @@ def populate_hdf5_group_with_signals(group, signals, index=True, data_dataset_kw
         data_dataset_kwargs: Optional keyword arguments for dataset creation.
     """
     for signal in signals:
-        populate_hdf5_group_with_signal(
-            group, signal, index=index, data_dataset_kwargs=data_dataset_kwargs
-        )
+        populate_hdf5_group_with_signal(group, signal, index=index, data_dataset_kwargs=data_dataset_kwargs)
 
 
 class HDF5Writer(FileWriter):
-    """Handles writing Signal data to HDF5 files with specified compression and buffering."""
+    """Write Signals using TorchSig's legacy object-per-record HDF5 layout.
+
+    Each signal array, metadata object, and component relationship is stored
+    as a separate HDF5 object. Batches are buffered and committed in batch
+    index order.
+    """
 
     def __init__(
         self,
@@ -169,16 +187,17 @@ class HDF5Writer(FileWriter):
         chunk_cache_size: int = 1024 * 1024 * 10,  # 10MB cache
         max_batches_in_memory: int = 4,
     ):
-        """Initializes the HDF5FileHandler.
+        """Initialize the legacy HDF5 writer.
 
         Args:
-            root (str): Where to write dataset on disk.
-            compression (str, optional): Compression algorithm ('gzip', 'szip', 'lzf'). Defaults to 'lzf'.
-            compression_opts (int | None, optional): Compression level (0-9 for gzip). Defaults to None.
-            shuffle (bool, optional): Enable shuffle filter for better compression. Defaults to True.
-            fletcher32 (bool, optional): Enable Fletcher32 checksum filter. Defaults to True.
-            chunk_cache_size (int, optional): HDF5 chunk cache size in bytes. Defaults to 10MB.
-            max_batches_in_memory (int, optional): Maximum batches to keep in memory before flushing. Defaults to 4.
+            root: Directory in which ``data.h5`` is created.
+            compression: HDF5 compression filter name, or ``None``.
+            compression_opts: Options passed to the selected compression
+                filter.
+            shuffle: Whether to apply the HDF5 shuffle filter.
+            fletcher32: Whether to apply the Fletcher32 checksum filter.
+            chunk_cache_size: HDF5 raw chunk cache size in bytes.
+            max_batches_in_memory: Number of batches buffered before a flush.
         """
         # compression
         self.compression = compression
@@ -195,10 +214,13 @@ class HDF5Writer(FileWriter):
         # Monotonically-increasing counter used to stamp each Signal with a
         # unique short string key (_hdf5_key attribute) before it is written.
         self._key_counter: int = 0
+        # Distinguishes keys assigned by this writer from attributes left on a
+        # persistent metadata object by an earlier writer session.
+        self._hdf5_writer_token = object()
 
         self._current_sample_index = 0
         super().__init__(root=root)
-        self.datapath = self.root.joinpath("data.h5") # fixed data file name
+        self.datapath = self.root.joinpath("data.h5")  # fixed data file name
         # Thread safety
         self._lock = threading.Lock()
 
@@ -234,8 +256,8 @@ class HDF5Writer(FileWriter):
         )
 
         # Set global attributes
-        self._file.attrs["torchsig_version"] = torchsig_version
-        self._file.attrs["compression"] = self.compression
+        self._file.attrs["torchsig_version"] = torchsig_cache_version()
+        self._file.attrs["compression"] = self.compression or "none"
         self._file.attrs["created_by"] = "TorchSig HDF5FileHandler"
         self._file.create_group("data")
         self._file.create_group("metadata")
@@ -256,33 +278,54 @@ class HDF5Writer(FileWriter):
                 pass  # File might already be closed
             del self._file
 
+    def _assign_hdf5_keys_to_parent_chain(self, metadata_obj) -> None:
+        """Assign stable keys to every metadata parent used by this writer.
+
+        Shared parents retain one key within a writer session. A per-writer
+        token ensures that a persistent parent reused by a later writer gets a
+        key from that writer's namespace instead of retaining a stale key.
+        """
+        parent = getattr(metadata_obj, "parent", None)
+        visited: set[int] = set()
+        while parent is not None and id(parent) not in visited:
+            visited.add(id(parent))
+            if getattr(parent, "_hdf5_writer_token", None) is not self._hdf5_writer_token:
+                setattr(parent, "_hdf5_key", str(self._key_counter))
+                setattr(parent, "_hdf5_writer_token", self._hdf5_writer_token)
+                self._key_counter += 1
+            parent = getattr(parent, "parent", None)
+
     def _assign_hdf5_keys(self, signal) -> None:
-        """Stamp *signal* and all its component signals with a unique ``_hdf5_key``.
+        """Stamp a signal, its metadata parents, and components with stable keys.
 
         Called immediately before each batch is written so that every Signal
-        object receives a short, monotonically-increasing string key.  The key
-        is used by the module-level populate helpers instead of ``str(id(signal))``,
-        making the HDF5 layout independent of CPython memory addresses and
-        allowing signals to be garbage-collected as soon as they leave scope.
+        and metadata-parent object receives a short, monotonically-increasing
+        string key. The module-level populate helpers therefore do not depend
+        on recyclable CPython memory addresses for writer-managed objects.
         """
-        signal._hdf5_key = str(self._key_counter)
+        setattr(signal, "_hdf5_key", str(self._key_counter))
+        setattr(signal, "_hdf5_writer_token", self._hdf5_writer_token)
         self._key_counter += 1
+        self._assign_hdf5_keys_to_parent_chain(signal)
         for cs in signal.component_signals:
             self._assign_hdf5_keys(cs)
 
     def _write_batch_to_hdf5(self, data) -> None:
-        """Writes a batch of signals (as List[Signal]) to the file.
+        """Write a batch of signals to the open file.
 
         Args:
-            data (List[Signal]): The list of signals to write to the HDF5 file.
+            data: Signals to write to the HDF5 file.
         """
         # Assign stable write keys before touching HDF5 so the populate
-        # helpers never fall back to id()-based keys for signal objects.
+        # helpers never fall back to id()-based keys for signals or metadata
+        # objects in their parent chains.
         for signal in data:
             self._assign_hdf5_keys(signal)
 
         populate_hdf5_group_with_signals(
-            self._file, data, data_dataset_kwargs=self._data_dataset_kwargs(),
+            self._file,
+            data,
+            data_dataset_kwargs=self._data_dataset_kwargs(),
         )
 
     def _flush_buffer(self) -> None:
@@ -377,12 +420,8 @@ def fill_object_metadata_from_group_and_id(obj, group, id_str):
         if not key == "parent_metadata_id":
             obj[key] = load_value_from_group(group["metadata"][id_str], key)
     try:
-        parent_id = load_value_from_group(
-            group["metadata"][id_str], "parent_metadata_id"
-        )
-        metadata_obj = fill_object_metadata_from_group_and_id(
-            HierarchicalMetadataObject(), group, parent_id
-        )
+        parent_id = load_value_from_group(group["metadata"][id_str], "parent_metadata_id")
+        metadata_obj = fill_object_metadata_from_group_and_id(HierarchicalMetadataObject(), group, parent_id)
         obj.add_parent(metadata_obj)
     except:
         pass  # we have no parent set; do nothing
@@ -401,10 +440,7 @@ def load_signal_from_group_by_id(group, id_str):
     """
     component_signals = []
     try:
-        component_signals = [
-            load_signal_from_group_by_id(group, temp_id)
-            for temp_id in load_value_from_group(group["component_signals"], id_str)
-        ]
+        component_signals = [load_signal_from_group_by_id(group, temp_id) for temp_id in load_value_from_group(group["component_signals"], id_str)]
     except:
         pass
     signal = Signal(
@@ -430,7 +466,7 @@ def load_signal_from_group_by_index(group, ind):
 
 
 class HDF5Reader(FileReader):
-    """Handles reading Signal data from HDF5 files."""
+    """Read Signals from TorchSig's legacy object-per-record HDF5 layout."""
 
     def __init__(self, root) -> None:
         """Initializes the HDF5Reader.
@@ -442,7 +478,7 @@ class HDF5Reader(FileReader):
         self.datapath = self.root.joinpath("data.h5")
         self._file = None
         self._len_cache = None
-        self._locking = False # do not lock data file
+        self._locking = False  # do not lock data file
 
     def __len__(self) -> int:
         """Returns the total number of samples in the dataset.
@@ -457,7 +493,7 @@ class HDF5Reader(FileReader):
         return self._len_cache
 
     def read(self, idx: int) -> Signal:
-        """Reads a single sample and its corresponding targets from the HDF5 file.
+        """Read one signal, including metadata and component signals.
 
         Args:
             idx (int): The index of the sample to read.
@@ -484,7 +520,7 @@ class HDF5Reader(FileReader):
 
 
 class HDF5FileHandler(BaseFileHandler):
-    """HDF5FileHandler creates a reader or writer for HDF5 files."""
+    """Create a legacy :class:`HDF5Reader` or :class:`HDF5Writer`."""
 
     reader_class: FileReader = HDF5Reader
     writer_class: FileWriter = HDF5Writer

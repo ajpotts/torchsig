@@ -1,0 +1,36 @@
+Title: Add a user-facing guide to TorchSIG frequency coordinates
+
+Summary
+
+The `SignalMetadataObject` API documentation defines `center_freq` and
+`bandwidth`, but the convention is not presented prominently in the user-facing
+signal documentation. Users can reasonably mistake `center_freq` for an
+absolute RF carrier or interpret bandwidth as a one-sided quantity.
+
+Proposed documentation
+
+Add a "Frequency coordinate conventions" section to `docs/signals.rst` that
+explains:
+
+- `center_freq` is a signed offset in Hz from the complex-IQ capture origin.
+- `center_freq` is not an absolute RF tuning frequency.
+- An external RF center can be added to obtain an absolute frequency.
+- `bandwidth` is the full two-sided bandwidth.
+- `lower_freq = center_freq - bandwidth / 2`.
+- `upper_freq = center_freq + bandwidth / 2`.
+- Built-in generators initially produce components centered at zero.
+- The representable Nyquist interval is normally `[-sample_rate/2,
+  sample_rate/2]`.
+
+Include a small diagram or worked numerical example showing the capture origin,
+Nyquist limits, component center, and occupied edges.
+
+Acceptance criteria
+
+- The convention can be found from the main Signals documentation without
+  navigating into generated API pages.
+- The guide explicitly distinguishes relative baseband frequency from absolute
+  RF frequency.
+- Equations and examples consistently treat bandwidth as full and two-sided.
+- The source RST builds without warnings.
+

@@ -1,0 +1,40 @@
+Title: Make frequency_shift_signal consistent for non-baseband input signals
+
+Summary
+
+`frequency_shift_signal` selects a target center frequency, shifts the IQ data
+by that entire frequency, and then overwrites `signal.center_freq` with the
+target. This is correct for the built-in generators, which all return signals
+centered at zero, but it produces inconsistent IQ data and metadata when passed
+a signal with a nonzero center frequency.
+
+For an input centered at `old_center`, shifting the samples by `target_center`
+places their spectrum at `old_center + target_center`, while the metadata says
+the spectrum is at `target_center`.
+
+Proposed change
+
+Treat the randomly selected value as the desired final center frequency and
+shift the IQ data by:
+
+    target_center - old_center
+
+Continue to run edge checking and anti-alias filtering using the final target
+center. Preserve the existing behavior for zero-centered generator output.
+
+If supporting already-placed signals is not intended, an alternative is to
+validate `signal.center_freq == 0` and document the baseband-only precondition.
+Supporting arbitrary input centers is preferred because the public function is
+currently described as shifting a signal to a new center frequency.
+
+Acceptance criteria
+
+- A zero-centered input behaves exactly as it does today.
+- A signal centered at a nonzero frequency is shifted by the difference between
+  its old and requested centers.
+- The spectral center measured from a deterministic test tone agrees with the
+  resulting `center_freq` metadata.
+- Positive, negative, and unchanged target centers are tested.
+- Anti-alias filtering receives metadata describing the actual shifted
+  spectrum.
+
