@@ -9,6 +9,8 @@ if TYPE_CHECKING:
 
 __all__ = ["BaseSignalGenerator", "ConcatSignalGenerator"]
 
+__all__ = ["BaseSignalGenerator", "ConcatSignalGenerator"]
+
 
 class BaseSignalGenerator(HierarchicalMetadataObject):
     """Defines a callable object which takes no arguments and returns a Signal.
