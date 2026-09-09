@@ -7,24 +7,24 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from torchsig.utils.defaults import TorchSigDefaults
+from torchsig.datasets.datasets import SafeTorchSigIterableDataset
 from torchsig.signals.signal_lists import FAMILY_SHARED_LIST
-from torchsig.datasets.datasets import TorchSigIterableDataset
 from torchsig.transforms.impairments import Impairments
-from torchsig.transforms.transforms import ComplexTo2D, Spectrogram
 from torchsig.transforms.metadata_transforms import YOLOLabel
+from torchsig.transforms.transforms import ComplexTo2D, Spectrogram
 from torchsig.utils.data_loading import WorkerSeedingDataLoader
+from torchsig.utils.defaults import TorchSigDefaults
 from torchsig.utils.signal_building import lookup_signal_generator_by_string
 from torchsig.utils.writer import DatasetCreator, identity_collate_fn
 from torchsig.utils.yaml import load_config_from_yaml
 
 
 def configure_signal_generators(
-    dataset: TorchSigIterableDataset,
+    dataset: SafeTorchSigIterableDataset,
     mode: Literal["per_signal", "per_family"],
 ) -> None:
     """Configure dataset signal placement probabilities. This function adjusts the signal generator
-    probabilities in-place within the dataset based on the specified signal sampling mode. The two 
+    probabilities in-place within the dataset based on the specified signal sampling mode. The two
     modes are defined as follows:
 
     "per_signal":
@@ -53,8 +53,8 @@ def configure_signal_generators(
     dataset.total_likelihood = 0
 
     for fam in FAMILY_SHARED_LIST:
-        fam_gen = lookup_signal_generator_by_string(fam)    # returns ConcatSignalGenerator
-        dataset.add_signal_generator(fam_gen, likelihood=1) # equal likelihood per family
+        fam_gen = lookup_signal_generator_by_string(fam)  # returns ConcatSignalGenerator
+        dataset.add_signal_generator(fam_gen, likelihood=1)  # equal likelihood per family
 
 
 def generate_dataset() -> None:
@@ -77,13 +77,12 @@ def generate_dataset() -> None:
         default=None,
         help="Override signal_sampling.mode from YAML.",
     )
-    p.add_argument("--save_config_copy", action="store_true",
-        help="Save a copy of the YAML used into <root>/original_config.yaml")
+    p.add_argument("--save_config_copy", action="store_true", help="Save a copy of the YAML used into <root>/original_config.yaml")
     args = p.parse_args()
 
     # load dataset configuration from yaml file
     cfg = load_config_from_yaml(args.config)
-    mode = args.signal_weighting or cfg.signal_sampling_mode # allow command-line override of mode
+    mode = args.signal_weighting or cfg.signal_sampling_mode  # allow command-line override of mode
 
     # filepaths
     root = os.path.join(args.root, cfg.dataset_id)
@@ -100,18 +99,18 @@ def generate_dataset() -> None:
     transforms = [whole_signal_impairments]
 
     target_labels = None
-    if cfg.output_representation == "spectrogram": # typical wideband
+    if cfg.output_representation == "spectrogram":  # typical wideband
         transforms.append(Spectrogram(fft_size=int(dataset_metadata["fft_size"])))
         transforms.append(YOLOLabel())
-        target_labels=["yolo_label"],  # yolo labels
-    elif cfg.output_representation == "iq": # typical narrowband
+        target_labels = (["yolo_label"],)  # yolo labels
+    elif cfg.output_representation == "iq":  # typical narrowband
         transforms.append(ComplexTo2D())
 
     # Dataset construction:
     # - per_signal: initialize with signal_generators="all"
     # - per_family: initialize empty, then add family generators
     signal_generators = "all" if mode == "per_signal" else []
-    dataset = TorchSigIterableDataset(
+    dataset = SafeTorchSigIterableDataset(
         signal_generators=signal_generators,
         metadata=dataset_metadata,
         transforms=transforms,
