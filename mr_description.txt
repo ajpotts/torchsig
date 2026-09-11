@@ -1,0 +1,28 @@
+## Summary
+
+Adds the second stage of the file-reader modernization plan: a shared,
+manifest-driven record index for WAV and OGG IQ datasets.
+
+## Changes
+
+- Added an internal ``AudioRecord`` descriptor and ``AudioRecordLayout``.
+- Added support for per-row ``file_path``, ``start_frame``, and ``num_frames``
+  fields, plus optional expected sample-rate and channel-count fields.
+- Added construction-time validation for contained relative paths, existing
+  files, nonnegative offsets and lengths, file bounds, and overlap.
+- Updated WAV and OGG readers to select records through the shared layout.
+- Retained the legacy fixed-length layout through a compatibility adapter.
+- Added parity and validation coverage for variable lengths, uneven file
+  populations, nested paths, invalid descriptors, and truncated files.
+
+## Scope
+
+This MR intentionally continues to read a whole audio file before selecting a
+record. Bounded partial reads and process-safe handle caching belong to MR3;
+audio codec and signal-fidelity policy belong to MR4. Variable-length packed
+NPY support remains a separate follow-up.
+
+## Testing
+
+- ``pytest tests/utils/file_handlers/test_audio_record_layout.py``
+- ``pytest tests/utils/file_handlers/test_wav.py tests/utils/file_handlers/test_ogg.py``

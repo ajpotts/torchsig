@@ -1,0 +1,31 @@
+Title: Support variable-length WAV and OGG records with an explicit audio manifest
+
+TorchSIG's WAV and OGG readers currently derive each record location from a
+uniform ``elements_per_file`` and ``num_iq_samples`` layout. That assumption
+prevents datasets from storing variable-length records or uneven numbers of
+records per audio file, and it makes metadata incapable of identifying the
+actual waveform segment associated with a row.
+
+Add a shared audio-record layout abstraction used by both readers. Header-based
+``metadata.csv`` rows should be able to declare a relative ``file_path``,
+``start_frame``, and ``num_frames``, with optional ``expected_sample_rate`` and
+``channel_count`` values. Resolve and validate every record when the reader is
+constructed: paths must remain inside the dataset root, offsets and lengths
+must be nonnegative, segments must fit inside their files, and records in the
+same file must not overlap.
+
+Preserve compatibility with existing fixed-length datasets by adapting
+``num_iq_samples`` and ``elements_per_file`` into the same internal descriptor
+model. NPY, partial reads, handle caching, codec/fidelity enforcement, and
+normalization are outside this ticket.
+
+Acceptance criteria:
+
+- WAV and OGG share one internal record-layout implementation.
+- Variable-length records and uneven per-file record counts are supported.
+- Nested relative audio paths are supported without allowing root traversal.
+- Missing, invalid, overlapping, and truncated record descriptors fail during
+  reader construction with actionable errors.
+- Every metadata row maps to exactly one valid audio segment.
+- Existing fixed-length WAV and OGG datasets remain readable.
+- Equivalent WAV and OGG manifests produce equivalent record indexes.
