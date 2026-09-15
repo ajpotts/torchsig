@@ -1,0 +1,36 @@
+Title: Add deterministic parallel IQ dataset generation and logging
+
+Summary
+
+The example IQDatasetGenerator currently executes every GNU Radio flowgraph in
+one process, derives record seeds with Python's randomized hash(), writes
+sidecars incrementally, and reports progress with print(). Generation is not
+stable across interpreter runs and an interruption can expose partial output.
+
+Acceptance criteria
+
+- Record specification is deterministic and separate from record execution.
+- Every record receives a stable seed derived without Python's hash().
+- Serial and configurable process-pool execution produce identical record
+  ordering, seeds, metadata.csv, and info.json.
+- Workers construct process-local GNU Radio flowgraphs and RNG state.
+- Workers return metadata to the parent; only the parent writes sidecars.
+- metadata.csv uses the MR1 header schema and includes MR2 file_path,
+  start_frame, num_frames, expected_sample_rate, and channel_count fields.
+- Record files and sidecars are written to temporary paths and atomically
+  renamed into place.
+- A failed record does not publish sidecars or a partial final record.
+- Operational output uses module logging with configurable verbosity.
+- Focused tests cover stable specifications, worker-count equivalence,
+  manifest fields, failure cleanup, invalid worker counts, and logging.
+
+Compatibility
+
+The historical constructor parameters and default single-process behavior are
+preserved. GNU Radio remains an optional dependency and is imported only when
+record execution begins.
+
+Dependencies
+
+Depends on MR1's versioned metadata schema and MR2's audio record descriptor
+contract.

@@ -1,0 +1,52 @@
+Title: Make IQ dataset generation deterministic, parallel, and atomic
+
+Summary
+
+This MR restores and modernizes the GNU Radio IQDatasetGenerator example. It
+first builds an immutable ordered RecordSpec for every modulation/SNR pair,
+then executes those specifications either serially or in a configurable
+ProcessPoolExecutor. Output ordering and metadata no longer depend on task
+completion order or worker count.
+
+Determinism and concurrency
+
+- Per-record uint32 seeds are derived with BLAKE2s from the base seed, record
+  index, modulation name, and SNR; Python's process-randomized hash() is not
+  used.
+- Each worker reconstructs the generator and creates its own GNU Radio
+  flowgraph and NumPy RNG.
+- Workers return metadata rows to the parent process, which sorts by record
+  index and writes metadata.csv and info.json exactly once.
+- workers=1 remains the default and follows the same record specifications as
+  multiprocessing execution.
+
+Output contract and failure safety
+
+metadata.csv uses the versioned header schema and includes file_path,
+start_frame, num_frames, expected_sample_rate, and channel_count so WAV output
+is directly consumable by the shared audio record layout. info.json retains
+the established dataset-level fields and schema version.
+
+Each record is generated beside its destination under a temporary name and
+published with os.replace(). Sidecars use the same temporary-write and atomic
+rename pattern. If record execution fails, the temporary record is removed and
+the parent does not publish dataset sidecars.
+
+Logging and optional dependencies
+
+Operational print calls are replaced by module logging. generate() accepts an
+optional logging level while otherwise respecting application logging
+configuration. GNU Radio is imported lazily during record execution, allowing
+record planning and focused tests to run without the optional dependency.
+
+Testing
+
+Focused tests verify stable record seeds and ordering, serial/parallel sidecar
+equivalence, MR2 manifest fields, atomic cleanup after a worker failure,
+logging verbosity, and invalid worker-count handling.
+
+Scope note
+
+This MR does not add RF/channel augmentation or change reader fidelity and
+normalization behavior. Those concerns remain separate from generation
+orchestration.

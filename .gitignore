@@ -17,6 +17,8 @@ dist/
 !file_reader_mr3_description.txt
 !file_reader_mr4_ticket.txt
 !file_reader_mr4_description.txt
+!file_reader_mr5_ticket.txt
+!file_reader_mr5_description.txt
 *.npy
 *.jpg
 *.pt*
@@ -58,6 +60,9 @@ examples/datasets/
 !examples/transforms/*.ipynb
 !examples/*.py
 !examples/*.yaml
+!examples/scripts/
+examples/scripts/*
+!examples/scripts/generate_gnuradio_examples.py
 
 # Pytest Files
 *.coverage
