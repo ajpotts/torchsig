@@ -5,8 +5,13 @@ The session fixture creates equivalent temporary datasets before timing. Run:
     pytest benchmarks/optional/benchmark_file_readers.py --benchmark-only
 
 Override defaults with TORCHSIG_BENCHMARK_RECORDS,
-TORCHSIG_BENCHMARK_IQ_SAMPLES, TORCHSIG_BENCHMARK_ELEMENTS_PER_FILE, and
-TORCHSIG_BENCHMARK_READS. Results are warm-cache measurements.
+TORCHSIG_BENCHMARK_IQ_SAMPLES, TORCHSIG_BENCHMARK_ELEMENTS_PER_FILE,
+TORCHSIG_BENCHMARK_READS, and TORCHSIG_BENCHMARK_AUDIO_CACHE_SIZES. Results
+are warm-cache measurements. Pytest-benchmark reports records per second; the
+extra fields report requested bytes and process peak memory. Compare runs with
+``TORCHSIG_BENCHMARK_IQ_SAMPLES`` set to representative small and large record
+sizes. A greater than 10% throughput regression against the cache-disabled
+baseline should be investigated.
 """
 
 from __future__ import annotations
@@ -14,19 +19,23 @@ from __future__ import annotations
 import csv
 import json
 import os
-from collections.abc import Callable, Sequence
-from pathlib import Path
-from typing import Any
+import resource
+from typing import TYPE_CHECKING, Any
 
 import h5py
 import numpy as np
 import pytest
 import soundfile as sf
+from torch.utils.data import DataLoader, Dataset
 
 from torchsig.utils.file_handlers.hdf5 import HDF5Reader
 from torchsig.utils.file_handlers.ogg import OGGReader
 from torchsig.utils.file_handlers.sigmf import SigMFReader
 from torchsig.utils.file_handlers.wav import WAVReader
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+    from pathlib import Path
 
 READER_TYPES = {
     "hdf5": HDF5Reader,
@@ -41,6 +50,14 @@ def _positive_env_int(name: str, default: int) -> int:
     if value <= 0:
         raise ValueError(f"{name} must be positive")
     return value
+
+
+def _cache_sizes() -> tuple[int, ...]:
+    """Return configured nonnegative cache sizes for audio benchmarks."""
+    values = tuple(int(value) for value in os.environ.get("TORCHSIG_BENCHMARK_AUDIO_CACHE_SIZES", "0,1,8").split(","))
+    if not values or any(value < 0 for value in values):
+        raise ValueError("TORCHSIG_BENCHMARK_AUDIO_CACHE_SIZES must contain nonnegative integers")
+    return values
 
 
 def _write_sidecars(
@@ -179,6 +196,56 @@ def _read_records(reader: Any, indices: Sequence[int]) -> tuple[int, float]:
     return payload_bytes, checksum
 
 
+def _read_audio_records(reader: Any, indices: Sequence[int]) -> tuple[int, float]:
+    """Read records and report logical bytes requested from audio storage."""
+    checksum = 0.0
+    requested_bytes = 0
+    for idx in indices:
+        record = reader.record_layout[idx]
+        signal = reader.read(idx)
+        requested_bytes += record.num_frames * 2 * np.dtype(np.float32).itemsize
+        if signal.data.size:
+            checksum += float(signal.data[0].real)
+    return requested_bytes, checksum
+
+
+class _AudioReadDataset(Dataset):
+    """Adapt a file reader and fixed index order for DataLoader benchmarks."""
+
+    def __init__(self, reader: Any, indices: Sequence[int]) -> None:
+        self.reader = reader
+        self.indices = tuple(indices)
+
+    def __len__(self) -> int:
+        return len(self.indices)
+
+    def __getitem__(self, index: int) -> np.ndarray:
+        return self.reader.read(self.indices[index]).data
+
+
+def _consume_loader(loader: DataLoader) -> float:
+    """Consume one DataLoader epoch and return a small anti-optimization checksum."""
+    checksum = 0.0
+    for batch in loader:
+        if batch.numel():
+            checksum += float(batch[0, 0].real)
+    return checksum
+
+
+def _read_audio_records_whole(reader: Any, indices: Sequence[int]) -> tuple[int, float]:
+    """Reproduce the pre-MR3 whole-file implementation for comparison."""
+    storage_bytes = 0
+    checksum = 0.0
+    for idx in indices:
+        record = reader.record_layout[idx]
+        pcm, _ = sf.read(record.path, dtype="float32", always_2d=True)
+        storage_bytes += np.asarray(pcm).nbytes
+        stereo = np.asarray(pcm)[record.start_frame : record.start_frame + record.num_frames]
+        if stereo.size:
+            checksum += float(stereo[0, 0])
+    return storage_bytes, checksum
+
+
 @pytest.mark.parametrize("reader_name", READER_TYPES)
 def test_reader_initialization(
     benchmark: Callable,
@@ -191,7 +258,7 @@ def test_reader_initialization(
     assert size > 0
 
 
-@pytest.mark.parametrize("access_pattern", ("sequential", "random"))
+@pytest.mark.parametrize("access_pattern", ["sequential", "random"])
 @pytest.mark.parametrize("reader_name", READER_TYPES)
 def test_reader_throughput(
     benchmark: Callable,
@@ -203,15 +270,72 @@ def test_reader_throughput(
     reader = READER_TYPES[reader_name](file_reader_datasets[reader_name])
     try:
         count = min(_positive_env_int("TORCHSIG_BENCHMARK_READS", 128), len(reader))
-        if access_pattern == "sequential":
-            indices = tuple(range(count))
-        else:
-            indices = tuple(int(idx) for idx in np.random.default_rng(1).integers(0, len(reader), size=count))
+        indices = tuple(range(count)) if access_pattern == "sequential" else tuple(int(idx) for idx in np.random.default_rng(1).integers(0, len(reader), size=count))
 
         _read_records(reader, indices)  # untimed warm-up
         payload_bytes, checksum = benchmark(_read_records, reader, indices)
         benchmark.extra_info["records_per_iteration"] = count
         benchmark.extra_info["payload_mib_per_iteration"] = payload_bytes / (1024**2)
+        assert np.isfinite(checksum)
+    finally:
+        _close(reader)
+
+
+@pytest.mark.parametrize("cache_size", _cache_sizes())
+@pytest.mark.parametrize("access_pattern", ["sequential", "shuffled"])
+@pytest.mark.parametrize("workers", [0, 2])
+@pytest.mark.parametrize("reader_name", ["wav", "ogg"])
+def test_audio_partial_read_cache_throughput(
+    benchmark: Callable,
+    file_reader_datasets: dict[str, Path],
+    reader_name: str,
+    access_pattern: str,
+    workers: int,
+    cache_size: int,
+) -> None:
+    """Compare bounded partial reads across access patterns and cache sizes."""
+    reader = READER_TYPES[reader_name](
+        file_reader_datasets[reader_name],
+        audio_handle_cache_size=cache_size,
+    )
+    try:
+        count = min(_positive_env_int("TORCHSIG_BENCHMARK_READS", 128), len(reader))
+        indices = list(range(count))
+        if access_pattern == "shuffled":
+            np.random.default_rng(1).shuffle(indices)
+        requested_bytes = sum(reader.record_layout[idx].num_frames * 2 * np.dtype(np.float32).itemsize for idx in indices)
+        loader_kwargs = {"multiprocessing_context": "spawn"} if workers else {}
+        loader = DataLoader(_AudioReadDataset(reader, indices), batch_size=1, num_workers=workers, **loader_kwargs)
+        checksum = benchmark(_consume_loader, loader)
+        benchmark.extra_info["records_per_iteration"] = count
+        benchmark.extra_info["requested_mib_per_iteration"] = requested_bytes / (1024**2)
+        usage = resource.getrusage(resource.RUSAGE_SELF if workers == 0 else resource.RUSAGE_CHILDREN)
+        benchmark.extra_info["peak_worker_mib"] = usage.ru_maxrss / 1024
+        benchmark.extra_info["cache_size"] = cache_size
+        benchmark.extra_info["workers"] = workers
+        assert np.isfinite(checksum)
+    finally:
+        _close(reader)
+
+
+@pytest.mark.parametrize("access_pattern", ["sequential", "shuffled"])
+@pytest.mark.parametrize("reader_name", ["wav", "ogg"])
+def test_audio_whole_file_baseline(
+    benchmark: Callable,
+    file_reader_datasets: dict[str, Path],
+    reader_name: str,
+    access_pattern: str,
+) -> None:
+    """Measure the pre-MR3 whole-file read path as a comparison baseline."""
+    reader = READER_TYPES[reader_name](file_reader_datasets[reader_name], audio_handle_cache_size=0)
+    try:
+        count = min(_positive_env_int("TORCHSIG_BENCHMARK_READS", 128), len(reader))
+        indices = list(range(count))
+        if access_pattern == "shuffled":
+            np.random.default_rng(1).shuffle(indices)
+        storage_bytes, checksum = benchmark(_read_audio_records_whole, reader, indices)
+        benchmark.extra_info["records_per_iteration"] = count
+        benchmark.extra_info["storage_mib_per_iteration"] = storage_bytes / (1024**2)
         assert np.isfinite(checksum)
     finally:
         _close(reader)

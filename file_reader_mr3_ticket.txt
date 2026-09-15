@@ -1,0 +1,35 @@
+Title: Add bounded partial audio reads and process-safe handle caching
+
+Summary
+
+WAV and OGG readers currently load an entire audio file for every record and
+then slice the requested segment. This makes random access unnecessarily
+expensive, especially when files contain many records, and prevents readers
+from efficiently reusing open files.
+
+Acceptance criteria
+
+- WAV and supported seekable OGG reads seek to a record's start_frame and read
+  only num_frames.
+- Both readers expose a nonnegative audio_handle_cache_size option; zero
+  disables caching.
+- Open SoundFile handles are retained in a bounded per-process LRU cache.
+- Repeated access reuses a handle, eviction closes the least-recently-used
+  handle, and teardown closes all handles.
+- A PID change discards inherited handles and opens process-local replacements.
+- Pickled readers contain no live audio handles.
+- Readers support setup(), teardown(), and context-manager cleanup.
+- Focused tests cover bounded reads, reuse, eviction, disabled caching,
+  teardown, pickle state, PID changes, and shuffled worker-safe access.
+- Optional benchmarks cover sequential and shuffled reads, multiple cache
+  sizes, representative record sizes, payload bytes, throughput, and memory.
+  Generated benchmark result files are not committed.
+
+Out of scope
+
+Signal normalization and the complete sample-rate/channel/codec fidelity
+policy remain in MR4.
+
+Dependencies
+
+Depends on MR2's shared AudioRecordLayout manifest and fixed-layout adapter.

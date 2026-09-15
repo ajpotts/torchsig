@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+from collections import OrderedDict
+from contextlib import suppress
 from dataclasses import dataclass
 from itertools import pairwise
 from pathlib import Path
@@ -12,9 +15,88 @@ import soundfile as sf
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-__all__ = ["AudioRecord", "AudioRecordLayout"]
+    import numpy as np
+
+__all__ = ["AudioHandleCache", "AudioRecord", "AudioRecordLayout"]
 
 _MANIFEST_REQUIRED_COLUMNS = ("file_path", "start_frame", "num_frames")
+
+
+class AudioHandleCache:
+    """Manage a bounded set of process-local ``SoundFile`` handles.
+
+    A size of zero disables caching. The cache notices process changes before
+    every access, which prevents handles inherited by forked DataLoader workers
+    from being reused. Live handles are also removed from pickle state.
+    """
+
+    def __init__(self, max_size: int = 8) -> None:
+        if isinstance(max_size, bool) or not isinstance(max_size, int):
+            raise TypeError("audio_handle_cache_size must be an integer")
+        if max_size < 0:
+            raise ValueError("audio_handle_cache_size must be nonnegative")
+        self.max_size = max_size
+        self._handles: OrderedDict[Path, sf.SoundFile] = OrderedDict()
+        self._pid = os.getpid()
+
+    def _reset_after_process_change(self) -> None:
+        """Discard inherited handles when the current process changes."""
+        pid = os.getpid()
+        if pid != self._pid:
+            self.close()
+            self._pid = pid
+
+    def setup(self) -> None:
+        """Prepare the cache in the current process."""
+        self._reset_after_process_change()
+
+    def _get(self, path: Path) -> sf.SoundFile:
+        """Return an open handle and update its LRU position."""
+        self._reset_after_process_change()
+        handle = self._handles.pop(path, None)
+        if handle is None:
+            handle = sf.SoundFile(path, mode="r")
+        self._handles[path] = handle
+        if len(self._handles) > self.max_size:
+            _, evicted = self._handles.popitem(last=False)
+            evicted.close()
+        return handle
+
+    def read(self, path: Path, start_frame: int, num_frames: int) -> np.ndarray:
+        """Read exactly the requested frame range from ``path``."""
+        if self.max_size == 0:
+            self._reset_after_process_change()
+            with sf.SoundFile(path, mode="r") as handle:
+                handle.seek(start_frame)
+                return handle.read(frames=num_frames, dtype="float32", always_2d=True)
+        handle = self._get(path)
+        handle.seek(start_frame)
+        return handle.read(frames=num_frames, dtype="float32", always_2d=True)
+
+    def close(self) -> None:
+        """Close and remove every cached handle."""
+        while self._handles:
+            _, handle = self._handles.popitem(last=False)
+            handle.close()
+
+    def __getstate__(self) -> dict[str, Any]:
+        """Return pickle state without live process-local handles."""
+        return {"max_size": self.max_size, "_handles": OrderedDict(), "_pid": None}
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        """Restore an empty cache in the receiving process."""
+        self.max_size = state["max_size"]
+        self._handles = OrderedDict()
+        self._pid = os.getpid()
+
+    def __del__(self) -> None:
+        """Best-effort cleanup for readers not explicitly torn down."""
+        with suppress(Exception):
+            self.close()
+
+    def __len__(self) -> int:
+        """Return the number of cached handles."""
+        return len(self._handles)
 
 
 @dataclass(frozen=True)

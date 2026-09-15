@@ -362,18 +362,14 @@ def test_global_index_to_file_mapping(dataset_dir: Path, monkeypatch):
     frames_per_file = 1
     monkeypatch.setattr("soundfile.info", lambda _: fake_info(frames=frames_per_file))
 
-    # The actual PCM values are irrelevant for this test.
-    dummy_pairs = [(0, 0)] * (frames_per_file * 2)
-    monkeypatch.setattr("soundfile.read", fake_read_factory(dummy_pairs, frames_per_file))
-
-    # Capture every ``sf.read`` call so we can inspect which file was accessed.
+    # Capture the bounded cache reads so we can inspect which file was used.
     called_paths: list[Path] = []
 
-    def capture_read(path, start=0, frames=1, dtype=None, always_2d=False):
+    def capture_read(self, path, start_frame, num_frames):
         called_paths.append(Path(path))
-        return np.array([0.0, 0.0], dtype="float32"), 48_000
+        return np.array([[0.0, 0.0]], dtype="float32")
 
-    monkeypatch.setattr("soundfile.read", capture_read)
+    monkeypatch.setattr("torchsig.utils.file_handlers.audio.AudioHandleCache.read", capture_read)
 
     reader = OGGReader(dataset_dir)
     _ = reader.read(0)  # should hit a.ogg

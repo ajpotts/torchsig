@@ -1,0 +1,43 @@
+Title: Use bounded partial reads with a process-safe audio handle cache
+
+Summary
+
+This MR changes WAVReader and OGGReader to read only the AudioRecord segment
+requested by the caller. A shared AudioHandleCache uses SoundFile.seek() and
+SoundFile.read(frames=...) and optionally retains a bounded LRU set of open
+handles. The default cache holds eight files; passing
+audio_handle_cache_size=0 opens and closes a handle for every read.
+
+Process and resource safety
+
+- The cache records its owning PID and closes inherited handles before the
+  first access in a different process.
+- Pickle state retains configuration but excludes all live handles.
+- LRU eviction and teardown close handles deterministically.
+- WAVReader and OGGReader now provide setup(), teardown(), and context-manager
+  cleanup.
+
+Benchmarking
+
+The optional file-reader benchmark now includes an audio-specific matrix for
+sequential and shuffled access with cache sizes 0, 1, and 8 by default. Record
+size and cache sizes are configurable through environment variables. Results
+include requested bytes, pytest-benchmark throughput, and peak process memory.
+No generated benchmark results are included. Throughput regressions over 10%
+against the cache-disabled partial-read baseline should be investigated.
+
+Testing
+
+- bounded seek and frame-count reads;
+- handle reuse and LRU eviction;
+- cache size zero;
+- teardown and context cleanup;
+- pickle-safe state;
+- PID-change reopen behavior;
+- existing WAV/OGG record-layout and reader behavior.
+
+Scope note
+
+The broader audio fidelity policy, including explicit lossy-codec rejection,
+sample-rate/channel checks, finite-value validation, and normalization, remains
+in MR4 as defined by the merge plan.

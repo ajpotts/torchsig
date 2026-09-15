@@ -13,6 +13,8 @@ dist/
 *.p
 *.png
 *.txt
+!file_reader_mr3_ticket.txt
+!file_reader_mr3_description.txt
 *.npy
 *.jpg
 *.pt*
