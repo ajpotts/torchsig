@@ -1,0 +1,29 @@
+Summary
+Adds MR3's reusable generation-time RF/channel augmentation pipeline without changing file-reader behavior.
+
+Implementation
+- Introduces immutable declarative configuration objects for uniform parameter ranges and Rayleigh fading.
+- Reuses TorchSIG's frequency shift, carrier phase noise, fading, and AWGN implementations.
+- Uses deterministic, effect-specific seeds derived from the global seed and record identity, making execution independent of worker ordering.
+- Records sampled parameters and the exact transform order in each augmented Signal's rf_channel_impairments metadata.
+- Defines normalization explicitly before or after the impairment chain; disabled augmentation is a true no-op.
+- Adds eager validation for malformed ranges, units, fading profiles, normalization mode, sample rate, IQ shape/type, and Nyquist limits.
+
+Transform order
+1. Optional unit-power normalization (before)
+2. Frequency offset (Hz)
+3. Gaussian phase noise (standard deviation in degrees)
+4. Rayleigh multipath fading (coherence bandwidth normalized to sample rate)
+5. AWGN (absolute dB)
+6. Optional unit-power normalization (after)
+
+Testing
+- Disabled behavior and metadata preservation
+- Frequency-offset units
+- Deterministic phase noise and fading
+- Combined ordering and normalization
+- Stable per-effect sampling
+- Invalid configuration and Nyquist validation
+
+Compatibility
+No reader APIs or existing default generation behavior change. No new dependencies are introduced. The pipeline can be called by the future IQDatasetGenerator/concurrency record executor once that component is available.
