@@ -1,0 +1,25 @@
+Title: Add deterministic configurable RF/channel augmentation to IQ generation
+
+Problem
+Generated IQ records cannot currently opt into explicit frequency offset, phase noise, fading, and noise with reproducible per-record provenance. Reader-side augmentation would make stored data nondeterministic and couple modeling policy to I/O.
+
+Scope
+- Add a reusable declarative generation-time RF/channel impairment pipeline.
+- Support independent frequency offset (Hz), Gaussian phase noise (degrees), Rayleigh fading (normalized coherence bandwidth and power-delay profile), and AWGN (absolute dB).
+- Support optional unit-power normalization before or after impairments.
+- Derive random draws from a global seed, stable record identity, and effect name.
+- Store actual sampled values, effect order, seed, identity, sample rate, and configuration in signal metadata.
+- Keep file readers unchanged and make a disabled configuration a no-op.
+
+Acceptance criteria
+- Each impairment works independently and in representative combinations.
+- Identical seed, configuration, and record identity produce identical samples and metadata regardless of scheduling or worker count.
+- Enabling another effect does not change an already-enabled effect's sampled parameter.
+- Transform order is frequency offset, phase noise, fading, AWGN, with normalization explicitly before or after that sequence.
+- Invalid configuration is rejected before record generation; record-dependent Nyquist violations are rejected before signal mutation.
+- Deterministic tests cover effect behavior, combinations, provenance, no-op behavior, and validation.
+
+Out of scope
+- Reader augmentation, seeking, caching, and sidecar parsing.
+- Training-time augmentation policy.
+- New fading models beyond the existing Rayleigh implementation.

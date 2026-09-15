@@ -13,6 +13,8 @@ dist/
 *.p
 *.png
 *.txt
+!rf_channel_augmentation_ticket.txt
+!rf_channel_augmentation_mr_description.txt
 *.npy
 *.jpg
 *.pt*

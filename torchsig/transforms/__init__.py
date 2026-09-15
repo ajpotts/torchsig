@@ -11,9 +11,17 @@ if TYPE_CHECKING:
     from . import functional as functional
     from . import impairments as impairments
     from . import metadata_transforms as metadata_transforms
+    from . import rf_channel as rf_channel
     from . import transforms as transforms
 
-__all__ = ["base_transforms", "functional", "impairments", "metadata_transforms", "transforms"]
+__all__ = [
+    "base_transforms",
+    "functional",
+    "impairments",
+    "metadata_transforms",
+    "rf_channel",
+    "transforms",
+]
 _EXPORTS = {name: (f"{__name__}.{name}", None) for name in __all__}
 
 
