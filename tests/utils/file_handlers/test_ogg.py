@@ -200,6 +200,10 @@ def fake_info(frames: int):
     class _Info:
         def __init__(self, frames):
             self.frames = frames
+            self.channels = 2
+            self.samplerate = 192_000
+            self.format = "WAV"
+            self.subtype = "FLOAT"
 
     return _Info(frames)
 
@@ -485,6 +489,10 @@ def _fake_sf_info(frames: int):
     class _Info:
         def __init__(self, frames_: int):
             self.frames = frames_
+            self.channels = 2
+            self.samplerate = 48_000
+            self.format = "WAV"
+            self.subtype = "FLOAT"
 
     return _Info(frames)
 

@@ -1,0 +1,71 @@
+Title: Enforce audio fidelity and add opt-in I/Q normalization
+
+Summary
+
+This MR applies one shared fidelity policy to WAVReader and OGGReader. Reader
+construction now validates audio headers and sidecar declarations, while each
+bounded read is checked before its stereo frames are converted into complex64
+I/Q samples.
+
+Audio validation
+
+- Audio files must contain exactly two channels, interpreted as I and Q.
+- The decoded file sample rate must agree with record metadata, optional
+  manifest expectations, and an optional dataset-wide sample rate.
+- Datasets may contain files with different sample rates when each record
+  declares the matching rate and no dataset-wide rate contradicts it.
+- Optional manifest channel counts must match the decoded file header.
+- Every bounded read must return the requested `(num_frames, 2)` shape.
+- NaN and infinite sample values are rejected before Signal construction.
+
+Codec policy
+
+OGG/Vorbis and OGG/Opus are rejected explicitly. Both codecs are lossy, so
+their decoded samples cannot provide the fidelity expected of stored I/Q data.
+Lossless data in supported containers continues to use the same record-layout,
+partial-read, and handle-cache paths introduced by the preceding MRs.
+
+Normalization
+
+Normalization remains disabled by default. WAVReader and OGGReader now accept:
+
+- `normalization="none"` to return stored samples unchanged;
+- `normalization="rms"` to scale a record to unit complex RMS power;
+- `normalization="peak"` to scale its largest complex magnitude to one.
+
+Both enabled modes compute one real scalar from the complex record and apply
+it jointly to I and Q. This preserves sample phase and relative I/Q scaling.
+Silent records remain zero with a deterministic scale of `1.0`.
+
+Passing `record_normalization_scale=True` adds the applied scalar to returned
+signal metadata as `normalization_scale`. Metadata is unchanged when this
+option is disabled.
+
+Compatibility
+
+The default remains `normalization="none"`, so valid lossless stereo datasets
+retain their existing sample values and complex64 output dtype. The public
+cache-size option, context-manager lifecycle, pickle safety, and fixed-layout
+compatibility are unchanged. Invalid inputs now fail early with errors that
+identify the affected record, file, or declaration.
+
+Testing
+
+Focused tests cover:
+
+- mono and greater-than-stereo rejection;
+- matching, mixed, record-conflicting, and dataset-conflicting sample rates;
+- explicit lossy OGG rejection;
+- truncated decoder output and non-finite samples;
+- unchanged default values;
+- joint RMS and peak normalization;
+- preservation of complex ratios and phase;
+- deterministic silence handling;
+- optional normalization-scale metadata; and
+- invalid normalization settings.
+
+Scope note
+
+RF/channel augmentation and deterministic parallel dataset generation remain
+separate follow-up work. This MR does not resample inconsistent inputs or add
+support for lossy I/Q storage.

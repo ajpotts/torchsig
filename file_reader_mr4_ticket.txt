@@ -1,0 +1,56 @@
+Title: Add shared audio fidelity validation and optional normalization
+
+Summary
+
+WAV and OGG readers need a consistent policy for interpreting stereo audio as
+complex I/Q data. The readers currently rely on file and sidecar metadata
+without fully validating channel counts, sample-rate consistency, decoded
+frame counts, finite values, or codec fidelity. They also do not offer an
+explicit, opt-in normalization policy.
+
+Acceptance criteria
+
+- WAV and OGG readers require exactly two audio channels for I and Q.
+- File sample rates are validated against record-level metadata and an
+  optional dataset-wide sample rate.
+- Mixed sample rates are permitted only when each record declares the rate of
+  its source audio file and no dataset-wide rate conflicts with it.
+- Manifest `expected_sample_rate` and `channel_count` values are validated
+  when present.
+- Bounded reads must return exactly the requested number of stereo frames.
+- Non-finite decoded samples are rejected before constructing a Signal.
+- OGG/Vorbis and OGG/Opus inputs are rejected explicitly because they are
+  lossy and cannot preserve stored I/Q samples faithfully.
+- Existing samples are returned unchanged by default.
+- Readers accept `normalization="none"`, `normalization="rms"`, and
+  `normalization="peak"`.
+- RMS and peak normalization apply one scale factor jointly to I and Q so
+  phase and relative channel scaling are preserved.
+- Normalizing silence is deterministic and leaves the record unchanged.
+- Callers may opt into recording the applied `normalization_scale` in returned
+  signal metadata.
+- Invalid normalization modes fail with an actionable error.
+- Focused tests cover channels, sample rates, codecs, truncated and non-finite
+  reads, normalization, silence, metadata recording, and unchanged defaults.
+
+Compatibility
+
+- `normalization="none"` remains the default, preserving existing signal
+  values for valid lossless stereo datasets.
+- The existing audio handle-cache and bounded-read behavior remain unchanged.
+- Legacy fixed-length and explicit manifest layouts use the same fidelity
+  policy.
+- Files with invalid channel counts, inconsistent sample rates, or lossy OGG
+  codecs now fail early instead of being interpreted as valid I/Q data.
+
+Out of scope
+
+- RF or channel augmentation.
+- Dataset-generator multiprocessing and logging.
+- Resampling records with mismatched sample rates.
+- Supporting lossy audio codecs for I/Q storage.
+
+Dependencies
+
+Depends on MR2's shared AudioRecordLayout and MR3's bounded audio reads and
+process-safe handle cache.

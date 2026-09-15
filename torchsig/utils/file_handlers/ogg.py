@@ -3,12 +3,11 @@
 from pathlib import Path
 from typing import Self
 
-import numpy as np
 import soundfile as sf
 
 from torchsig.signals.signal_types import Signal
 
-from .audio import AudioHandleCache, AudioRecordLayout
+from .audio import AudioFidelity, AudioHandleCache, AudioRecordLayout
 from .metadata_reader import MetadataReader
 
 __all__ = ["OGGReader"]
@@ -18,13 +17,26 @@ class OGGReader(MetadataReader):
     """Read fixed-length or manifest-indexed stereo OGG IQ records.
 
     Explicit manifests use the same ``file_path``, ``start_frame``, and
-    ``num_frames`` columns as :class:`WAVReader`. Lossless-codec enforcement
-    is handled separately from partial reads and handle caching.
+    ``num_frames`` columns as :class:`WAVReader`. OGG/Vorbis and OGG/Opus are
+    rejected because their lossy samples are unsuitable for faithful IQ data.
     """
 
-    def __init__(self, root: str | Path, audio_handle_cache_size: int = 8) -> None:
-        """Initialize the reader with a bounded per-process handle cache."""
+    def __init__(
+        self,
+        root: str | Path,
+        audio_handle_cache_size: int = 8,
+        normalization: str = "none",
+        record_normalization_scale: bool = False,
+    ) -> None:
+        """Initialize the reader and its fidelity and handle-cache policies.
+
+        Lossy OGG/Vorbis and OGG/Opus streams are rejected. ``normalization``
+        accepts ``"none"`` (the default), ``"rms"``, or ``"peak"``.
+        """
         super().__init__(root)
+        self._audio_fidelity = AudioFidelity(normalization)
+        self.normalization = self._audio_fidelity.normalization
+        self.record_normalization_scale = bool(record_normalization_scale)
         self.audio_handle_cache_size = audio_handle_cache_size
         self._audio_handles = AudioHandleCache(audio_handle_cache_size)
         self.ogg_files = sorted(self.root.rglob("*.ogg"), key=str)
@@ -52,6 +64,7 @@ class OGGReader(MetadataReader):
             num_iq_samples=self.num_iq_samples,
             elements_per_file=self.elements_per_file,
         )
+        AudioFidelity.validate_layout(self.record_layout, self._metadata_rows, self.sample_rate, reject_lossy_ogg=True)
         self.total_elements = len(self.record_layout)
         self.file_start_indices = [] if self.record_layout.is_manifest else list(range(0, self.total_elements, self.elements_per_file))
 
@@ -64,9 +77,12 @@ class OGGReader(MetadataReader):
         if idx < 0 or idx >= self.dataset_size:
             raise IndexError(f"index {idx} out of range (size={self.dataset_size})")
         record = self.record_layout[idx]
-        stereo = np.asarray(self._audio_handles.read(record.path, record.start_frame, record.num_frames))
-        complex_vec = (stereo[:, 0] + 1j * stereo[:, 1]).astype(np.complex64)
-        return Signal(data=complex_vec, component_signals=[], metadata=self.load_row(idx, self.class_list))
+        stereo = self._audio_handles.read(record.path, record.start_frame, record.num_frames)
+        complex_vec, scale = self._audio_fidelity.convert(stereo, record)
+        metadata = self.load_row(idx, self.class_list)
+        if self.record_normalization_scale:
+            metadata["normalization_scale"] = scale
+        return Signal(data=complex_vec, component_signals=[], metadata=metadata)
 
     def setup(self) -> None:
         """Prepare the reader for use after an earlier teardown."""

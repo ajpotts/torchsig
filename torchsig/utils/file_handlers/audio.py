@@ -10,16 +10,94 @@ from itertools import pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import soundfile as sf
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    import numpy as np
-
-__all__ = ["AudioHandleCache", "AudioRecord", "AudioRecordLayout"]
+__all__ = ["AudioFidelity", "AudioHandleCache", "AudioRecord", "AudioRecordLayout"]
 
 _MANIFEST_REQUIRED_COLUMNS = ("file_path", "start_frame", "num_frames")
+_NORMALIZATION_MODES = {"none", "rms", "peak"}
+_IQ_CHANNEL_COUNT = 2
+
+
+class AudioFidelity:
+    """Validate audio-backed IQ data and optionally normalize each record.
+
+    Audio files must contain exactly two channels, interpreted jointly as I
+    and Q. ``normalization`` may be ``"none"``, ``"rms"``, or ``"peak"``;
+    the latter modes apply one real scale factor to the complex record and
+    therefore preserve phase and relative I/Q scaling. Silence is unchanged
+    and has a reported scale of ``1.0``.
+    """
+
+    def __init__(self, normalization: str = "none") -> None:
+        if not isinstance(normalization, str):
+            raise TypeError("normalization must be a string")
+        self.normalization = normalization.lower()
+        if self.normalization not in _NORMALIZATION_MODES:
+            raise ValueError(f"normalization must be one of {sorted(_NORMALIZATION_MODES)}")
+
+    @staticmethod
+    def validate_layout(
+        layout: AudioRecordLayout,
+        metadata_rows: list[dict[str, Any]],
+        dataset_sample_rate: int,
+        *,
+        reject_lossy_ogg: bool,
+    ) -> None:
+        """Validate channels, codecs, and declared sample rates up front."""
+        info_by_path = {path: sf.info(path) for path in layout.audio_files}
+        for path, info in info_by_path.items():
+            if int(info.channels) != _IQ_CHANNEL_COUNT:
+                raise ValueError(f"IQ audio file {path} must contain exactly 2 channels; found {info.channels}")
+            if reject_lossy_ogg and str(info.format).upper() == "OGG":
+                raise ValueError(f"Unsupported lossy OGG codec {info.subtype!r} in {path}")
+
+        for position, (record, row) in enumerate(zip(layout.records, metadata_rows, strict=True)):
+            info = info_by_path[record.path]
+            actual_rate = float(info.samplerate)
+            declared_rates: list[tuple[str, float]] = []
+            if dataset_sample_rate:
+                declared_rates.append(("dataset sample_rate", float(dataset_sample_rate)))
+            row_rate = row.get("sample_rate")
+            try:
+                parsed_row_rate = float(row_rate)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"Audio record {position} has invalid sample_rate {row_rate!r}") from exc
+            if not np.isfinite(parsed_row_rate) or parsed_row_rate <= 0:
+                raise ValueError(f"Audio record {position} has invalid sample_rate {row_rate!r}")
+            declared_rates.append(("record sample_rate", parsed_row_rate))
+            if record.expected_sample_rate is not None:
+                declared_rates.append(("expected_sample_rate", record.expected_sample_rate))
+            for source, rate in declared_rates:
+                if not np.isfinite(rate) or rate <= 0 or rate != actual_rate:
+                    raise ValueError(f"Audio record {position} {source} {rate!r} conflicts with {record.path} sample rate {actual_rate:g}")
+            if record.channel_count is not None and record.channel_count != int(info.channels):
+                raise ValueError(f"Audio record {position} channel_count {record.channel_count} conflicts with {record.path} channel count {info.channels}")
+
+    def convert(self, frames: np.ndarray, record: AudioRecord) -> tuple[np.ndarray, float]:
+        """Validate one bounded read and return complex64 data and its scale."""
+        stereo = np.asarray(frames)
+        if stereo.shape != (record.num_frames, 2):
+            raise ValueError(f"Audio segment from {record.path} returned shape {stereo.shape}; expected ({record.num_frames}, 2)")
+        if not np.isfinite(stereo).all():
+            raise ValueError(f"Audio segment from {record.path} contains non-finite samples")
+        complex_vec = (stereo[:, 0] + 1j * stereo[:, 1]).astype(np.complex64)
+        scale = 1.0
+        if self.normalization == "rms":
+            denominator = float(np.sqrt(np.mean(np.abs(complex_vec) ** 2))) if complex_vec.size else 0.0
+            if denominator > 0.0:
+                scale = 1.0 / denominator
+        elif self.normalization == "peak":
+            denominator = float(np.max(np.abs(complex_vec))) if complex_vec.size else 0.0
+            if denominator > 0.0:
+                scale = 1.0 / denominator
+        if scale != 1.0:
+            complex_vec = (complex_vec * scale).astype(np.complex64)
+        return complex_vec, scale
 
 
 class AudioHandleCache:
@@ -188,8 +266,8 @@ class AudioRecordLayout:
             expected_sample_rate = None if sample_rate in (None, "") else float(sample_rate)
         except (TypeError, ValueError) as exc:
             raise ValueError(f"Audio record {position} has invalid expected_sample_rate {sample_rate!r}") from exc
-        if expected_sample_rate is not None and expected_sample_rate < 0:
-            raise ValueError(f"Audio record {position} has negative expected_sample_rate {expected_sample_rate}")
+        if expected_sample_rate is not None and (not np.isfinite(expected_sample_rate) or expected_sample_rate <= 0):
+            raise ValueError(f"Audio record {position} has invalid expected_sample_rate {expected_sample_rate}")
         return AudioRecord(
             path=self._resolve_path(row["file_path"], position),
             start_frame=self._parse_nonnegative_int(row["start_frame"], "start_frame", position),
