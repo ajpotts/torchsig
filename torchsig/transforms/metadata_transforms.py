@@ -237,31 +237,55 @@ class MultiHotLabel(MetadataTransform):
 
 
 class YOLOLabel(MetadataTransform):
-    """Adds a YOLO_label to a signal.
+    """Add a YOLO label to a signal.
 
-    This transform adds a YOLO_label to a signal in the form of a list of tuples (cid, cx, cy, width, height).
+    The label is a tuple of ``(cid, cx, cy, width, height)``. By default, its
+    frequency-axis height uses the signal's threshold-based
+    ``estimated_occupied_bandwidth``. Set ``bandwidth_key="bandwidth"`` to use
+    the generator-selected canonical bandwidth instead.
+
+    Args:
+        bandwidth_key: Signal metadata field used for the box height. Must be
+            ``"estimated_occupied_bandwidth"`` or ``"bandwidth"``.
+        **kwargs: Additional keyword arguments passed to the parent class.
 
     Attributes:
         required_metadata: List of metadata fields required for applying the transform.
         targets_metadata: List of metadata fields that will be added by the transform.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(
+        self,
+        bandwidth_key: str = "estimated_occupied_bandwidth",
+        **kwargs,
+    ) -> None:
         """Initialize the YOLOLabel transform.
 
         Args:
+            bandwidth_key: Signal metadata field used for the box height.
             **kwargs: Additional keyword arguments passed to the parent class.
+
+        Raises:
+            ValueError: If ``bandwidth_key`` is not a supported field.
         """
+        valid_bandwidth_keys = {"bandwidth", "estimated_occupied_bandwidth"}
+        if bandwidth_key not in valid_bandwidth_keys:
+            raise ValueError(
+                "bandwidth_key must be 'estimated_occupied_bandwidth' or "
+                "'bandwidth'"
+            )
+
         super().__init__(
             required_metadata=[
                 "class_index",
                 "start",
-                "bandwidth",
+                bandwidth_key,
                 "center_freq",
                 "dataset_metadata",
             ],
             **kwargs,
         )
+        self.bandwidth_key = bandwidth_key
         self.targets_metadata = ["yolo_label"]
 
     def __apply__(self, signal: Signal) -> Signal:
@@ -273,11 +297,16 @@ class YOLOLabel(MetadataTransform):
         Returns:
             The transformed signal with YOLO_label added.
         """
+        if not hasattr(signal, self.bandwidth_key):
+            raise ValueError(
+                f"key: {self.bandwidth_key} is missing from signal metadata, "
+                f"but is required by {self.__class__.__name__}."
+            )
         class_index = signal.class_index
         # normalized to width of sample
         width = signal.duration
-        # normalize bandwidth with sample rate
-        height = signal.bandwidth / signal.sample_rate
+        # normalize the selected bandwidth with sample rate
+        height = signal[self.bandwidth_key] / signal.sample_rate
         x_center = signal.start + (width / 2.0)
         # normalize center frequency with sample rate
         # subtract from 1 since (0,0) for YOLO is upper left, but we define (0,0) lower left
