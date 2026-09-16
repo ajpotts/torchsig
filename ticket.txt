@@ -1,0 +1,121 @@
+Summary
+Improve TorchSig’s homogeneous HDF5 infrastructure so users can efficiently materialize deterministic dataset transformations and load the resulting model-ready data through PyTorch DataLoaders.
+This parent ticket tracks the reusable TorchSig work. Model- and experiment-specific feature definitions remain outside TorchSig.
+Motivation
+For static datasets, repeatedly applying deterministic signal transforms during every training epoch can make data preparation substantially slower than GPU computation.
+In one benchmark:
+
+
+        
+      Runtime transformation pipeline: approximately 1,610 samples/second.
+
+        
+      Precomputed HDF5 pipeline: approximately 14,418 samples/second.
+
+        
+      DataLoader improvement: approximately 9×.
+
+TorchSig should make this materialization pattern reliable and reusable without requiring projects to implement custom HDF5 infrastructure.
+Proposed child issues
+
+
+        
+      Support batched materialization from a Dataset or DataLoader.
+
+        
+      Support structured, fixed-shape inputs and targets.
+
+        
+      Add worker-safe lazy HDF5 file access.
+
+        
+      Add schema inference and validation.
+
+        
+      Add atomic output creation and explicit overwrite behavior.
+
+        
+      Add source/output sample-equivalence validation.
+
+        
+      Investigate optional HDF5 sharding and manifest support.
+
+        
+      Add documentation and performance examples.
+
+Scope
+TorchSig should provide generic storage and loading capabilities for homogeneous numeric data, including:
+
+
+        
+      Multiple fixed-shape fields per sample
+
+        
+      Preservation of field names, shapes, and dtypes
+
+        
+      Efficient indexed access
+
+        
+      Concurrent read-only DataLoader workers
+
+        
+      Batched generation with progress reporting
+
+        
+      Clear errors for unsupported variable-size or object-valued fields
+
+        
+      Dataset length and schema metadata
+
+        
+      Safe handling of incomplete or existing output
+
+TorchSig should not define model-specific fields, class mappings, feature transforms, dataset splits, or training configurations.
+Validation
+
+
+        
+      Round-trip fixed-shape numeric samples exactly.
+
+        
+      Verify structured input and target fields.
+
+        
+      Test multiple numeric dtypes and tensor shapes.
+
+        
+      Test single- and multiworker DataLoader access.
+
+        
+      Verify file handles are not improperly shared across worker processes.
+
+        
+      Test schema mismatch and incomplete-output failures.
+
+        
+      Benchmark reading against online deterministic transformations.
+
+        
+      Document supported and unsupported dataset structures.
+
+Acceptance criteria
+
+
+        
+      Users can materialize a compatible Dataset or DataLoader using public TorchSig APIs.
+
+        
+      Materialized samples retain their expected structure, shapes, dtypes, and values.
+
+        
+      The reader works safely with multiple PyTorch DataLoader workers.
+
+        
+      Failed generation does not leave an apparently valid completed dataset.
+
+        
+      Existing homogeneous HDF5 behavior remains compatible or has a documented migration path.
+
+        
+      Documentation explains when to precompute deterministic transforms and when to retain randomized online transforms.
