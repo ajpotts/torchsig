@@ -41,6 +41,7 @@ def load_config_from_yaml(path: Path) -> "TorchSigDatasetConfig":
         A dictionary containing the dataset metadata extracted from the YAML file.
     """
     from torchsig.datasets.datasets import TorchSigDatasetConfig
+    from torchsig.utils.experiment_config import load_experiment_config
 
     # load configuration from yaml file
     cfg = yaml.safe_load(path.read_text()) or {}
@@ -58,16 +59,19 @@ def load_config_from_yaml(path: Path) -> "TorchSigDatasetConfig":
     mode = ss.get("mode")
     _require(mode in ("per_signal", "per_family"), "signal_sampling.mode must be 'per_signal' or 'per_family'")
 
-    return TorchSigDatasetConfig(
-        dataset_id=str(cfg.get("dataset_id", path.stem)),
-        dataset_length=int(cfg["dataset_length"]),
-        seed=int(cfg["seed"]),
-        impairment_level=int(cfg["impairment_level"]),
-        output_representation=rep,
-        output_spectrogram_fft=cfg["dataset_metadata"].get("fft_size"),
-        signal_sampling_mode=mode,
-        dataset_metadata=dict(cfg["dataset_metadata"]),
-    )
+    config_kwargs = {
+        "dataset_id": str(cfg.get("dataset_id", path.stem)),
+        "dataset_length": int(cfg["dataset_length"]),
+        "seed": int(cfg["seed"]),
+        "impairment_level": int(cfg["impairment_level"]),
+        "output_representation": rep,
+        "output_spectrogram_fft": cfg["dataset_metadata"].get("fft_size"),
+        "signal_sampling_mode": mode,
+        "dataset_metadata": dict(cfg["dataset_metadata"]),
+    }
+    if "signals" in cfg:
+        config_kwargs["experiment_config"] = load_experiment_config({"signals": cfg["signals"]})
+    return TorchSigDatasetConfig(**config_kwargs)
 
 
 def dataset_from_yaml_dict(yaml_dict: dict[str, Any]) -> "TorchSigIterableDataset":

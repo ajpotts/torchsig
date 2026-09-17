@@ -54,6 +54,9 @@ examples/datasets/
 !examples/transforms/*.ipynb
 !examples/*.py
 !examples/*.yaml
+!examples/scripts/
+examples/scripts/*
+!examples/scripts/demo_signal_generation_config.py
 
 # Pytest Files
 *.coverage

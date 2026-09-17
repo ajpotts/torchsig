@@ -19,6 +19,7 @@ from torchsig.transforms.metadata_transforms import GroupingLabel
 from torchsig.utils.abstractions import HierarchicalMetadataObject
 from torchsig.utils.coordinate_system import Coordinate, Rectangle, is_rectangle_overlap
 from torchsig.utils.dsp import compute_spectrogram, update_signal_snr_bandwidth
+from torchsig.utils.experiment_config import ExperimentConfig, load_experiment_config
 from torchsig.utils.file_handlers.hdf5 import HDF5Reader
 from torchsig.utils.metadata_logging import (
     get_metadata_logging_context,
@@ -67,6 +68,7 @@ class TorchSigDatasetConfig:
     signal_sampling_mode: Literal["per_signal", "per_family"]
     dataset_metadata: dict[str, Any]
     target_labels: list[str] = field(default_factory=lambda: ["class_index"])  # default classification use case
+    experiment_config: ExperimentConfig = field(default_factory=ExperimentConfig)
 
 
 def apply_label_to_signal(sample: Signal, target_label: str) -> list:
@@ -178,6 +180,7 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         target_labels: list | None = None,
         sampling_grouping: (GroupingLabel | str | Path | Mapping[str, Any] | None) = None,
         per_signal_metadata: dict[str, dict[str, int | float]] | None = None,
+        experiment_config: ExperimentConfig | str | Path | Mapping[str, Any] | None = None,
         # will try to validate required metadata in this dataset; can be turned off if a dataset needs to be initialized before it's metadata is known
         validate_init: bool = True,
         **kwargs,
@@ -197,6 +200,8 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
             per_signal_metadata: Optional metadata overrides keyed by signal
                 class name. Supported overrides are the minimum and maximum
                 values for SNR, signal duration in samples, and bandwidth.
+            experiment_config: Optional validated configuration, YAML path, or
+                mapping containing per-signal generator parameter overrides.
             validate_init: Whether to validate metadata during initialization.
             **kwargs: Additional keyword arguments passed to the parent class.
 
@@ -220,6 +225,7 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         self._signal_probability_mode = "likelihood"
         self.target_labels = target_labels
         self.per_signal_metadata = self._validate_per_signal_metadata(per_signal_metadata)
+        self.experiment_config = load_experiment_config(experiment_config)
         self.transforms = [] if transforms is None else transforms
         self.component_transforms = [] if component_transforms is None else component_transforms
         self._metadata_logging_sample_index = 0
@@ -298,6 +304,14 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         overrides = self.per_signal_metadata.get(signal_generator.class_name, {})
         for metadata_field, value in overrides.items():
             signal_generator[metadata_field] = value
+
+    def _apply_experiment_config(self, signal_generator: callable) -> None:
+        """Apply validated generator parameter overrides for a signal class."""
+        if not hasattr(signal_generator, "class_name"):
+            return
+        alpha = self.experiment_config.parameter_value(signal_generator.class_name, "alpha")
+        if alpha is not None:
+            signal_generator["alpha"] = alpha
 
     @staticmethod
     def _validate_positive_weight(value: float, parameter_name: str) -> float:
@@ -523,6 +537,7 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
             signal_generator["class_name"] = class_name
 
         self._apply_per_signal_metadata(signal_generator)
+        self._apply_experiment_config(signal_generator)
 
         if isinstance(signal_generator, Seedable):
             signal_generator.add_parent(self)
