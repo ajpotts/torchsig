@@ -100,6 +100,7 @@ def _mock_config(
     cfg.seed = seed
     cfg.output_representation = output_representation
     cfg.dataset_metadata = {}
+    cfg.experiment_config = MagicMock()
     return cfg
 
 
@@ -509,6 +510,12 @@ def test_split_datamodule_prepare_data_creates_all_splits(
     assert dataset_creator_cls.call_args_list[0].kwargs["dataset_length"] == 12
     assert dataset_creator_cls.call_args_list[1].kwargs["dataset_length"] == 6
     assert dataset_creator_cls.call_args_list[2].kwargs["dataset_length"] == 4
+
+    for call_args, cfg in zip(
+        iterable_dataset_cls.call_args_list,
+        (train_cfg, val_cfg, test_cfg),
+    ):
+        assert call_args.kwargs["experiment_config"] is cfg.experiment_config
 
     assert Path(dataset_creator_cls.call_args_list[0].kwargs["root"]) == (tmp_path / "test_dataset" / "train")
     assert Path(dataset_creator_cls.call_args_list[1].kwargs["root"]) == (tmp_path / "test_dataset" / "val")
