@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from . import homogeneous_hdf5 as homogeneous_hdf5
     from . import npy as npy
     from . import packed_hdf5 as packed_hdf5
+    from . import structured_schema as structured_schema
     from .base_handler import BaseFileHandler as BaseFileHandler
     from .base_handler import FileReader as FileReader
     from .base_handler import FileWriter as FileWriter
@@ -27,6 +28,10 @@ if TYPE_CHECKING:
     from .packed_hdf5 import PackedHDF5Reader as PackedHDF5Reader
     from .packed_hdf5 import PackedHDF5Writer as PackedHDF5Writer
     from .sigmf import SigMFReader as SigMFReader
+    from .structured_schema import StructuredField as StructuredField
+    from .structured_schema import StructuredNode as StructuredNode
+    from .structured_schema import StructuredSampleSchema as StructuredSampleSchema
+    from .structured_schema import infer_structured_sample_schema as infer_structured_sample_schema
     from .wav import WAVReader as WAVReader
 
 _EXPORTS = {
@@ -35,6 +40,7 @@ _EXPORTS = {
     "homogeneous_hdf5": ("torchsig.utils.file_handlers.homogeneous_hdf5", None),
     "npy": ("torchsig.utils.file_handlers.npy", None),
     "packed_hdf5": ("torchsig.utils.file_handlers.packed_hdf5", None),
+    "structured_schema": ("torchsig.utils.file_handlers.structured_schema", None),
     "BaseFileHandler": ("torchsig.utils.file_handlers.base_handler", "BaseFileHandler"),
     "FileReader": ("torchsig.utils.file_handlers.base_handler", "FileReader"),
     "FileWriter": ("torchsig.utils.file_handlers.base_handler", "FileWriter"),
@@ -50,6 +56,10 @@ _EXPORTS = {
     "PackedHDF5Reader": ("torchsig.utils.file_handlers.packed_hdf5", "PackedHDF5Reader"),
     "PackedHDF5Writer": ("torchsig.utils.file_handlers.packed_hdf5", "PackedHDF5Writer"),
     "SigMFReader": ("torchsig.utils.file_handlers.sigmf", "SigMFReader"),
+    "StructuredField": ("torchsig.utils.file_handlers.structured_schema", "StructuredField"),
+    "StructuredNode": ("torchsig.utils.file_handlers.structured_schema", "StructuredNode"),
+    "StructuredSampleSchema": ("torchsig.utils.file_handlers.structured_schema", "StructuredSampleSchema"),
+    "infer_structured_sample_schema": ("torchsig.utils.file_handlers.structured_schema", "infer_structured_sample_schema"),
     "WAVReader": ("torchsig.utils.file_handlers.wav", "WAVReader"),
 }
 
