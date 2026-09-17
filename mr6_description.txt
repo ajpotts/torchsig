@@ -1,0 +1,23 @@
+Summary
+
+Adds optional source/output equivalence validation to materialize_structured_dataset. validation="full" checks every materialized sample, while validation="sampled" checks a deterministic subset controlled by validation_samples and validation_seed. Source samples selected for validation are copied from the exact DataLoader stream during writing, avoiding a second pass that could rerun randomized transforms.
+
+Validation occurs after the staged writer is complete and the structured reader has validated the physical file, but before MR4 atomic publication. The comparison checks structure, field paths, shapes, dtypes, and values. Exact equality is the default, with NaNs treated as equivalent and complex values supported. Callers can explicitly configure validation_rtol and validation_atol for lossy workflows. Failures identify the sample index and field path and leave an existing published dataset unchanged.
+
+Successful staged files record validation_mode, validation_result, validation_sample_count, validation_seed, validation_rtol, and validation_atol attributes. Outputs created without validation record that validation was not requested.
+
+Public API
+
+* materialize_structured_dataset(..., validation=None, validation_samples=100, validation_seed=0, validation_rtol=0.0, validation_atol=0.0)
+
+Test plan
+
+* Run focused structured materialization and validation tests.
+* Run structured schema, storage, and multiprocessing regression suites.
+* Run existing homogeneous HDF5 compatibility tests.
+* Run Ruff on all changed Python files.
+* Run git diff --check.
+
+Scope boundaries
+
+This MR does not change the structured HDF5 schema version, reader lifecycle, or existing homogeneous format. Documentation and end-to-end performance reporting remain in MR7.
