@@ -1,0 +1,135 @@
+Structured HDF5 Performance Follow-up
+=====================================
+
+Goal
+----
+
+The primary goal of the merge plan is to increase model-training throughput by
+reducing repeated CPU work, Python object construction, and inefficient storage
+access in the model-facing DataLoader. The structured format is a means to that
+end, not by itself proof of a speedup.
+
+Effect on existing formats
+--------------------------
+
+The proposed work does not automatically accelerate files already stored in
+the packed or Signal-oriented homogeneous formats. Those readers and their
+on-disk schemas are intentionally preserved for compatibility.
+
+Both formats can benefit as inputs to the MR3 materialization API:
+
+* A Dataset backed by PackedHDF5Reader can be iterated once and its final
+  model-ready outputs written to structured HDF5. Training then reads the
+  structured copy instead of reconstructing packed Signal and metadata
+  records every epoch.
+* A Dataset backed by HomogeneousHDF5Reader can be materialized the same way.
+  This can still remove Signal reconstruction, metadata decoding, target
+  extraction, deterministic output transforms, and general-purpose collation.
+* Conversion has an up-front time and storage cost. Its value depends on the
+  number of training epochs and should be reported as a break-even epoch count.
+
+For direct, unconverted access, the current merge plan provides no new packed
+reader optimization. The existing homogeneous reader already supports
+contiguous Signal batch reads, and StaticTorchSigDataset uses that path for
+contiguous __getitems__ requests. Shuffled batches generally fall back to
+individual sample reads. Any direct optimization of packed or homogeneous
+formats should be separately scoped and benchmarked rather than implied by the
+structured-format work.
+
+Recommended changes to the merge plan
+-------------------------------------
+
+1. Add an early raw-I/O performance checkpoint after MR2.
+
+   Compare existing standard, packed, and homogeneous readers with the
+   structured reader. Measure individual random reads and contiguous batch
+   reads for representative IQ and spectrogram-shaped samples. Test
+   uncompressed and LZF-compressed files and relevant chunk sizes.
+
+2. Expand MR3 to include model-facing integration.
+
+   The structured map-style Dataset should implement both __getitem__ and
+   batch-aware __getitems__. TorchSigDataModule and SplitTorchSigDataModule
+   should have an explicit, documented way to create and select materialized
+   structured model outputs. Without this integration, existing training code
+   does not become faster merely because the structured reader exists.
+
+3. Make shuffled batch access a first-class requirement.
+
+   For contiguous indices, issue one slice per schema leaf. For shuffled
+   indices, sort and coalesce reads where practical, then restore sampler
+   order. Avoid one HDF5 operation per field per sample when a batch-level read
+   can be used. Benchmark the actual PyTorch DataLoader path rather than only
+   calling reader methods directly.
+
+4. Add an end-to-end performance gate after MR3.
+
+   Compare the current StaticTorchSigDataset path against materialized
+   structured loading with sequential and shuffled sampling, persistent
+   workers, and num_workers values of 0, 2, 4, and optionally 8. Record cold
+   first-batch latency, steady-state epoch throughput, CPU utilization, peak
+   memory, output size, materialization time, and break-even epoch count.
+
+   Use at least these workloads:
+
+   * Fixed-size complex IQ input with a scalar class target.
+   * Spectrogram or image-like floating-point input.
+   * A multi-field detection-style target if it satisfies the fixed-shape
+     structured contract.
+   * A workload with deterministic transforms expensive enough for
+     precomputation to matter.
+
+   Establish a project-approved throughput target before treating later MRs as
+   evidence that the performance goal has been achieved.
+
+5. Keep deterministic and randomized work separate.
+
+   Materialize expensive deterministic transforms, representation conversion,
+   and deterministic target construction. Retain randomized augmentations
+   online when they are intended to change across epochs. Document this split
+   so materialization does not accidentally freeze training augmentation.
+
+6. Tune compression and chunking for training access.
+
+   Compression reduces storage and I/O volume but consumes CPU and can amplify
+   shuffled reads when chunks contain multiple samples. Benchmark no
+   compression, LZF, one-sample chunks, and small multi-sample chunks. Do not
+   assume that the smallest file produces the fastest DataLoader. Consider an
+   uncompressed default for model-ready training data if measurements support
+   it.
+
+7. Treat MR5 as both a safety and scaling checkpoint.
+
+   PID-aware lazy handles, pickle-safe state, fork/spawn support, and explicit
+   close are required for correctness. After implementing them, repeat the
+   end-to-end benchmark. More workers may be slower when they contend for one
+   HDF5 file or compete for decompression and memory bandwidth.
+
+8. Promote sharding if measurements show single-file contention.
+
+   The sharding investigation can remain outside the correctness-critical
+   path, but it should not be assumed irrelevant to performance. Proceed with
+   a sharded implementation if multiworker throughput plateaus or regresses
+   because workers contend on one file, or if dataset size and operational
+   constraints make a single file impractical.
+
+Recommended merge order
+-----------------------
+
+MR1 -> MR2 -> raw-I/O performance checkpoint -> MR3 plus DataModule and
+batch-aware integration -> end-to-end performance gate -> MR5 -> repeat the
+performance gate -> MR4 -> MR6 -> MR7.
+
+Run the sharding investigation after the first end-to-end performance gate so
+its recommendation is based on observed access patterns and contention.
+
+Expected outcome
+----------------
+
+The largest speedup is expected when structured materialization replaces work
+that is otherwise repeated each epoch: Signal reconstruction, metadata
+decoding, label extraction, deterministic transforms, and Python-heavy
+collation. Workloads that already precompute transforms and are limited by raw
+storage bandwidth may see a smaller improvement or no improvement. Existing
+packed and homogeneous datasets participate by being materialization sources;
+they are not made faster in place unless separately optimized.
