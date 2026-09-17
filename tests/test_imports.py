@@ -10,7 +10,7 @@ from torchsig import _lazy
 
 
 def run_python(source: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # noqa: S603
+    return subprocess.run(
         [sys.executable, "-c", source],
         check=False,
         capture_output=True,

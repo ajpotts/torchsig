@@ -108,7 +108,7 @@ def test_pickle_excludes_handles(fake_soundfile) -> None:
     cache = AudioHandleCache(2)
     cache.read(Path("one.wav"), 0, 1)
 
-    restored = pickle.loads(pickle.dumps(cache))  # noqa: S301 - trusted local test object
+    restored = pickle.loads(pickle.dumps(cache))
 
     assert restored.max_size == 2
     assert len(restored) == 0

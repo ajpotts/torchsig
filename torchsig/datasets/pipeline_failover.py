@@ -1,4 +1,3 @@
-# ruff: noqa: PERF203
 import logging
 import sys
 import traceback

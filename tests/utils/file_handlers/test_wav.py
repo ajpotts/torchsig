@@ -103,9 +103,9 @@ def test_context_manager_closes_cached_handles(tmp_path):
 
     with WAVReader(tmp_path) as reader:
         reader.read(0)
-        assert len(reader._audio_handles) == 1  # noqa: SLF001 - lifecycle assertion
+        assert len(reader._audio_handles) == 1
 
-    assert len(reader._audio_handles) == 0  # noqa: SLF001 - lifecycle assertion
+    assert len(reader._audio_handles) == 0
 
 
 def test_pickled_reader_has_no_live_handles(tmp_path):
@@ -114,8 +114,8 @@ def test_pickled_reader_has_no_live_handles(tmp_path):
     reader = WAVReader(tmp_path, audio_handle_cache_size=3)
     reader.read(0)
 
-    restored = pickle.loads(pickle.dumps(reader))  # noqa: S301 - trusted local test object
+    restored = pickle.loads(pickle.dumps(reader))
 
     assert restored.audio_handle_cache_size == 3
-    assert len(restored._audio_handles) == 0  # noqa: SLF001 - pickle assertion
+    assert len(restored._audio_handles) == 0
     np.testing.assert_array_equal(restored.read(0).data, reader.read(0).data)
