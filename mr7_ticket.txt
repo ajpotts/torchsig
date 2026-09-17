@@ -1,0 +1,16 @@
+Title: Document structured materialization and add an end-to-end performance benchmark
+
+Document the complete structured HDF5 workflow introduced in MRs 1 through 6 and provide a reproducible benchmark comparing online deterministic transforms with materialized model-ready reads.
+
+Acceptance criteria:
+
+* Document the supported nested sample grammar and unsupported object-valued, ragged, or variable-shape data.
+* Provide Dataset and existing DataLoader materialization examples.
+* Explain which deterministic work to precompute and why randomized epoch-varying augmentation should remain online.
+* Document atomic publication, explicit overwrite behavior, validation modes and tolerances, worker-safe lazy handles, and explicit close behavior.
+* Explain compatibility with legacy, packed, and Signal-oriented homogeneous HDF5 and how those datasets can serve as materialization sources.
+* Add a configurable benchmark for sequential and shuffled DataLoader access with zero and multiple workers.
+* Report materialization time, output size, cold first-batch latency, online and materialized epoch throughput, and break-even epoch count.
+* Avoid asserting a universal speedup and explain how compression, chunking, storage, and workload cost affect results.
+
+No public storage or materialization API changes are required by this ticket.
