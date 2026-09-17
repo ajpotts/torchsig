@@ -1,0 +1,26 @@
+Title: Reduce test-suite runtime caused by redundant dataset generation and worker startup
+
+Description
+
+Several unit tests take multiple seconds each despite exercising small behaviors. Most of the time is spent starting Python or PyTorch worker processes, generating full-size synthetic RF signals, or repeating multiprocessing coverage for every data representation.
+
+The slow tests include dataset creation and static loading, datamodule loader configuration, homogeneous HDF5 multiprocessing, DatasetCreator behavior and progress reporting, and the signal-generation configuration demo. Together, the targeted tests take approximately 32 seconds on the development system.
+
+Optimize these tests while retaining coverage of the behaviors they are intended to validate. Multiprocessing behavior should remain covered by a representative HDF5 reader case, while representation-specific behavior can use single-process execution. Tests concerned with writer mechanics should use the smallest practical datasets and batch counts. The demo should be callable in-process so its behavior can be tested without launching another Python interpreter.
+
+Acceptance criteria
+
+- Dataset creation and static loading are tested with the minimum number of samples needed to validate persistence and duplicate-reader behavior.
+- Train, validation, and test dataloaders are checked for correct worker and persistent-worker configuration without launching a nested interpreter.
+- IQ, wideband, and spectrogram HDF5 content remain covered.
+- At least one HDF5 reader test exercises multiprocessing, repeated persistent-worker epochs, ordering, metadata reconstruction, and continued parent-reader access.
+- DatasetCreator tests continue to cover inferred-length errors, partial final batches, threaded and non-threaded writes, YAML output, caller-state restoration, and progress output.
+- The signal-generation demo remains usable from the command line and can also accept an explicit argument list for in-process testing.
+- The targeted slow-test call time is materially reduced without production-code behavior changes.
+- Relevant tests and lint checks pass.
+
+Out of scope
+
+- Production dataset-generation performance changes.
+- Changes to public dataset or file formats.
+- Removal of multiprocessing coverage from the test suite.

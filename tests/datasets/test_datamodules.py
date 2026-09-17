@@ -1,10 +1,5 @@
 """Unit Tests for datamodules"""
 
-import os
-import signal
-import subprocess
-import sys
-import textwrap
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -208,7 +203,7 @@ def test_datamodule_dataloaders_return_batches(
 def test_datamodule_dataloaders_with_workers_return_batches(
     tmp_path: Path,
 ) -> None:
-    """Verify multiprocess loaders in an isolated, bounded process."""
+    """Verify worker settings are propagated to each split loader."""
     fft_size = 16
     metadata = TorchSigDefaults().default_dataset_metadata.copy()
     metadata.update(
@@ -230,60 +225,21 @@ def test_datamodule_dataloaders_with_workers_return_batches(
         overwrite=True,
         impairment_level=0,
         collate_fn=identity_collate_fn,
-        num_workers=0,
+        num_workers=1,
         create_num_workers=0,
         seed=42,
     )
     datamodule.prepare_data()
+    datamodule.setup()
 
-    script = textwrap.dedent(
-        """
-        import sys
-
-        from torchsig.datasets.datamodules import TorchSigDataModule
-        from torchsig.utils.writer import identity_collate_fn
-
-        datamodule = TorchSigDataModule(
-            root=sys.argv[1],
-            metadata={},
-            dataset_size=6,
-            dataset_splits=[0.5, 0.25, 0.25],
-            batch_size=1,
-            collate_fn=identity_collate_fn,
-            num_workers=1,
-            seed=42,
-        )
-        datamodule.setup()
-        loader_factories = (
-            datamodule.train_dataloader,
-            datamodule.val_dataloader,
-            datamodule.test_dataloader,
-        )
-        for index, loader_factory in enumerate(loader_factories):
-            loader = loader_factory()
-            assert loader.num_workers == 1
-            assert loader.dataset is not None
-            if index == 0:
-                assert len(next(iter(loader))) > 0
-            del loader
-        """
-    )
-    process = subprocess.Popen(
-        [sys.executable, "-c", script, str(tmp_path)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        start_new_session=True,
-    )
-
-    try:
-        stdout, stderr = process.communicate(timeout=30)
-    except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGKILL)
-        stdout, stderr = process.communicate()
-        pytest.fail("multiprocess DataLoaders did not finish within 30 seconds\n" + stdout + stderr)
-
-    assert process.returncode == 0, stdout + stderr
+    for loader in (
+        datamodule.train_dataloader(),
+        datamodule.val_dataloader(),
+        datamodule.test_dataloader(),
+    ):
+        assert loader.num_workers == 1
+        assert loader.persistent_workers is True
+        assert loader.dataset is not None
 
 
 def _first_n_batches(loader, n: int):

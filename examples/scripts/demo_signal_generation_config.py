@@ -1,4 +1,3 @@
-# ruff: noqa: INP001
 """Demonstrate programmatic and YAML per-signal configuration.
 
 Run from the repository root:
@@ -121,7 +120,7 @@ def run_demo(output_dir: Path, *, overwrite: bool = False) -> None:
     print(f"Dataset artifact: {artifact_path}")
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     """Parse command-line arguments and run the demonstration."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -135,7 +134,7 @@ def main() -> None:
         action="store_true",
         help="Allow replacement of files in --output-dir.",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     run_demo(args.output_dir, overwrite=args.overwrite)
 

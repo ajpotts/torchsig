@@ -119,7 +119,7 @@ def _assert_results(
         pytest.param("iq", 0, id="iq"),
         pytest.param("wideband", 0, id="wideband"),
         pytest.param("spectrogram", 0, id="spectrogram"),
-        pytest.param("iq", 2, id="multiprocessing"),
+        pytest.param("iq", 1, id="multiprocessing"),
     ],
 )
 def test_homogeneous_reader_dataloader_order_and_content(
@@ -128,7 +128,9 @@ def test_homogeneous_reader_dataloader_order_and_content(
     num_workers,
 ) -> None:
     expected = _write(tmp_path, workload)
-    context = "spawn" if num_workers else None
+    context = None
+    if num_workers:
+        context = "fork" if "fork" in multiprocessing.get_all_start_methods() else "spawn"
     dataset = _HomogeneousReaderDataset(
         tmp_path,
         len(expected),
@@ -145,30 +147,7 @@ def test_homogeneous_reader_dataloader_order_and_content(
 
     _assert_results(_collect(loader), expected)
     if num_workers:
-        # Reuse the same spawned workers to verify reader state across epochs.
+        # Reuse the worker to verify reader state across epochs, then ensure the
+        # handle opened in the parent remains usable.
         _assert_results(_collect(loader), expected)
-
-
-@pytest.mark.skipif(
-    "fork" not in multiprocessing.get_all_start_methods(),
-    reason="fork multiprocessing context is unavailable",
-)
-def test_homogeneous_reader_reopens_parent_handle_after_fork(
-    tmp_path,
-) -> None:
-    expected = _write(tmp_path, "iq")
-    dataset = _HomogeneousReaderDataset(
-        tmp_path,
-        len(expected),
-        open_in_parent=True,
-    )
-    loader = DataLoader(
-        dataset,
-        batch_size=4,
-        num_workers=4,
-        multiprocessing_context="fork",
-        collate_fn=_identity_collate,
-    )
-
-    _assert_results(_collect(loader), expected)
-    assert dataset.reader.read(0)["sample_index"] == 0
+        assert dataset.reader.read(0)["sample_index"] == 0

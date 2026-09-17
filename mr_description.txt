@@ -1,0 +1,45 @@
+Title: Speed up dataset, writer, multiprocessing, and demo tests
+
+Summary
+
+This MR reduces test-suite runtime by removing redundant process startup and oversized synthetic workloads while preserving the behaviors covered by the affected tests.
+
+Changes
+
+- Simplifies dataset creation/static loading coverage to one sample and a zero-worker loader. Multiprocessing is covered in the dedicated file-handler tests.
+- Replaces full-size default signal generation in DatasetCreator tests with a small 256-sample iterable dataset containing no component signals.
+- Reduces writer test lengths while retaining partial-final-batch, threaded, non-threaded, YAML, state-restoration, and tqdm assertions.
+- Runs IQ, wideband, and spectrogram homogeneous HDF5 content checks without workers.
+- Consolidates HDF5 multiprocessing, persistent-worker epoch reuse, ordering, metadata reconstruction, and parent-handle validation into one representative IQ case.
+- Uses one native multiprocessing worker where fork is available, with spawn retained as the fallback on platforms without fork.
+- Replaces the datamodule test's nested Python subprocess with direct assertions that all split loaders receive the requested worker and persistent-worker configuration. Batch-return behavior remains covered by the adjacent zero-worker datamodule test, and actual worker reads remain covered by the HDF5 multiprocessing test.
+- Updates the signal-generation demo entry point to accept an optional argument list while preserving normal command-line invocation.
+- Calls the demo directly from its test instead of starting another Python interpreter.
+- Adds the examples/scripts package marker and allows its Python files through .gitignore.
+
+Performance
+
+Measured call-time improvements on the development system include:
+
+- Homogeneous HDF5 multiprocessing: 3.40s to 0.06s.
+- Datamodule worker test: 3.27s to 0.08s.
+- Signal-generation demo test: approximately 3.21s to 0.04s.
+- DatasetCreator and tqdm cases: approximately 2.50-3.07s each to approximately 0.02s each.
+- Dataset creation/static loading: the zero-worker case completes in approximately 0.05s and the redundant two-worker case is removed.
+
+The original group of targeted slow tests took approximately 32 seconds in aggregate call time. The corresponding optimized test calls complete in well under one second on the development system; overall pytest wall time remains higher because of suite import and collection overhead.
+
+Testing
+
+- pytest -q tests/utils/file_handlers/test_homogeneous_hdf5_multiprocessing.py tests/datasets/test_datamodules.py::test_datamodule_dataloaders_return_batches tests/datasets/test_datamodules.py::test_datamodule_dataloaders_with_workers_return_batches
+  - 6 passed in 2.74s
+- pytest -q tests/utils/file_handlers/test_homogeneous_hdf5_multiprocessing.py tests/test_demo_signal_generation_config.py tests/utils/test_writer.py::test_DatasetCreator tests/utils/test_writer.py::test_DatasetCreator_tqdm_output
+  - 11 passed in 5.92s before the final native-worker optimization
+- pytest -q tests/test_demo_signal_generation_config.py
+  - 1 passed; test call completed in 0.04s
+- Ruff checks pass for the changed demo and homogeneous HDF5 test files.
+- git diff --check passes.
+
+Risk and compatibility
+
+Production code and persisted data formats are unchanged. The main tradeoff is that explicit spawn coverage runs only on platforms where spawn is the native available fallback; Linux uses fork for the representative multiprocessing test to avoid repeated multi-second interpreter startup. Single-process tests still cover every supported homogeneous workload, while the representative multiprocessing case covers worker lifecycle behavior.
