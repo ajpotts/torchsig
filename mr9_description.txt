@@ -1,0 +1,73 @@
+Title: Add a unified benchmark for legacy, packed, homogeneous, and structured HDF5 reads
+
+Summary
+-------
+
+Adds a standalone raw-I/O benchmark that creates and validates equivalent
+datasets for all four TorchSig HDF5 formats before measuring them with a common
+methodology. It covers deterministic complex IQ and floating-point image-like
+workloads, uncompressed and LZF storage, individual sequential/random access,
+and contiguous/shuffled batch requests.
+
+The benchmark reports first-read latency, median warm-cache samples per second,
+repetition standard deviation, file size, native batch capabilities, requested
+configuration, and software/platform versions. Results are emitted as JSON and
+CSV for review and later before/after comparison with MR10.
+
+Format controls and semantics
+-----------------------------
+
+Homogeneous and structured writers expose ``chunk_samples`` and are measured
+for every requested chunk size. Legacy and packed writers do not expose that
+control, so they are generated once per compression mode and report
+``chunk_samples=null``. The JSON capability map makes this distinction
+explicit.
+
+Homogeneous and structured readers use their native contiguous batch APIs.
+Legacy and packed formats use individual reads because no equivalent native
+contiguous API exists. No reader currently exposes a native shuffled batch
+index API, so shuffled requests are deliberately measured through the current
+per-sample path. This supplies the baseline for MR10's structured shuffled-read
+optimization.
+
+Usage
+-----
+
+Run the default representative matrix with:
+
+python benchmarks/optional/benchmark_hdf5_readers_unified.py \
+  --output-dir .benchmarks/hdf5-readers \
+  --results .benchmarks/hdf5-reader-results.json \
+  --samples 256 \
+  --reads 128 \
+  --repetitions 3 \
+  --compressions none,lzf \
+  --chunk-sizes 1,8,32
+
+Use ``--overwrite`` to replace a previously generated benchmark matrix.
+
+Files changed
+-------------
+
+* benchmarks/optional/benchmark_hdf5_readers_unified.py
+* tests/test_unified_hdf5_reader_benchmark.py
+* docs/hdf5_readers.rst
+* mr9_ticket.txt
+* mr9_description.txt
+
+Test plan
+---------
+
+* Run Ruff on the new benchmark and tests.
+* Run the focused unified-reader benchmark tests.
+* Run a self-contained CLI smoke matrix across all four readers.
+* Run the existing structured and HDF5 reader regression suites.
+* Run git diff --check.
+
+Scope boundaries
+----------------
+
+This MR is measurement-only. It does not change reader APIs, storage schemas,
+writer behavior, DataModule integration, or sharding. Benchmark results are
+hardware- and workload-specific and should not be interpreted as a universal
+format ranking.

@@ -91,6 +91,37 @@ features. Homogeneous files use ``torchsig-homogeneous`` and schema version
 The legacy layout has no equivalent schema identifier. Keep the legacy reader
 for existing files, and use packed or homogeneous storage for new datasets.
 
+Unified raw-I/O benchmark
+-------------------------
+
+``benchmarks/optional/benchmark_hdf5_readers_unified.py`` creates equivalent
+legacy, packed, homogeneous, and structured datasets and validates their array
+values, shapes, and dtypes before timing them. It compares individual
+sequential and random reads with contiguous and shuffled batch requests for
+complex IQ and floating-point image-like samples.
+
+.. code-block:: console
+
+   python benchmarks/optional/benchmark_hdf5_readers_unified.py \
+       --output-dir .benchmarks/hdf5-readers \
+       --results .benchmarks/hdf5-reader-results.json \
+       --samples 256 --reads 128 --repetitions 3 \
+       --compressions none,lzf --chunk-sizes 1,8,32
+
+The benchmark writes JSON and CSV results containing first-read latency,
+warm-cache samples per second, file size, environment versions, and native
+batch-read capability. Legacy and packed writers accept compression but do not
+expose a sample-count chunk control; their ``chunk_samples`` result is therefore
+``null`` rather than implying that a requested chunk size was used.
+
+These are raw reader measurements, not end-to-end model throughput. The
+homogeneous contiguous fast path returns top-level arrays without decoding
+metadata, while legacy and packed readers reconstruct complete ``Signal``
+objects. Structured reads reconstruct the fixed model-facing sample grammar.
+Interpret those differences as the cost of each supported reader path, and use
+the Stage-2 benchmark when deciding whether materialization benefits training.
+Filesystem-cache state is warm during steady-state measurements.
+
 Reader details
 --------------
 

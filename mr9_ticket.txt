@@ -1,0 +1,65 @@
+Title: Add a unified raw-I/O benchmark for TorchSig HDF5 readers
+
+Summary
+-------
+
+Create one reproducible benchmark that compares the legacy standard, packed,
+homogeneous, and structured HDF5 readers using equivalent fixed-shape arrays
+and one timing methodology. This establishes the overdue raw-I/O baseline
+needed before optimizing structured shuffled batch access.
+
+Background
+----------
+
+Existing optional benchmarks measure different formats with different data,
+operations, and reporting conventions. Those results cannot isolate storage
+layout and reader-path costs. The confirmed Stage-2 benchmark demonstrates an
+end-to-end benefit from materialization, but it does not directly compare all
+four HDF5 readers or identify the cost of per-sample shuffled reads.
+
+Scope
+-----
+
+* Generate deterministic complex IQ and floating-point spectrogram/image-like
+  arrays.
+* Write equivalent values through legacy, packed, homogeneous, and structured
+  writers.
+* Validate length, shape, dtype, and exact representative values before timing.
+* Measure individual sequential reads, individual random reads, contiguous
+  batch requests, and shuffled batch requests.
+* Exercise uncompressed and LZF-compressed storage.
+* Exercise one-sample and small multi-sample chunks for formats exposing a
+  sample-count chunk control.
+* Clearly label unsupported chunk controls for legacy and packed formats.
+* Report first-read latency, warm-cache steady-state throughput, file size,
+  operation semantics, repetition variability, and environment versions.
+* Emit machine-readable JSON and CSV.
+* Document how the benchmark differs from the end-to-end Stage-2 benchmark.
+
+Acceptance criteria
+-------------------
+
+* Every timed dataset passes exact value and dtype checks first.
+* The same source arrays and requested read counts are used across formats.
+* Random and shuffled index orders are deterministic from a configured seed.
+* Contiguous native batch paths are used where supported.
+* Formats without native batch-index APIs use an explicitly labeled
+  per-sample fallback.
+* Unsupported format/configuration controls are represented in result metadata
+  instead of silently applying different settings.
+* JSON records the Python, platform, TorchSig, PyTorch, NumPy, and h5py versions.
+* CSV contains one row per format, workload, storage configuration, and access
+  operation.
+* Existing production readers and on-disk formats are unchanged.
+* Focused tests cover deterministic workload generation, all four formats,
+  every access operation, invalid matrix input, and a complete CLI smoke run.
+
+Out of scope
+------------
+
+* Changing any reader or writer implementation.
+* Optimizing structured shuffled batch reads; that is MR10.
+* Measuring model compute or end-to-end training throughput.
+* Claiming a universal fastest format from one machine.
+* Implementing sharding.
+
