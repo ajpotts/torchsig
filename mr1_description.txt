@@ -1,0 +1,78 @@
+Title: Add structured homogeneous sample schema inference and validation
+
+Summary
+-------
+
+This MR introduces the schema contract for future model-ready homogeneous HDF5
+datasets. It adds an immutable representation of structured samples, schema
+inference from a representative sample, strict validation of subsequent
+samples, and JSON-compatible serialization.
+
+The existing Signal-oriented homogeneous HDF5 format and its version 1 schema
+are unchanged.
+
+Changes
+-------
+
+* Add StructuredField to describe a leaf's logical path, shape, dtype, and
+  reserved dataset path.
+* Add StructuredNode to preserve mapping, tuple, list, and leaf structure.
+* Add StructuredSampleSchema with version metadata, dictionary serialization,
+  schema-document validation, and sample validation.
+* Add infer_structured_sample_schema as the public inference entry point.
+* Normalize NumPy arrays, PyTorch tensors, and numeric scalars to NumPy arrays
+  during validation.
+* Use deterministic depth-first field ordering and /fields/<index> dataset
+  paths for the later HDF5 implementation.
+* Export the new public types and inference function from
+  torchsig.utils.file_handlers.
+
+Supported sample grammar
+------------------------
+
+Containers:
+
+* Tuples
+* Lists
+* Mappings with string keys
+
+Leaves:
+
+* NumPy arrays and numeric scalars
+* PyTorch tensors
+* Python numeric scalars
+* Numeric and boolean dtypes, including complex values
+
+Unsupported values fail during inference or validation. These include object
+arrays, strings, arbitrary objects, empty containers, non-string mapping keys,
+and cyclic structures.
+
+Compatibility
+-------------
+
+This is additive. No existing reader, writer, file format, or public API is
+modified. The new format identifier is torchsig-structured-homogeneous with
+schema version 1.0. HDF5 persistence will be added in a subsequent MR.
+
+Testing
+-------
+
+The focused tests cover:
+
+* Nested input and target structures.
+* NumPy and PyTorch leaves.
+* Complex, floating-point, integer, unsigned integer, and boolean dtypes.
+* Scalar and multidimensional shapes.
+* JSON-compatible schema round trips.
+* Mapping insertion-order independence.
+* Shape, dtype, key, container-type, and container-length mismatches.
+* Empty containers, invalid keys, object/string data, arbitrary values, and
+  cycles.
+* Unsupported format/schema versions and malformed schema documents.
+
+Follow-up work
+--------------
+
+The next MR can use this contract to implement one HDF5 dataset per schema
+leaf, indexed and contiguous batch reads, completion metadata, and file-level
+integrity validation.
