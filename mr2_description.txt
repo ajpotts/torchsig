@@ -1,0 +1,16 @@
+Summary
+
+Adds StructuredHDF5Writer and StructuredHDF5Reader as a separate model-ready storage API. Structured samples are described by the MR1 schema and stored as one extensible HDF5 dataset per numeric leaf. Files carry a JSON schema plus format, version, length, and completion metadata, and readers validate the complete physical layout before exposing data.
+
+The writer infers its schema from the first sample or accepts an explicit schema for zero-length datasets. It validates every later sample before appending a batch. The reader reconstructs mapping, tuple, and list containers for single samples and performs one contiguous slice per leaf for batch reads. Existing HomogeneousHDF5Reader and HomogeneousHDF5Writer behavior and their version 1 format are unchanged.
+
+Test plan
+
+* Run the focused structured schema and structured HDF5 tests.
+* Run the existing homogeneous HDF5 tests as compatibility regression coverage.
+* Run Ruff on the changed Python files.
+* Run the broader file-handler test directory if focused checks pass.
+
+Benchmark assessment
+
+No benchmark is required for MR2. This change establishes correctness and the physical storage API, but it does not yet provide the Dataset/DataLoader materialization path or worker-safe lifecycle needed for representative throughput comparisons. The merge plan assigns the benchmark to MR7, after MRs 3 through 6. At that point, benchmark online deterministic transforms against materialized structured reads with zero and multiple workers, reporting generation time, epoch throughput, and break-even epoch count. A small ad hoc read benchmark may be run during review if a performance regression is suspected, but it is not an MR2 acceptance gate.

@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from . import homogeneous_hdf5 as homogeneous_hdf5
     from . import npy as npy
     from . import packed_hdf5 as packed_hdf5
+    from . import structured_hdf5 as structured_hdf5
     from . import structured_schema as structured_schema
     from .base_handler import BaseFileHandler as BaseFileHandler
     from .base_handler import FileReader as FileReader
@@ -28,6 +29,8 @@ if TYPE_CHECKING:
     from .packed_hdf5 import PackedHDF5Reader as PackedHDF5Reader
     from .packed_hdf5 import PackedHDF5Writer as PackedHDF5Writer
     from .sigmf import SigMFReader as SigMFReader
+    from .structured_hdf5 import StructuredHDF5Reader as StructuredHDF5Reader
+    from .structured_hdf5 import StructuredHDF5Writer as StructuredHDF5Writer
     from .structured_schema import StructuredField as StructuredField
     from .structured_schema import StructuredNode as StructuredNode
     from .structured_schema import StructuredSampleSchema as StructuredSampleSchema
@@ -40,6 +43,7 @@ _EXPORTS = {
     "homogeneous_hdf5": ("torchsig.utils.file_handlers.homogeneous_hdf5", None),
     "npy": ("torchsig.utils.file_handlers.npy", None),
     "packed_hdf5": ("torchsig.utils.file_handlers.packed_hdf5", None),
+    "structured_hdf5": ("torchsig.utils.file_handlers.structured_hdf5", None),
     "structured_schema": ("torchsig.utils.file_handlers.structured_schema", None),
     "BaseFileHandler": ("torchsig.utils.file_handlers.base_handler", "BaseFileHandler"),
     "FileReader": ("torchsig.utils.file_handlers.base_handler", "FileReader"),
@@ -56,6 +60,8 @@ _EXPORTS = {
     "PackedHDF5Reader": ("torchsig.utils.file_handlers.packed_hdf5", "PackedHDF5Reader"),
     "PackedHDF5Writer": ("torchsig.utils.file_handlers.packed_hdf5", "PackedHDF5Writer"),
     "SigMFReader": ("torchsig.utils.file_handlers.sigmf", "SigMFReader"),
+    "StructuredHDF5Reader": ("torchsig.utils.file_handlers.structured_hdf5", "StructuredHDF5Reader"),
+    "StructuredHDF5Writer": ("torchsig.utils.file_handlers.structured_hdf5", "StructuredHDF5Writer"),
     "StructuredField": ("torchsig.utils.file_handlers.structured_schema", "StructuredField"),
     "StructuredNode": ("torchsig.utils.file_handlers.structured_schema", "StructuredNode"),
     "StructuredSampleSchema": ("torchsig.utils.file_handlers.structured_schema", "StructuredSampleSchema"),
