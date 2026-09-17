@@ -1,0 +1,62 @@
+Title: Optimize structured shuffled batch reads without regressing sparse access
+
+Summary
+-------
+
+Add a public indexed-batch read path for structured HDF5 and route PyTorch
+``__getitems__`` requests through it. Preserve sampler order and duplicate
+indices while coalescing adjacent reads when that materially reduces HDF5
+operations. Retain the existing direct path for sparse requests where h5py
+batch selection or sorting is measurably slower.
+
+Background
+----------
+
+The MR9 benchmark showed that structured HDF5 is the fastest tested
+model-facing format, but non-contiguous DataLoader batches previously called
+``read()`` once per sample. A naive h5py fancy-index selection is not an
+acceptable fix: representative measurements showed severe regressions for
+chunked multidimensional arrays. The optimized path must therefore be adaptive
+rather than assuming fewer Python calls always means greater throughput.
+
+Scope
+-----
+
+* Add ``StructuredHDF5Reader.read_indices(indices)``.
+* Validate the index collection, element types, and bounds consistently with
+  existing single and contiguous reads.
+* Preserve the exact requested order and duplicate indices.
+* Sort and deduplicate multi-field requests when coalescing is beneficial.
+* Combine adjacent indices into half-open HDF5 slices per schema leaf.
+* Use direct reads for sparse requests when coalescing would not reduce the
+  operation count enough to offset sorting and copying.
+* Preserve the contiguous slice fast path, including single-leaf samples.
+* Route ``StructuredHDF5Dataset.__getitems__`` through the new API.
+* Update the unified benchmark to identify structured shuffled batches as a
+  native indexed-batch path.
+* Document the adaptive behavior and performance rationale.
+
+Acceptance criteria
+-------------------
+
+* Empty, contiguous, shuffled, and duplicate index batches return correct
+  nested samples.
+* Invalid collection types, element types, booleans, negative indices, and
+  out-of-range indices fail clearly.
+* Coalescible runs issue slices per schema leaf rather than one read per sample.
+* Sparse batches avoid slow h5py fancy-index selection and unnecessary sorted
+  batch copies.
+* ``__getitems__`` preserves DataLoader sampler order and duplicates.
+* Single-index and ``read_batch`` public behavior remains compatible.
+* Multiprocessing and persistent-worker behavior remains correct.
+* Sequential/contiguous performance does not regress outside measurement
+  noise, and representative sparse multi-field throughput remains within 5%
+  of the original direct path.
+
+Out of scope
+------------
+
+* Changing the structured on-disk schema.
+* Adding a native indexed-batch API to legacy, packed, or homogeneous readers.
+* Forcing batched HDF5 selection when measurements show it is slower.
+* DataModule integration or sharding.

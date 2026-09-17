@@ -1,0 +1,75 @@
+Title: Add adaptive indexed-batch reads for structured HDF5
+
+Summary
+-------
+
+Adds ``StructuredHDF5Reader.read_indices`` and routes
+``StructuredHDF5Dataset.__getitems__`` through it. The new API validates index
+batches, preserves sampler order and duplicates, and coalesces adjacent sorted
+runs into HDF5 slices for every schema leaf when that reduces storage
+operations.
+
+The implementation is deliberately adaptive. Sparse shuffled batches retain
+direct reads, and fragmented single-leaf batches avoid sorting and h5py fancy
+selection. Benchmarking during development showed that a naive fancy-index
+implementation was substantially slower for chunked IQ and spectrogram data;
+the final density gate keeps that behavior out of the production path.
+
+Behavior
+--------
+
+* Contiguous batches use slice reads.
+* Coalescible multi-field shuffled batches are sorted, deduplicated, read as
+  adjacent runs, and restored to requested order.
+* Duplicate indices appear in every requested output position.
+* Sparse batches use the established direct-read path when coalescing would not
+  materially reduce operation count.
+* Invalid batch and index inputs produce explicit type or bounds errors.
+
+Benchmark integration
+---------------------
+
+The MR9 unified benchmark now calls ``read_indices`` for structured shuffled
+batches and marks structured storage as supporting a native shuffled-batch API.
+The original MR9 result remains the before baseline.
+
+Across the final representative structured matrix, shuffled throughput had a
+median before/after ratio of 0.975x. The best IQ configuration improved 1.7%,
+while the recommended uncompressed, one-sample spectrogram configuration was
+3.2% slower; both remain within the 5% no-regression gate. On a 100,000-sample,
+six-field Stage-2 materialization, the final adaptive path retained 96.5% of
+the original sparse direct-read throughput. A same-process one-leaf comparison
+measured the indexed API at 1.04x the original IQ path and 1.11x the original
+spectrogram path. These results do not establish a universal shuffled speedup;
+they demonstrate that coalescing is useful only when adjacency exists and that
+sparse random batches should not be forced through h5py fancy selection.
+
+Files changed
+-------------
+
+* torchsig/utils/file_handlers/structured_hdf5.py
+* torchsig/datasets/structured.py
+* benchmarks/optional/benchmark_hdf5_readers_unified.py
+* tests/utils/file_handlers/test_structured_hdf5.py
+* tests/datasets/test_structured.py
+* tests/test_unified_hdf5_reader_benchmark.py
+* docs/hdf5_structured.rst
+* docs/hdf5_readers.rst
+* mr10_ticket.txt
+* mr10_description.txt
+
+Test plan
+---------
+
+* Run focused reader, dataset, and unified benchmark tests.
+* Run structured multiprocessing tests for fork/spawn and persistent workers.
+* Run Ruff on all changed Python files.
+* Compare the MR9 baseline with the final MR10 structured matrix.
+* Run git diff --check.
+
+Scope boundaries
+----------------
+
+This MR does not alter the structured file format, other reader APIs,
+DataModule configuration, or sharding. It does not claim shuffled speedups for
+index distributions that contain no coalescible runs.

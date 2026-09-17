@@ -1,0 +1,56 @@
+Title: Restore the lazy public exports for torchsig.utils
+
+Summary
+-------
+
+Restore the utility-package lazy import map after the file-handler initializer
+was accidentally copied into ``torchsig/utils/__init__.py`` during a rebase.
+The regression removes expected utility modules from ``__all__`` and
+``dir(torchsig.utils)`` and points lazy imports at nonexistent module paths.
+
+Observed failure
+----------------
+
+``tests/test_imports.py::test_dir_and_all_include_lazy_exports`` fails because
+``torchsig.utils.__all__`` does not contain ``dsp``, ``file_handlers``,
+``writer``, or ``yaml``. Instead, it contains file-handler classes and modules
+that belong to ``torchsig.utils.file_handlers``.
+
+Root cause
+----------
+
+A rebase conflict was resolved with the contents intended for
+``torchsig/utils/file_handlers/__init__.py`` in the parent
+``torchsig/utils/__init__.py`` file. Consequently, lazy access attempts imports
+such as ``torchsig.utils.base_handler``, which do not exist, and the documented
+utility-module discovery surface is lost.
+
+Scope
+-----
+
+* Restore the utility package docstring and type-checking imports.
+* Restore the complete utility-module ``__all__`` list.
+* Rebuild the lazy export map from those module names.
+* Restore the utility-specific ``__getattr__`` documentation.
+* Keep structured schema and HDF5 exports in
+  ``torchsig.utils.file_handlers``; do not expose them from the parent utility
+  package.
+
+Acceptance criteria
+-------------------
+
+* ``dsp``, ``file_handlers``, ``writer``, and ``yaml`` appear in both
+  ``torchsig.utils.__all__`` and ``dir(torchsig.utils)``.
+* Lazy access imports and caches each utility module from
+  ``torchsig.utils.<module>``.
+* Importing ``torchsig.utils`` does not eagerly import its submodules.
+* Unknown attributes still raise ``AttributeError``.
+* The complete import regression test module passes.
+* File-handler public exports continue to pass their existing import tests.
+
+Out of scope
+------------
+
+* Changing the public utility-module list.
+* Moving structured file-handler APIs to the parent utility package.
+* Refactoring the shared lazy import helper.

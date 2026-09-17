@@ -24,7 +24,6 @@ __all__ = ["StructuredHDF5Reader", "StructuredHDF5Writer"]
 
 _SCHEMA_PATH = "schema"
 _TARGET_CHUNK_BYTES = 1024**2
-_MAX_COALESCED_RUNS = 4
 
 
 def _reconstruct(node: StructuredNode, leaves: Sequence[Any]) -> Any:
@@ -292,9 +291,11 @@ class StructuredHDF5Reader(FileReader):
         """Read an index batch efficiently and restore its requested order.
 
         Indices are validated, sorted, and deduplicated before accessing each
-        schema leaf. Contiguous runs use slices when only a few runs are
-        required; more fragmented requests use one sorted HDF5 selection per
-        leaf. Duplicate indices are reconstructed in their original positions.
+        schema leaf. Adjacent runs are coalesced when doing so materially
+        reduces the operation count. Sparse requests and fragmented
+        single-leaf samples retain direct reads because h5py point selection,
+        sorting, and batch copying are slower for those cases. Duplicate
+        indices are reconstructed in their original positions.
         """
         self._ensure_open()
         if not isinstance(indices, Sequence) or isinstance(indices, (str, bytes)):
@@ -307,13 +308,18 @@ class StructuredHDF5Reader(FileReader):
             if index < 0 or index >= self._length:
                 raise IndexError(f"Structured HDF5 sample index out of range: {index}")
 
+        if len(self._datasets) == 1:
+            dataset = self._datasets[0]
+            if all(index == indices[0] + offset for offset, index in enumerate(indices)):
+                values = dataset[indices[0] : indices[-1] + 1]
+                return [_reconstruct(self.schema.root, [value]) for value in values]
+            return [_reconstruct(self.schema.root, [dataset[index]]) for index in indices]
         unique_indices, inverse = np.unique(np.asarray(indices, dtype=np.intp), return_inverse=True)
         breaks = np.flatnonzero(np.diff(unique_indices) != 1) + 1
         runs = np.split(unique_indices, breaks)
-        if len(runs) <= _MAX_COALESCED_RUNS:
-            leaves = [np.concatenate([dataset[int(run[0]) : int(run[-1]) + 1] for run in runs], axis=0) for dataset in self._datasets]
-        else:
-            leaves = [dataset[unique_indices] for dataset in self._datasets]
+        if len(runs) * 2 > len(unique_indices):
+            return [_reconstruct(self.schema.root, [dataset[index] for dataset in self._datasets]) for index in indices]
+        leaves = [np.concatenate([dataset[int(run[0]) : int(run[-1]) + 1] for run in runs], axis=0) for dataset in self._datasets]
         return [_reconstruct(self.schema.root, [field_values[position] for field_values in leaves]) for position in inverse]
 
     def teardown(self) -> None:

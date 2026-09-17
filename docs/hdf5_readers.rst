@@ -122,6 +122,12 @@ Interpret those differences as the cost of each supported reader path, and use
 the Stage-2 benchmark when deciding whether materialization benefits training.
 Filesystem-cache state is warm during steady-state measurements.
 
+The structured reader also provides ``read_indices(indices)`` for DataLoader
+batch requests. It validates, sorts, and deduplicates coalescible multi-field
+requests, reads adjacent runs with slices, and restores sampler order and
+duplicates. It adaptively retains direct reads for sparse or single-leaf
+requests when batching would add overhead without reducing storage operations.
+
 Reader details
 --------------
 

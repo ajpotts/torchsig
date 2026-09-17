@@ -107,6 +107,31 @@ def test_index_batch_coalesces_contiguous_runs_per_leaf(tmp_path) -> None:
     assert all(field_keys == [slice(0, 3), slice(4, 5)] for field_keys in keys)
 
 
+def test_index_batch_avoids_slice_overhead_for_sparse_indices(tmp_path) -> None:
+    _write_samples(tmp_path)
+    reader = StructuredHDF5Reader(tmp_path)
+    assert len(reader) == 5
+    keys: list[list[object]] = [[] for _ in reader._datasets]  # noqa: SLF001
+
+    class TrackingDataset:
+        def __init__(self, dataset, field_keys) -> None:
+            self.dataset = dataset
+            self.field_keys = field_keys
+
+        def __getitem__(self, key):
+            self.field_keys.append(key)
+            return self.dataset[key]
+
+    reader._datasets = [TrackingDataset(dataset, field_keys) for dataset, field_keys in zip(reader._datasets, keys, strict=True)]  # noqa: SLF001
+    try:
+        reader.read_indices([4, 2, 0])
+    finally:
+        reader.close()
+
+    assert keys
+    assert all(field_keys == [4, 2, 0] for field_keys in keys)
+
+
 def test_writer_persists_schema_metadata_and_leaf_datasets(tmp_path) -> None:
     _write_samples(tmp_path)
 

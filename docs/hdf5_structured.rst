@@ -56,11 +56,15 @@ tuple, list, and mapping containers.
 
    materialized.close()
 
-``StructuredHDF5Dataset`` implements single-index access and a contiguous
-``__getitems__`` fast path. Non-contiguous and shuffled requests preserve
-sampler order. Each worker lazily opens its own HDF5 handle; forked handles are
-reopened after the process changes, while spawn serialization excludes HDF5
-objects. Explicit ``close()`` is safe, and later access reopens the file.
+``StructuredHDF5Dataset`` implements single-index access and routes DataLoader
+index batches through ``StructuredHDF5Reader.read_indices``. Contiguous
+requests use one slice per schema leaf. Shuffled requests preserve sampler
+order and duplicate indices; adjacent sorted runs are coalesced when that
+materially reduces HDF5 operations. Sparse requests retain direct reads because
+h5py point selections and unnecessary batch copies are slower for that case.
+Each worker lazily opens its own HDF5 handle; forked handles are reopened after
+the process changes, while spawn serialization excludes HDF5 objects. Explicit
+``close()`` is safe, and later access reopens the file.
 
 Materializing an existing DataLoader
 ------------------------------------

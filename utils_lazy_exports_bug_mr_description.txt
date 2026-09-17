@@ -1,0 +1,34 @@
+Title: Fix the torchsig.utils lazy export map after rebase
+
+Summary
+-------
+
+Restores ``torchsig/utils/__init__.py`` as the lazy initializer for TorchSig
+utility modules. The file had inadvertently been replaced with the initializer
+for ``torchsig.utils.file_handlers`` during conflict resolution, causing the
+expected utility modules to disappear from ``__all__`` and ``dir()``.
+
+Fix
+---
+
+* Restore all supported utility module names, including ``dsp``,
+  ``file_handlers``, ``writer``, and ``yaml``.
+* Restore lazy module paths beneath ``torchsig.utils``.
+* Restore the package-specific type-checking imports and documentation.
+* Leave structured schema, reader, and writer exports under the file-handler
+  package where they belong.
+
+Impact
+------
+
+This restores the public import and discovery behavior present on the target
+branch. It also prevents lazy attribute access from attempting nonexistent
+imports such as ``torchsig.utils.base_handler``. No new public API is added.
+
+Test plan
+---------
+
+* Run ``pytest -q tests/test_imports.py``.
+* Run the structured schema and HDF5 import regression tests.
+* Run Ruff on both lazy initializer modules and the import tests.
+* Run ``git diff --check``.
