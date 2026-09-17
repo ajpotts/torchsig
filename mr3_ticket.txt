@@ -1,0 +1,19 @@
+Title: Add public structured Dataset and DataLoader materialization API
+
+Implement the public PyTorch integration for the structured homogeneous HDF5 format introduced in MRs 1 and 2. Users must be able to materialize either a Dataset or an existing DataLoader and immediately consume the result as a map-style Dataset.
+
+Acceptance criteria:
+
+* Accept PyTorch Dataset and DataLoader sources.
+* Construct a DataLoader internally for Dataset sources with configurable batch size, worker count, and collate function.
+* Preserve sample container structure when using the default Dataset path.
+* Correctly split already-collated tuple, list, and mapping batches using the leading dimension of numeric leaves rather than the number of fields.
+* Support identity-collated lists of complete samples.
+* Correctly write final partial batches.
+* Infer the expected count from sized datasets or accept an explicit expected count for unsized iterable datasets.
+* Reject sources that produce too few or too many samples and leave their HDF5 output incomplete.
+* Provide optional progress reporting.
+* Return a PyTorch-compatible map-style structured dataset with single-index access and a contiguous __getitems__ batch fast path.
+* Add deterministic tests covering Dataset, DataLoader, custom-collate, iterable, partial-batch, count-error, progress, and batch-read behavior.
+
+Atomic publication and overwrite policy are deferred to MR4. Multiprocess-safe lazy reader lifecycle behavior is deferred to MR5. Post-write source equivalence validation is deferred to MR6.

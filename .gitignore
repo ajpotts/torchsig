@@ -13,6 +13,11 @@ dist/
 *.p
 *.png
 *.txt
+!follow_up.txt
+!mr2_description.txt
+!mr2_ticket.txt
+!mr3_description.txt
+!mr3_ticket.txt
 *.npy
 *.jpg
 *.pt*
