@@ -1,0 +1,13 @@
+Title: Add structured homogeneous HDF5 reader and writer
+
+Implement the storage layer for the fixed-shape structured sample contract introduced in MR1. Add separate structured homogeneous HDF5 reader and writer classes that store one extensible HDF5 dataset per schema leaf without changing the existing Signal-oriented homogeneous version 1 format.
+
+Acceptance criteria:
+
+* Preserve mapping, tuple, and list structure, field names, leaf shapes, NumPy dtypes, values, and dataset length.
+* Persist the structured schema, format identifier, schema version, declared length, and completion marker.
+* Validate the file metadata, schema document, required datasets, leaf shapes and dtypes, lengths, and completion status when opening.
+* Support efficient single-index access and contiguous batch reads.
+* Cover exact round trips, multiple dtypes, empty datasets with an explicit schema, malformed and incomplete files, unsupported versions, random and contiguous access, and compatibility with homogeneous version 1 files.
+
+This ticket does not include the public Dataset/DataLoader materialization API, atomic publication, multiprocessing lifecycle hardening, or post-write equivalence validation; those remain in later merge requests.
