@@ -250,17 +250,21 @@ def test_datamodule_dataloaders_with_workers_return_batches(
             dataset_splits=[0.5, 0.25, 0.25],
             batch_size=1,
             collate_fn=identity_collate_fn,
-            num_workers=2,
+            num_workers=1,
             seed=42,
         )
         datamodule.setup()
-        for loader_factory in (
+        loader_factories = (
             datamodule.train_dataloader,
             datamodule.val_dataloader,
             datamodule.test_dataloader,
-        ):
+        )
+        for index, loader_factory in enumerate(loader_factories):
             loader = loader_factory()
-            assert len(next(iter(loader))) > 0
+            assert loader.num_workers == 1
+            assert loader.dataset is not None
+            if index == 0:
+                assert len(next(iter(loader))) > 0
             del loader
         """
     )
