@@ -1,0 +1,38 @@
+Ticket description
+==================
+
+Title: Update TorchSig version to 3.0
+
+Update the TorchSig package version from 2.2.0 to 3.0.0 in preparation for the
+3.0 release. The version should continue to be exposed through
+`torchsig.__version__` and consumed dynamically by the package build and
+documentation configuration.
+
+Acceptance criteria:
+- `torchsig.__version__` reports `3.0.0`.
+- Built package metadata uses version `3.0.0`.
+- Generated documentation displays version `3.0.0`.
+- Existing schema versions and historical release references remain unchanged.
+
+
+Merge request description
+=========================
+
+Title: Bump TorchSig version to 3.0.0
+
+Summary
+-------
+Updates the authoritative TorchSig version from 2.2.0 to 3.0.0 for the 3.0
+release. Packaging and documentation already read this value dynamically, so
+they will inherit the new version without duplicate version changes.
+
+Changes
+-------
+- Changed `torchsig.__version__` to `3.0.0`.
+- Left independent data/file schema versions and historical documentation
+  references unchanged.
+
+Validation
+----------
+- Confirmed the runtime version reports `3.0.0`.
+- Confirmed project packaging resolves the version as `3.0.0`.
