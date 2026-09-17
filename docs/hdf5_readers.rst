@@ -1,7 +1,7 @@
 HDF5 Readers
 ============
 
-TorchSig provides three HDF5 readers. The reader must match the layout used
+TorchSig provides four HDF5 readers. The reader must match the layout used
 when the dataset was written; the layouts are not interchangeable.
 
 .. list-table:: Reader selection
@@ -25,11 +25,18 @@ when the dataset was written; the layouts are not interchangeable.
      - Every top-level array has one shared shape and dtype.
      - Variable components are supported; inherited metadata is flattened.
      - Fixed-size model inputs and efficient contiguous batches.
+   * - :class:`~torchsig.utils.file_handlers.structured_hdf5.StructuredHDF5Reader`
+     - Each model-facing leaf has one fixed shape and dtype.
+     - Preserves nested tuples, lists, and string-keyed mappings rather than
+       ``Signal`` objects.
+     - Precomputed model inputs and targets; see :doc:`hdf5_structured`.
 
 The array content is not restricted to IQ. Packed and homogeneous files can
 contain narrowband IQ, wideband IQ, spectrograms, and other non-object NumPy
 arrays. Homogeneous files require only that all *top-level* arrays have the
 same shape and dtype. Their component counts, shapes, and dtypes may vary.
+Structured files instead require a fixed container and leaf schema across all
+model-facing samples.
 
 Using a reader directly
 -----------------------
@@ -93,3 +100,4 @@ Reader details
    hdf5_legacy
    hdf5_packed
    hdf5_homogeneous
+   hdf5_structured

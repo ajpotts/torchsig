@@ -1,0 +1,21 @@
+Summary
+
+Adds a complete structured HDF5 materialization guide covering the fixed-schema sample grammar, Dataset and DataLoader workflows, deterministic versus randomized transforms, atomic overwrite behavior, source/output validation, multiprocessing lifecycle safety, compatibility, and migration from existing HDF5-backed datasets.
+
+Adds an optional executable end-to-end benchmark that compares a deterministic online FFT-based model pipeline with its materialized structured equivalent. The benchmark supports sequential and shuffled access, configurable zero and multiworker DataLoaders, compression selection, fixed random seeds, warmup epochs, and optional CSV output. It reports materialization time, file size, cold first-batch latency, steady online and materialized samples per second, and the measured break-even epoch count. When materialization does not improve epoch time, break-even is reported as never rather than implying a universal speedup.
+
+Run the representative matrix with:
+
+python benchmarks/optional/benchmark_structured_hdf5.py --samples 1024 --workers 0 2 4 --access sequential shuffled
+
+Test plan
+
+* Run the benchmark with a small smoke-test workload.
+* Run Ruff on the benchmark.
+* Build the Sphinx documentation with warnings treated as errors.
+* Run the structured schema, storage, materialization, and multiprocessing regression suites.
+* Run git diff --check.
+
+Scope boundaries
+
+This MR documents and measures the APIs delivered by MRs 1 through 6. It does not change the structured schema, storage implementation, materialization semantics, or worker lifecycle behavior. Benchmark results are environment-specific and are not encoded as a universal performance claim.
