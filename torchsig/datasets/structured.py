@@ -241,8 +241,8 @@ def materialize_structured_dataset(
             if written != required_count:
                 raise RuntimeError(f"Source produced {written} samples; expected {required_count}")
 
-        with StructuredHDF5Reader(staging_root):
-            pass
+        with StructuredHDF5Reader(staging_root) as staged_reader:
+            len(staged_reader)
         _publish_structured_dataset(staging_root, destination, overwrite)
     finally:
         if staging_root.exists():
