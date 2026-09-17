@@ -1,0 +1,26 @@
+Summary
+
+Adds a public materialize_structured_dataset function and StructuredHDF5Dataset map-style PyTorch Dataset.
+
+Dataset sources are wrapped in an internal DataLoader with configurable batch size, worker count, and collator. The default identity collator preserves each sample's tuple, list, and mapping types. Existing DataLoaders are consumed as configured. Their collated outputs are split along numeric leaf batch dimensions, avoiding the common error of treating a tuple or mapping's field count as the number of samples. Identity-collated lists of complete samples are also recognized and written directly.
+
+The materializer infers an expected count from sized datasets or accepts expected_length for unsized iterable datasets. It handles final partial batches and rejects too few, too many, or empty batches. Count failures occur before writer completion so the resulting HDF5 file retains its incomplete marker.
+
+The returned StructuredHDF5Dataset implements __len__, __getitem__, and __getitems__. Contiguous __getitems__ requests use StructuredHDF5Reader.read_batch so each schema field is fetched with one slice. Non-contiguous requests retain correct order through indexed reads.
+
+Public API
+
+* torchsig.datasets.materialize_structured_dataset
+* torchsig.datasets.StructuredHDF5Dataset
+
+Test plan
+
+* Run the focused MR3 materialization tests.
+* Run the MR1 schema and MR2 structured HDF5 suites.
+* Run the complete dataset and file-handler test directories for regression coverage.
+* Run Ruff on all changed Python files.
+* Run git diff --check.
+
+Scope boundaries
+
+This MR writes directly to the requested destination using the MR2 writer. Atomic temporary-file publication and explicit overwrite behavior belong to MR4. StructuredHDF5Reader still owns an eager process-local HDF5 handle; spawn, fork, persistent-worker, and pickle lifecycle hardening belong to MR5. Optional source/output equivalence validation belongs to MR6. DataModule selection and performance acceptance gates are documented in follow_up.txt as recommended follow-up work beyond the original MR3 merge-plan scope.
