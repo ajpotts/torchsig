@@ -6,6 +6,7 @@ import pytest
 import torch
 from torch.utils.data import DataLoader, Dataset, IterableDataset
 
+import torchsig.datasets.structured as structured_module
 from torchsig.datasets import StructuredHDF5Dataset, materialize_structured_dataset
 
 
@@ -141,8 +142,7 @@ def test_rejects_too_few_or_too_many_samples(tmp_path, source, expected_length, 
             expected_length=expected_length,
             progress=False,
         )
-    with h5py.File(tmp_path / "data.h5", "r") as handle:
-        assert not bool(handle.attrs["complete"])
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_progress_can_be_enabled_or_disabled(tmp_path, capsys) -> None:
@@ -171,3 +171,104 @@ def test_map_dataset_uses_contiguous_batch_reader(tmp_path, monkeypatch) -> None
         assert len(samples) == 3
     finally:
         result.close()
+
+
+def test_existing_destination_requires_explicit_overwrite(tmp_path) -> None:
+    root = tmp_path / "dataset"
+    original = materialize_structured_dataset(_TupleDataset(2), root, progress=False)
+    original.close()
+
+    with pytest.raises(FileExistsError, match="destination already exists"):
+        materialize_structured_dataset(_TupleDataset(3), root, progress=False)
+
+    unchanged = StructuredHDF5Dataset(root)
+    try:
+        assert len(unchanged) == 2
+        _assert_tuple_sample(unchanged[1], 1)
+    finally:
+        unchanged.close()
+
+
+def test_overwrite_replaces_complete_or_incomplete_destination(tmp_path) -> None:
+    for name, complete in (("complete", True), ("incomplete", False)):
+        root = tmp_path / name
+        root.mkdir()
+        with h5py.File(root / "data.h5", "w") as handle:
+            handle.attrs["complete"] = complete
+
+        result = materialize_structured_dataset(_TupleDataset(3), root, progress=False, overwrite=True)
+        try:
+            assert len(result) == 3
+            _assert_tuple_sample(result[2], 2)
+        finally:
+            result.close()
+
+
+def test_schema_failure_leaves_no_destination_or_temporary_artifacts(tmp_path) -> None:
+    class _InvalidDataset(Dataset):
+        def __len__(self):
+            return 1
+
+        def __getitem__(self, index):
+            return {"unsupported": object()}
+
+    root = tmp_path / "dataset"
+    with pytest.raises(TypeError, match="Unsupported value"):
+        materialize_structured_dataset(_InvalidDataset(), root, progress=False)
+
+    assert not root.exists()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_mid_write_failure_preserves_existing_dataset(tmp_path) -> None:
+    root = tmp_path / "dataset"
+    original = materialize_structured_dataset(_TupleDataset(2), root, progress=False)
+    original.close()
+
+    class _InvalidSecondSample(_TupleDataset):
+        def __getitem__(self, index):
+            sample = super().__getitem__(index)
+            if index == 1:
+                return (np.zeros((4,), dtype=np.float32), sample[1])
+            return sample
+
+    with pytest.raises(ValueError, match="Shape"):
+        materialize_structured_dataset(
+            _InvalidSecondSample(3),
+            root,
+            batch_size=1,
+            progress=False,
+            overwrite=True,
+        )
+
+    unchanged = StructuredHDF5Dataset(root)
+    try:
+        assert len(unchanged) == 2
+        _assert_tuple_sample(unchanged[1], 1)
+    finally:
+        unchanged.close()
+    assert [path.name for path in tmp_path.iterdir()] == ["dataset"]
+
+
+def test_publication_failure_restores_existing_dataset(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "dataset"
+    original = materialize_structured_dataset(_TupleDataset(2), root, progress=False)
+    original.close()
+    real_replace = structured_module.Path.replace
+
+    def fail_staging_publication(source, destination):
+        if str(source).endswith(".tmp") and destination == root:
+            raise OSError("simulated publication failure")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(structured_module.Path, "replace", fail_staging_publication)
+    with pytest.raises(OSError, match="simulated publication failure"):
+        materialize_structured_dataset(_TupleDataset(3), root, progress=False, overwrite=True)
+
+    unchanged = StructuredHDF5Dataset(root)
+    try:
+        assert len(unchanged) == 2
+        _assert_tuple_sample(unchanged[1], 1)
+    finally:
+        unchanged.close()
+    assert [path.name for path in tmp_path.iterdir()] == ["dataset"]

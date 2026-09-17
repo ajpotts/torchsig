@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import shutil
+import tempfile
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -117,6 +120,38 @@ def _source_length(source: Dataset | DataLoader, expected_length: int | None) ->
         raise ValueError("expected_length is required when the source dataset has no length") from error
 
 
+def _remove_path(path: Path) -> None:
+    """Remove a file or directory used during atomic publication."""
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    else:
+        path.unlink(missing_ok=True)
+
+
+def _destination_conflicts(path: Path) -> bool:
+    """Return whether a path contains an existing destination to preserve."""
+    return path.exists() and (not path.is_dir() or any(path.iterdir()))
+
+
+def _publish_structured_dataset(staging_root: Path, root: Path, overwrite: bool) -> None:
+    """Publish a validated staging directory while preserving prior output."""
+    if _destination_conflicts(root) and not overwrite:
+        raise FileExistsError(f"Structured dataset destination already exists: {root}")
+    if not root.exists():
+        staging_root.replace(root)
+        return
+
+    backup_root = Path(tempfile.mkdtemp(prefix=f".{root.name}.", suffix=".backup", dir=root.parent))
+    backup_root.rmdir()
+    root.replace(backup_root)
+    try:
+        staging_root.replace(root)
+    except Exception:
+        backup_root.replace(root)
+        raise
+    _remove_path(backup_root)
+
+
 def materialize_structured_dataset(
     source: Dataset | DataLoader,
     root: str | PathLike[str],
@@ -126,6 +161,7 @@ def materialize_structured_dataset(
     collate_fn: Callable[[list[Any]], Any] | None = None,
     expected_length: int | None = None,
     progress: bool = True,
+    overwrite: bool = False,
     writer_kwargs: Mapping[str, Any] | None = None,
 ) -> StructuredHDF5Dataset:
     """Materialize a PyTorch Dataset or DataLoader into structured HDF5.
@@ -143,6 +179,8 @@ def materialize_structured_dataset(
         collate_fn: Optional collator used only for a Dataset source.
         expected_length: Required count, inferred from ``len(dataset)`` when possible.
         progress: Whether to display materialization progress.
+        overwrite: Whether to atomically replace an existing destination after
+            the new dataset has been completed and validated.
         writer_kwargs: Optional keyword arguments for StructuredHDF5Writer.
 
     Returns:
@@ -150,6 +188,11 @@ def materialize_structured_dataset(
     """
     if not isinstance(source, (Dataset, DataLoader)):
         raise TypeError("source must be a PyTorch Dataset or DataLoader")
+    if not isinstance(overwrite, bool):
+        raise TypeError("overwrite must be a boolean")
+    destination = Path(root).resolve()
+    if _destination_conflicts(destination) and not overwrite:
+        raise FileExistsError(f"Structured dataset destination already exists: {destination}")
     if isinstance(source, DataLoader):
         if collate_fn is not None:
             raise ValueError("collate_fn cannot replace the collator of an existing DataLoader")
@@ -173,26 +216,36 @@ def materialize_structured_dataset(
         raise ValueError("Cannot infer a structured schema from an empty source")
     kwargs = dict(writer_kwargs or {})
     written = 0
-    with (
-        StructuredHDF5Writer(root, **kwargs) as writer,
-        tqdm(total=required_count, desc="Materializing structured dataset", disable=not progress, unit="sample") as progress_bar,
-    ):
-        for batch_index, batch in enumerate(loader):
-            if getattr(loader, "batch_size", None) is None:
-                samples = [batch]
-            elif batches_are_sample_lists:
-                samples = batch
-            else:
-                samples = _sample_list(batch) or _unbatch_collated(batch)
-            if not samples:
-                raise ValueError(f"Source produced an empty batch at index {batch_index}")
-            if written + len(samples) > required_count:
-                raise RuntimeError(f"Source produced more than the expected {required_count} samples")
-            writer.write(batch_index, samples)
-            written += len(samples)
-            progress_bar.update(len(samples))
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    staging_root = Path(tempfile.mkdtemp(prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent))
+    try:
+        with (
+            StructuredHDF5Writer(staging_root, **kwargs) as writer,
+            tqdm(total=required_count, desc="Materializing structured dataset", disable=not progress, unit="sample") as progress_bar,
+        ):
+            for batch_index, batch in enumerate(loader):
+                if getattr(loader, "batch_size", None) is None:
+                    samples = [batch]
+                elif batches_are_sample_lists:
+                    samples = batch
+                else:
+                    samples = _sample_list(batch) or _unbatch_collated(batch)
+                if not samples:
+                    raise ValueError(f"Source produced an empty batch at index {batch_index}")
+                if written + len(samples) > required_count:
+                    raise RuntimeError(f"Source produced more than the expected {required_count} samples")
+                writer.write(batch_index, samples)
+                written += len(samples)
+                progress_bar.update(len(samples))
 
-        if written != required_count:
-            raise RuntimeError(f"Source produced {written} samples; expected {required_count}")
+            if written != required_count:
+                raise RuntimeError(f"Source produced {written} samples; expected {required_count}")
 
-    return StructuredHDF5Dataset(root)
+        with StructuredHDF5Reader(staging_root):
+            pass
+        _publish_structured_dataset(staging_root, destination, overwrite)
+    finally:
+        if staging_root.exists():
+            _remove_path(staging_root)
+
+    return StructuredHDF5Dataset(destination)
