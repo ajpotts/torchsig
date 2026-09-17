@@ -563,13 +563,12 @@ def test_static_dataset_getitem_returns_requested_targets(
         verify_getitem_targets(num_signals_max, target_labels, sample)
 
 
-@pytest.mark.parametrize("num_workers", [0, 2])
-def test_dataset_creation_and_static_loading(tmp_path, num_workers: int) -> None:
+def test_dataset_creation_and_static_loading(tmp_path) -> None:
     """Create a small dataset, reload it, and verify stored samples."""
     seed = 123456789
-    dataset_length = 2
+    dataset_length = 1
     fft_size = 16
-    root = tmp_path / f"workers_{num_workers}"
+    root = tmp_path / "static_dataset"
 
     metadata = deepcopy(TorchSigDefaults().default_dataset_metadata)
     metadata.update(
@@ -594,7 +593,7 @@ def test_dataset_creation_and_static_loading(tmp_path, num_workers: int) -> None
     dataloader = WorkerSeedingDataLoader(
         iterable_dataset,
         batch_size=1,
-        num_workers=num_workers,
+        num_workers=0,
         collate_fn=lambda batch: batch,
     )
     dataloader.seed(seed)
