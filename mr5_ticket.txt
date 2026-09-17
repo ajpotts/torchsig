@@ -1,0 +1,16 @@
+Title: Harden structured HDF5 reader lifecycle for multiprocessing DataLoaders
+
+Apply the existing PID-aware lazy-open lifecycle pattern to StructuredHDF5Reader so structured datasets can be used safely with PyTorch DataLoaders across fork and spawn worker processes, persistent workers, repeated epochs, and shuffled access.
+
+Acceptance criteria:
+
+* Defer opening and validation until the first read or length request.
+* Track the process that owns each HDF5 handle.
+* Close inherited handles and reopen the file when the process ID changes after fork.
+* Exclude h5py.File and h5py.Dataset objects from pickle state for spawn workers.
+* Make explicit close idempotent and allow a later operation to reopen the reader.
+* Avoid sharing HDF5 file or dataset handles across processes.
+* Preserve single-index and contiguous batch behavior and all existing schema validation.
+* Cover DataLoader operation with 0, 2, and 4 workers, spawn and fork where available, handles opened in the parent, persistent workers, repeated epochs, shuffled access, pickle round trips, and worker-owned PID evidence.
+
+Atomic publication remains provided by MR4. Optional source/output equivalence validation remains deferred to MR6.

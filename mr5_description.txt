@@ -1,0 +1,18 @@
+Summary
+
+Makes StructuredHDF5Reader safe for PyTorch multiprocessing by adopting the PID-aware lazy lifecycle already used by the existing homogeneous reader. Reader construction no longer opens an HDF5 file. Length and read operations open and validate on demand, inherited fork handles are discarded when the process changes, and pickle state excludes all process-local h5py file and dataset objects.
+
+Explicit close now clears the file, PID, and field handles and is idempotent; subsequent access reopens the dataset. The MR4 staged-output check explicitly requests the staged reader length so atomic publication still performs complete physical validation before rename.
+
+Test plan
+
+* Run structured reader lifecycle and multiprocessing tests.
+* Exercise DataLoaders with 0, 2, and 4 workers.
+* Exercise spawn, fork where supported, parent-open readers, shuffled access, and repeated persistent-worker epochs.
+* Run the structured materialization, schema, and storage regression suites.
+* Run Ruff on all changed Python files.
+* Run git diff --check.
+
+Scope boundaries
+
+This MR does not alter the structured HDF5 schema or existing homogeneous reader APIs. Source/output equivalence validation remains deferred to MR6, and documentation and performance reporting remain in MR7.
