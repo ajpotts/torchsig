@@ -159,7 +159,9 @@ def read_operation(reader: Any, format_name: Format, operation: Operation, indic
             checksum += _checksum(_native_contiguous(reader, format_name, start, stop))
         return checksum
     for start in range(0, len(indices), batch_size):
-        checksum += _checksum(reader.read(index) for index in indices[start : start + batch_size])
+        batch_indices = indices[start : start + batch_size]
+        values = reader.read_indices(batch_indices) if format_name == "structured" else (reader.read(index) for index in batch_indices)
+        checksum += _checksum(values)
     return checksum
 
 
@@ -212,7 +214,7 @@ def measure(configuration: DatasetConfiguration, operation: Operation, samples: 
         "median_samples_per_second": statistics.median(rates),
         "stdev_samples_per_second": statistics.stdev(rates) if len(rates) > 1 else None,
         "native_contiguous_batch": configuration.format in {"homogeneous", "structured"},
-        "native_shuffled_batch": False,
+        "native_shuffled_batch": configuration.format == "structured",
         "warm_filesystem_cache": True,
     }
 

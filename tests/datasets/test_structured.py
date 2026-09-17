@@ -155,20 +155,24 @@ def test_progress_can_be_enabled_or_disabled(tmp_path, capsys) -> None:
     assert "Materializing structured dataset" in capsys.readouterr().err
 
 
-def test_map_dataset_uses_contiguous_batch_reader(tmp_path, monkeypatch) -> None:
+def test_map_dataset_uses_index_batch_reader(tmp_path, monkeypatch) -> None:
     result = materialize_structured_dataset(_TupleDataset(), tmp_path, progress=False)
     calls = []
-    original = result.reader.read_batch
+    original = result.reader.read_indices
 
-    def record(start, stop):
-        calls.append((start, stop))
-        return original(start, stop)
+    def record(indices):
+        calls.append(indices)
+        return original(indices)
 
-    monkeypatch.setattr(result.reader, "read_batch", record)
+    monkeypatch.setattr(result.reader, "read_indices", record)
     try:
         samples = result.__getitems__([1, 2, 3])
-        assert calls == [(1, 4)]
+        assert calls == [[1, 2, 3]]
         assert len(samples) == 3
+        shuffled = result.__getitems__([3, 0, 3])
+        assert calls[-1] == [3, 0, 3]
+        for sample, index in zip(shuffled, [3, 0, 3], strict=True):
+            _assert_tuple_sample(sample, index)
     finally:
         result.close()
 

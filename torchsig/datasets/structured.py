@@ -96,13 +96,8 @@ class StructuredHDF5Dataset(Dataset):
         return self.reader.read(index)
 
     def __getitems__(self, indices: list[int]) -> list[Any]:
-        """Read a requested batch, using a contiguous field read when possible."""
-        if not indices:
-            return []
-        contiguous = all(index == indices[0] + offset for offset, index in enumerate(indices))
-        if contiguous:
-            return self.reader.read_batch(indices[0], indices[-1] + 1)
-        return [self.reader.read(index) for index in indices]
+        """Read an index batch while preserving sampler order and duplicates."""
+        return self.reader.read_indices(indices)
 
     def close(self) -> None:
         """Close the underlying HDF5 reader."""

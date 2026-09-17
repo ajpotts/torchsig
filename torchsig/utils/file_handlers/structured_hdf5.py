@@ -24,6 +24,7 @@ __all__ = ["StructuredHDF5Reader", "StructuredHDF5Writer"]
 
 _SCHEMA_PATH = "schema"
 _TARGET_CHUNK_BYTES = 1024**2
+_MAX_COALESCED_RUNS = 4
 
 
 def _reconstruct(node: StructuredNode, leaves: Sequence[Any]) -> Any:
@@ -286,6 +287,34 @@ class StructuredHDF5Reader(FileReader):
             raise IndexError(f"Structured HDF5 batch range out of bounds: [{start}, {stop})")
         leaves = [dataset[start:stop] for dataset in self._datasets]
         return [_reconstruct(self.schema.root, [field_values[index] for field_values in leaves]) for index in range(stop - start)]
+
+    def read_indices(self, indices: Sequence[int]) -> list[Any]:
+        """Read an index batch efficiently and restore its requested order.
+
+        Indices are validated, sorted, and deduplicated before accessing each
+        schema leaf. Contiguous runs use slices when only a few runs are
+        required; more fragmented requests use one sorted HDF5 selection per
+        leaf. Duplicate indices are reconstructed in their original positions.
+        """
+        self._ensure_open()
+        if not isinstance(indices, Sequence) or isinstance(indices, (str, bytes)):
+            raise TypeError("Structured HDF5 indices must be a sequence of integers")
+        if not indices:
+            return []
+        for index in indices:
+            if not isinstance(index, int) or isinstance(index, bool):
+                raise TypeError("Structured HDF5 sample indices must be integers")
+            if index < 0 or index >= self._length:
+                raise IndexError(f"Structured HDF5 sample index out of range: {index}")
+
+        unique_indices, inverse = np.unique(np.asarray(indices, dtype=np.intp), return_inverse=True)
+        breaks = np.flatnonzero(np.diff(unique_indices) != 1) + 1
+        runs = np.split(unique_indices, breaks)
+        if len(runs) <= _MAX_COALESCED_RUNS:
+            leaves = [np.concatenate([dataset[int(run[0]) : int(run[-1]) + 1] for run in runs], axis=0) for dataset in self._datasets]
+        else:
+            leaves = [dataset[unique_indices] for dataset in self._datasets]
+        return [_reconstruct(self.schema.root, [field_values[position] for field_values in leaves]) for position in inverse]
 
     def teardown(self) -> None:
         """Close the process-local HDF5 file and field handles."""

@@ -94,4 +94,6 @@ def test_cli_writes_json_csv_and_capabilities(tmp_path: Path) -> None:
     assert payload["format_controls"]["standard"]["chunk_samples"] is False
     assert payload["format_controls"]["structured"]["chunk_samples"] is True
     assert {row["format"] for row in payload["measurements"]} == set(benchmark_module.FORMATS)
+    shuffled = [row for row in payload["measurements"] if row["operation"] == "shuffled_batch"]
+    assert all(row["native_shuffled_batch"] == (row["format"] == "structured") for row in shuffled)
     assert results.with_suffix(".csv").exists()
