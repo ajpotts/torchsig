@@ -1,0 +1,63 @@
+Title: Define the structured homogeneous sample contract and schema
+
+Summary
+-------
+
+Define a reusable, versioned schema for model-ready samples composed of
+fixed-shape numeric fields. This schema will become the contract used by the
+structured HDF5 reader, writer, and materialization APIs in later tickets.
+
+Background
+----------
+
+TorchSig's existing homogeneous HDF5 implementation stores Signal objects and
+their component metadata. Materialized training data may instead contain
+multiple model inputs and targets represented by nested tuples, lists, or
+mappings. Before adding another HDF5 format, TorchSig needs an explicit sample
+grammar and deterministic validation behavior.
+
+Scope
+-----
+
+* Support NumPy arrays, PyTorch tensors, NumPy numeric scalars, and Python
+  numeric scalars as leaves.
+* Support tuples, lists, and string-keyed mappings as containers.
+* Record every leaf's logical path, fixed shape, NumPy dtype, and future HDF5
+  dataset path.
+* Preserve tuple, list, and mapping distinctions in the schema.
+* Define a versioned, JSON-compatible schema document for the new structured
+  homogeneous format.
+* Infer a schema from one representative sample.
+* Validate later samples against the inferred structure, shapes, and dtypes.
+* Return normalized NumPy leaves in deterministic schema order.
+* Report validation failures with the logical path of the affected field.
+* Reject empty containers, non-string mapping keys, cyclic containers,
+  variable structures, object/string values, and other non-numeric leaves.
+
+Out of scope
+------------
+
+* Reading or writing HDF5 files.
+* Dataset or DataLoader materialization.
+* Atomic publication and overwrite behavior.
+* Multiprocessing file-handle management.
+* Source/output value-equivalence validation.
+* Changes to the existing Signal-oriented HomogeneousHDF5Reader,
+  HomogeneousHDF5Writer, or schema version 1.
+
+Acceptance criteria
+-------------------
+
+* Public APIs can infer and validate schemas for nested model input and target
+  samples.
+* Field paths, shapes, dtypes, ordering, and container kinds survive a JSON
+  schema round trip.
+* Validation accepts equivalent mapping samples regardless of mapping
+  insertion order.
+* Shape, dtype, keys, container type, and container length mismatches produce
+  clear errors containing the relevant logical path where applicable.
+* Unsupported leaves and malformed schema documents fail clearly.
+* Tests cover numeric and boolean dtypes, tensors, multidimensional arrays,
+  scalar leaves, nesting, boundary cases, and invalid inputs.
+* Existing homogeneous HDF5 behavior remains unchanged.
+
