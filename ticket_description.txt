@@ -1,0 +1,22 @@
+Title: Prevent circular imports and unnecessary package loading with lazy exports
+
+Description
+
+TorchSig package initializers eagerly import many submodules. Importing a small portion of the library can therefore load heavyweight dependencies and unrelated functionality, increase startup time, and expose the package to circular-import failures.
+
+Refactor package exports to load modules and public symbols only when first accessed. Preserve supported import paths, improve static type-checker visibility, and ensure lazy exports remain discoverable through dir() and consistent with __all__.
+
+Update internal and documentation-example imports to reference the modules that define their symbols. Optional Numba acceleration should fall back only when its import fails, rather than concealing unrelated runtime errors.
+
+Acceptance criteria
+
+- import torchsig does not eagerly import TorchSig subpackages.
+- Lazy exports are imported on first access and cached afterward.
+- Lazy-loading behavior is shared through a reusable helper.
+- __all__ accurately lists supported package exports.
+- dir() includes lazy exports before they are loaded.
+- Type checkers can resolve lazy exports through TYPE_CHECKING imports.
+- Internal code imports symbols from their defining modules.
+- Documentation examples use valid import paths.
+- Numba fallback catches ImportError rather than every exception.
+- Regression tests cover import isolation, caching, discoverability, invalid attributes, and import-error propagation.

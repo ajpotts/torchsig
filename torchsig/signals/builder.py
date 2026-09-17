@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any
 from torchsig.utils.abstractions import HierarchicalMetadataObject
 
 if TYPE_CHECKING:
-    from torchsig.signals import Signal
+    from torchsig.signals.signal_types import Signal
 
 __all__ = ["BaseSignalGenerator", "ConcatSignalGenerator"]
 

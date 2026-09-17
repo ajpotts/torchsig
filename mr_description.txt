@@ -1,0 +1,31 @@
+Title: Add typed, discoverable lazy imports across TorchSig
+
+Target branch: 3.0.0-dev
+
+Summary
+
+This MR replaces eager imports in TorchSig package initializers with reusable lazy exports. It reduces import-time coupling and prevents circular imports while retaining the intended package API.
+
+Changes
+
+- Added torchsig._lazy with shared helpers for importing modules or symbols on first access, caching resolved exports in package globals, and reporting lazy exports through dir().
+- Added lazy exports to torchsig, torchsig.datasets, torchsig.geo, torchsig.geo.utils, torchsig.signals, torchsig.transforms, torchsig.utils, and torchsig.utils.file_handlers.
+- Added guarded type-only imports for IDE and static type-checker support.
+- Aligned __all__ with the exports supported by each package.
+- Kept HierarchicalMetadataObject out of the top-level public API.
+- Changed internal imports to reference defining modules instead of package facades.
+- Corrected example imports for Signal, AWGN, TorchSigDefaults, Transmitter, and Receiver.
+- Narrowed the optional Numba fallback from Exception to ImportError.
+- Added import-specific regression tests.
+
+Testing
+
+- 167 passed, 4 skipped across the focused import, functional-transform, and Numba test sets.
+- New and modified lazy-import files pass Ruff.
+- python -m compileall passes.
+- git diff --check passes.
+- A broader test run reached 47% without failures before the runner stopped progressing and was terminated.
+
+Compatibility notes
+
+Supported package import paths remain available through lazy lookup. Lazy values are cached after their first resolution, so subsequent access behaves like a normal module attribute. HierarchicalMetadataObject is intentionally no longer exposed from the top-level torchsig namespace.

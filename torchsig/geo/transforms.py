@@ -126,7 +126,7 @@ def map_signal_leaves(
             references or an unexpectedly deep tree.
 
     Example:
-        >>> from torchsig.signals import Signal
+        >>> from torchsig.signals.signal_types import Signal
         >>> import numpy as np
         >>> def pad_signal(s, length):
         ...     pad_len = length - len(s.data)
@@ -200,7 +200,7 @@ def rebuild_signal_from_leaves(signal: Signal, *, max_depth: int | None = None) 
             references or an unexpectedly deep tree.
 
     Example:
-        >>> from torchsig.signals import Signal
+        >>> from torchsig.signals.signal_types import Signal
         >>> import numpy as np
         >>> leaf1 = Signal(data=np.ones(100))
         >>> leaf2 = Signal(data=np.ones(100) * 2)
@@ -291,7 +291,7 @@ def map_signal_tree(
             references or an unexpectedly deep tree.
 
     Example:
-        >>> from torchsig.signals import Signal
+        >>> from torchsig.signals.signal_types import Signal
         >>> import numpy as np
         >>> def truncate_signal(s, length):
         ...     s.data = s.data[:length]
@@ -755,7 +755,7 @@ class DopplerShift(GeoSignalTransform):
         >>> from torchsig.geo.transforms import DopplerShift, PathLoss
         >>> from torchsig.geo.types import GeoPoint
         >>> from torchsig.datasets import TorchSigIterableDataset
-        >>> from torchsig.utils import TorchSigDefaults
+        >>> from torchsig.utils.defaults import TorchSigDefaults
         >>>
         >>> # Create transmitter moving east at 100 m/s
         >>> metadata = TorchSigDefaults().default_dataset_metadata
