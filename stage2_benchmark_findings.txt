@@ -1,0 +1,73 @@
+Stage-2 Materialization Benchmark Findings
+==========================================
+
+Objective
+---------
+Determine whether precomputing deterministic Stage-2 transforms into structured
+HDF5 improves training throughput enough to justify the additional storage and
+one-time materialization cost.
+
+Test setup
+----------
+- 100,000 deterministic synthetic IQ samples
+- IQ length: 4,096
+- Batch size: 64
+- FP32 training
+- Built-in fallback Stage-2 transform and model pipeline
+- Online, materialized, and device-only pipelines compared
+
+Exploratory results
+-------------------
+The shortened configuration sweep compared 0 and 4 DataLoader workers,
+uncompressed and LZF storage, and chunk sizes of 1 and 32. The strongest
+shuffled configuration was:
+
+- Compression: none
+- Chunk size: 1 sample
+- DataLoader workers: 4
+- Layout: full dataset
+- Materialized throughput: 17,746 samples/second
+- Speedup over the matching online pipeline: 4.26x
+- Device-only ceiling utilization: 59.3%
+- Additional storage: 3.12 GiB
+- Estimated break-even: 3.23 epochs
+
+The exploratory run used one repetition, so it identified a promising
+configuration but did not establish measurement stability. It also showed that
+LZF compression and 32-sample chunks substantially reduced throughput.
+
+Confirmation results
+--------------------
+The winning configuration was measured over three repetitions with 10 warmup
+steps and 100 benchmark steps per repetition.
+
+Shuffled access:
+- Online throughput: 5,556 samples/second
+- Materialized throughput: 19,356 samples/second
+- Speedup: 3.48x
+- Device-only ceiling: 30,952 samples/second
+- Device-only ceiling utilization: 62.5%
+- Estimated break-even: 4.63 epochs
+
+Sequential access:
+- Online throughput: 5,837 samples/second
+- Materialized throughput: 16,642 samples/second
+- Speedup: 2.85x
+
+The confirmation run met the benchmark's stability criterion of no more than
+5% standard deviation across repetitions.
+
+Conclusion
+----------
+Precomputing deterministic Stage-2 transforms is beneficial for training runs
+lasting approximately five epochs or longer. The recommended configuration is
+uncompressed structured HDF5 with one sample per chunk, four DataLoader workers,
+and the full-dataset layout. This configuration provides a stable 3.48x shuffled
+training speedup at a storage cost of 3.12 GiB.
+
+The materialized pipeline reaches 62.5% of the device-only ceiling, indicating
+that additional input-pipeline optimization may still be possible. Physical
+train/validation/test split separation was not measured. Results use the
+benchmark's synthetic data and built-in fallback transform/model, so the final
+production decision should be validated with the real Stage-2 pipeline and
+representative hardware when those are available.
