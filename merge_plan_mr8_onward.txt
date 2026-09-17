@@ -1,0 +1,248 @@
+TorchSIG Structured HDF5 Follow-up Merge Plan (MR8 onward)
+===========================================================
+
+Current state
+-------------
+
+MR1 through MR7 delivered the structured sample schema, structured HDF5
+reader/writer, public materialization API, atomic publication, worker-safe
+reader lifecycle, source/output validation, documentation, and an initial
+benchmark.
+
+The follow-up review shows that these items are already covered:
+
+* StructuredHDF5Dataset implements __getitem__ and a contiguous __getitems__
+  fast path.
+* Worker-safe lazy handles, pickle-safe state, fork/spawn coverage,
+  persistent-worker coverage, and explicit close were added in MR5.
+* Documentation distinguishes deterministic work that can be materialized
+  from randomized augmentation that should remain online.
+* Compression and chunk-size measurements show that uncompressed,
+  one-sample chunks are the best tested choice for model-ready training data.
+* The confirmed synthetic Stage-2 result is a stable 3.48x shuffled throughput
+  improvement with four workers, 3.12 GiB of additional storage, and a
+  break-even point of 4.63 epochs.
+
+The following work remains:
+
+* Establish one directly comparable raw-I/O baseline across the standard,
+  packed, homogeneous, and structured readers.
+* Optimize non-contiguous/shuffled structured batch access. It currently
+  performs one read per sample per field.
+* Add explicit structured-materialization selection to TorchSigDataModule and
+  SplitTorchSigDataModule.
+* Validate the result with the real production Stage-2 transforms, model, and
+  representative workloads rather than only the built-in synthetic fallback.
+* Investigate sharding using observed multiworker behavior and dataset-size
+  constraints; implement it only if evidence supports doing so.
+
+
+MR8 - Establish the end-to-end Stage-2 performance gate
+--------------------------------------------------------
+
+Status: implemented on the current MR8 branch; prepare it for review.
+
+Scope:
+
+* Add the self-contained Stage-2 materialization benchmark with deterministic
+  synthetic IQ generation and optional production transform/model hooks.
+* Compare online, materialized, and device-only execution for sequential and
+  shuffled access.
+* Measure worker counts, compression, chunk size, first-batch latency,
+  throughput, materialization time, output size, and break-even epochs.
+* Run each case in an isolated process, explicitly stop DataLoader workers,
+  checkpoint completed cases, and resume interrupted matrices.
+* Verify sample equivalence and model-output equivalence before timing.
+* Store the confirmed findings without committing generated benchmark data.
+
+Acceptance evidence:
+
+* Focused benchmark tests and lint pass.
+* The three-repetition confirmation run reports 19,356 materialized shuffled
+  samples/second versus 5,556 online samples/second: a stable 3.48x speedup.
+* The recommended tested configuration is compression=none, chunk_samples=1,
+  workers=4, layout=full.
+* Documentation clearly labels the result as synthetic/fallback evidence, not
+  a universal production guarantee.
+
+Likely files:
+
+* benchmarks/benchmark_stage2_materialization.py
+* tests/test_stage2_materialization_benchmark.py
+* docs/hdf5_structured.rst
+* stage2_benchmark_findings.txt
+
+
+MR9 - Add a unified raw-reader I/O benchmark
+--------------------------------------------
+
+Dependency: MR8.
+
+Scope:
+
+* Add one benchmark harness that compares standard, packed, homogeneous, and
+  structured HDF5 readers under the same sample shapes and timing method.
+* Measure individual sequential reads, individual random reads, contiguous
+  batch reads, and shuffled batch reads.
+* Cover representative complex IQ and floating-point spectrogram/image data.
+* Cover no compression and LZF plus one-sample and small multi-sample chunks
+  where each format supports those controls.
+* Report first-read latency, steady-state samples/second, file size, and the
+  exact environment/configuration in machine-readable JSON/CSV.
+* Do not change reader behavior in this MR; it establishes a reviewable
+  baseline for MR10.
+
+Acceptance criteria:
+
+* Equivalent values and dtypes are checked before timing.
+* Warmup, repetition count, seeds, and cache assumptions are explicit.
+* Results distinguish unsupported format/configuration combinations rather
+  than silently comparing different settings.
+* A short findings document identifies whether structured shuffled access is
+  limited by per-sample HDF5 operations.
+
+
+MR10 - Optimize structured shuffled batch reads
+-----------------------------------------------
+
+Dependency: MR9.
+
+Scope:
+
+* Add a batch-index read API to StructuredHDF5Reader.
+* Validate indices consistently with single and contiguous reads.
+* For shuffled indices, sort and deduplicate indices, coalesce adjacent runs
+  into slices where practical, issue batched reads per schema leaf, and restore
+  the sampler's original order, including duplicate indices.
+* Route StructuredHDF5Dataset.__getitems__ through the new batch-index API.
+* Preserve the existing public single-index and contiguous APIs.
+* Re-run the MR9 raw-I/O benchmark and MR8 end-to-end confirmation case.
+
+Tests:
+
+* Sorted and unsorted indices.
+* Duplicate, empty, boundary, and invalid indices.
+* Exact reconstruction of nested samples and sampler order.
+* One contiguous slice per leaf for contiguous requests.
+* Coalesced reads for shuffled runs, with no per-field/per-sample fallback for
+  the normal batch path.
+* DataLoader behavior with zero and multiple persistent workers.
+
+Merge gate:
+
+* No regression in sequential throughput outside an agreed noise margin.
+* Record shuffled throughput before and after the change; do not require a
+  speedup claim unless repetitions show a stable improvement.
+
+
+MR11 - Integrate structured materialization with TorchSig DataModules
+--------------------------------------------------------------------
+
+Dependency: MR10.
+
+Scope:
+
+* Add an explicit, opt-in configuration for TorchSigDataModule and
+  SplitTorchSigDataModule to create, reuse, and select structured model-ready
+  datasets.
+* Keep current Signal-oriented behavior as the default for compatibility.
+* Define separate roots/manifests for source data and materialized outputs so
+  configuration changes cannot silently reuse stale results.
+* Preserve train/validation/test membership and deterministic split behavior.
+* Materialize deterministic representation conversion and target construction
+  while leaving requested randomized training augmentation online.
+* Make overwrite, validation mode, writer options, and materialization worker
+  settings explicit.
+* Ensure setup() selects StructuredHDF5Dataset when a compatible materialized
+  output exists and fails clearly when the manifest is incompatible.
+
+Tests:
+
+* Both DataModule classes with materialization disabled and enabled.
+* Creation, reuse, overwrite, and incompatible-manifest behavior.
+* Full-dataset splitting and physically separate split roots.
+* Train/validation/test sample membership and output equivalence.
+* Deterministic transforms are frozen; configured randomized transforms remain
+  online and vary as intended.
+* Model-facing loaders with shuffled access and persistent workers.
+* Existing DataModule API behavior remains unchanged by default.
+
+
+MR12 - Validate the production workloads and publish operating guidance
+-----------------------------------------------------------------------
+
+Dependency: MR11.
+
+Scope:
+
+* Run the end-to-end benchmark through the DataModule integration using the
+  real Stage-2 transform and model factories on representative hardware.
+* Include fixed-size complex IQ with a scalar class target, spectrogram/image
+  input, and one fixed-shape multi-field detection target.
+* Compare online and materialized loading with sequential and shuffled access,
+  persistent workers, and worker counts of 0, 2, and 4 (optionally 8).
+* Record CPU utilization and peak host/device memory in addition to existing
+  latency, throughput, storage, materialization, and break-even metrics.
+* Evaluate full-dataset versus physically separate split layouts.
+* Convert the evidence into conservative defaults and operational guidance.
+
+Acceptance criteria:
+
+* The project agrees on a throughput target before interpreting the result as
+  success or failure.
+* At least three repetitions support any recommended default.
+* Results and environment metadata are retained as reviewable artifacts or a
+  concise checked-in findings document; large generated datasets remain
+  untracked.
+* Documentation explains when materialization is not worthwhile.
+
+
+MR13 - Investigate HDF5 sharding and manifests
+----------------------------------------------
+
+Dependency: MR12 performance evidence.
+
+Scope:
+
+* Determine whether the remaining gap to the device-only ceiling is caused by
+  single-file contention, decompression, storage bandwidth, collation, or model
+  transfer rather than assuming sharding is the answer.
+* Prototype representative shard sizes only if measurement can isolate
+  single-file contention.
+* Define a manifest design, global-to-local index lookup, worker locality,
+  atomic multi-file publication, validation, and missing/corrupt-shard errors.
+* Evaluate shuffle quality, open-handle limits, operational dataset size, and
+  future append/resume behavior.
+* Produce a go/no-go recommendation and an implementation estimate.
+
+Decision gate:
+
+* Stop after the investigation if sharding does not provide a stable material
+  throughput or operational benefit.
+* Open MR14 only if MR13 demonstrates that the added format and lifecycle
+  complexity is justified.
+
+
+MR14 - Implement sharded structured datasets (conditional)
+-----------------------------------------------------------
+
+Dependency: a positive MR13 recommendation.
+
+Scope:
+
+* Implement the reviewed manifest and sharded reader/writer design.
+* Preserve the unsharded structured API and compatibility.
+* Add atomic publication, validation, corruption handling, multiprocessing,
+  and shuffled DataLoader coverage across shard boundaries.
+* Repeat the MR12 performance gate and document the measured tradeoff.
+
+
+Recommended merge order
+-----------------------
+
+MR8 -> MR9 -> MR10 -> MR11 -> MR12 -> MR13 -> MR14 (only if approved)
+
+MR9 and MR10 close the overdue raw-I/O and shuffled-batch requirements before
+the format is exposed through DataModules. MR11 makes the faster path usable by
+normal training code. MR12 establishes production evidence. Sharding remains a
+measured, conditional optimization rather than part of the correctness path.
