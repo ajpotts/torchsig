@@ -32,6 +32,8 @@ their frequency-axis height and default to `estimated_occupied_bandwidth`.
   `YOLOLabel(bandwidth_key="bandwidth")` to retain canonical-bandwidth boxes.
 - Validate unsupported YOLO bandwidth keys and missing selected bandwidth
   metadata with clear errors.
+- Add `examples/scripts/compare_yolo_bandwidth_boxes.py` to generate
+  side-by-side spectrogram examples using both YOLO bandwidth modes.
 
 ## Behavior
 
@@ -116,6 +118,14 @@ pytest -q tests/transforms/test_metadata_transforms.py \
 ```
 
 Result: `14 passed, 147 deselected`.
+
+```bash
+python examples/scripts/compare_yolo_bandwidth_boxes.py \
+    --examples 1 \
+    --output /tmp/yolo_bandwidth_box_comparison.png
+```
+
+The script completes and writes the comparison image.
 
 ```bash
 ruff format --check \
