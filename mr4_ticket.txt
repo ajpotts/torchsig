@@ -1,0 +1,16 @@
+Title: Add atomic structured dataset publication and explicit overwrite behavior
+
+Materialize structured HDF5 datasets into a temporary sibling directory and publish them only after writing completes and the resulting file passes reader validation. Add an explicit overwrite option so callers control whether an existing complete or incomplete destination may be replaced.
+
+Acceptance criteria:
+
+* Materialize into a uniquely named temporary sibling directory.
+* Flush, complete, and validate the staged dataset before publication.
+* Publish a newly created destination with an atomic rename.
+* Reject any existing destination when overwrite=False, including incomplete output.
+* With overwrite=True, preserve the existing destination until the replacement is complete and validated.
+* Restore an existing destination if publication of its replacement fails.
+* Remove temporary and backup artifacts after expected failures where safe.
+* Cover schema and mid-write failures, complete and incomplete destinations, both overwrite modes, and replacement failure safety.
+
+Worker-safe lazy reader lifecycle behavior remains deferred to MR5. Optional source/output equivalence validation remains deferred to MR6.

@@ -1,0 +1,20 @@
+Summary
+
+Adds atomic publication and explicit overwrite behavior to materialize_structured_dataset. Materialization now writes to a uniquely named sibling staging directory, closes and flushes the writer, and opens the staged output with StructuredHDF5Reader to validate its completion and physical schema before publishing it.
+
+The new overwrite=False default rejects complete, incomplete, file, or directory conflicts without changing them. With overwrite=True, an existing destination is moved to a sibling backup only after the replacement is ready. The staged dataset is then renamed into place, with rollback restoring the prior destination if publication fails. Temporary staging and successful-publication backup artifacts are cleaned up.
+
+Public API
+
+* materialize_structured_dataset(..., overwrite: bool = False)
+
+Test plan
+
+* Run the focused structured Dataset materialization tests.
+* Run the MR1 schema and MR2 structured HDF5 suites.
+* Run Ruff on the changed Python files.
+* Run git diff --check.
+
+Scope boundaries
+
+This MR keeps StructuredHDF5Writer's direct-write behavior unchanged; atomicity is provided by the public materialization API that owns the complete creation workflow. PID-aware lazy reader handles and multiprocessing lifecycle behavior belong to MR5. Post-write comparison against the source belongs to MR6.
