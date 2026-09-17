@@ -85,7 +85,7 @@ def _unpack_value(value: Any) -> Any:
 def encode_metadata(obj: HierarchicalMetadataObject) -> str:
     """Encode an object's local metadata as deterministic TorchSig JSON."""
     # HierarchicalMetadataObject is not iterable; its keys() API is required.
-    metadata = {key: obj[key] for key in obj.keys()}  # noqa: SIM118
+    metadata = {key: obj[key] for key in obj.keys()}
     return json.dumps(
         _pack_value(metadata),
         separators=(",", ":"),
