@@ -282,6 +282,7 @@ class TorchSigDataModule(pl.LightningDataModule):
         target_labels: list[str] | None = None,
         seed: int | None = None,
         metadata_debug: bool | Mapping[str, Any] = False,
+        experiment_config: Any = None,
     ):
         """Initialize the TorchSigDataModule.
 
@@ -306,6 +307,8 @@ class TorchSigDataModule(pl.LightningDataModule):
             metadata_debug: Enable metadata debugging with default settings,
                 or provide keyword arguments for ``enable_metadata_debug``.
                 Defaults to ``False``.
+            experiment_config: Optional signal-generation configuration, YAML
+                path, or mapping. Defaults to no overrides.
 
         Raises:
             ValueError: If dataset_splits don't sum to 1.0 (when using fractions).
@@ -328,6 +331,7 @@ class TorchSigDataModule(pl.LightningDataModule):
 
         self.target_labels = target_labels
         self.metadata_debug_options = _metadata_debug_options(metadata_debug)
+        self.experiment_config = experiment_config
 
         # ---- dataloader configuration ------------------------------------
         self.batch_size = batch_size
@@ -448,6 +452,7 @@ class TorchSigDataModule(pl.LightningDataModule):
             transforms=additional_transforms,
             target_labels=target_labels or None,
             seed=cfg.seed,
+            experiment_config=cfg.experiment_config,
             **kwargs,
         )
 
@@ -467,6 +472,7 @@ class TorchSigDataModule(pl.LightningDataModule):
             component_transforms=[self.burst_impairments],
             target_labels=self.target_labels,
             seed=self.seed,
+            experiment_config=self.experiment_config,
         )
         _enable_dataset_metadata_debug(dataset, self.metadata_debug_options)
         loader = WorkerSeedingDataLoader(
@@ -681,6 +687,7 @@ class SplitTorchSigDataModule(pl.LightningDataModule):
             transforms=_config_transforms(cfg),
             signal_generators=self.signal_generators,
             seed=cfg.seed,
+            experiment_config=cfg.experiment_config,
         )
         _enable_dataset_metadata_debug(dataset, self.metadata_debug_options)
 

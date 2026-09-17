@@ -275,12 +275,16 @@ class DatasetCreator:
         ds = self.dataloader.dataset
         seed = getattr(ds, "rng_seed", None)
 
-        return {
+        result = {
             "dataset_length": int(dataset_length),
             "seed": None if seed is None else int(seed),
             "target_labels": original_target_labels,
             "dataset_metadata": self._get_dataset_metadata_dict(),
         }
+        experiment_config = getattr(ds, "experiment_config", None)
+        if experiment_config is not None:
+            result["experiment_config"] = experiment_config.to_dict()
+        return result
 
     def get_writer_info_dict(self, *, complete: bool) -> dict[str, Any]:
         """Returns a dictionary with information about the dataset writing configuration.
@@ -344,6 +348,8 @@ class DatasetCreator:
             dataset_disk = yaml.safe_load(f) or {}
 
         stable_keys = ["seed", "target_labels", "dataset_metadata"]
+        if "experiment_config" in expected_dataset_info:
+            stable_keys.append("experiment_config")
         for k in stable_keys:
             if k not in dataset_disk:
                 differences.append((k, "missing_on_disk", expected_dataset_info.get(k)))

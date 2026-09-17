@@ -101,6 +101,19 @@ def test_load_config_from_yaml_defaults_dataset_id_to_file_stem(tmp_path, monkey
     assert config.kwargs["dataset_id"] == "fallback_name"
 
 
+def test_load_config_from_yaml_includes_signal_generation_config(tmp_path, monkeypatch):
+    install_fake_datasets_module(monkeypatch)
+    cfg = make_valid_config_dict()
+    cfg["signals"] = {"qpsk": {"parameters": {"alpha": {"value": 0.35}}}}
+    path = tmp_path / "configured.yaml"
+    path.write_text(yaml.safe_dump(cfg))
+
+    config = load_config_from_yaml(path)
+
+    effective = config.kwargs["experiment_config"]
+    assert effective.parameter_value("qpsk", "alpha") == 0.35
+
+
 @pytest.mark.parametrize(
     ("mutation", "expected_message"),
     [

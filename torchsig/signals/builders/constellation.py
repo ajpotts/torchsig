@@ -230,8 +230,13 @@ class ConstellationSignalGenerator(BaseSignalGenerator):
         bandwidth = self.random_generator.integers(low=self["bandwidth_min"], high=self["bandwidth_max"] + 1)
         constellation_name = self["constellation_name"]
 
-        # Randomize pulse shape selection
-        if self.random_generator.integers(0, 2) == 0:
+        # A fixed alpha implies SRRC shaping; otherwise preserve the existing
+        # randomized pulse-shape and rolloff behavior.
+        configured_alpha = self["alpha"] if hasattr(self, "alpha") else None
+        if configured_alpha is not None:
+            pulse_shape_name = "srrc"
+            alpha_rolloff = configured_alpha
+        elif self.random_generator.integers(0, 2) == 0:
             pulse_shape_name = "srrc"
             alpha_rolloff = self.random_generator.uniform(0.1, 0.5)
         else:
