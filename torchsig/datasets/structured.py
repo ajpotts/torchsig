@@ -6,8 +6,9 @@ import shutil
 import tempfile
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
+import h5py
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -19,6 +20,8 @@ if TYPE_CHECKING:
     from os import PathLike
 
 __all__ = ["StructuredHDF5Dataset", "materialize_structured_dataset"]
+
+ValidationMode = Literal["full", "sampled"]
 
 
 def _identity_collate(samples: list[Any]) -> list[Any]:
@@ -152,6 +155,81 @@ def _publish_structured_dataset(staging_root: Path, root: Path, overwrite: bool)
     _remove_path(backup_root)
 
 
+def _validation_indices(length: int, mode: ValidationMode | None, sample_count: int, seed: int) -> range | frozenset[int]:
+    """Return the source indices whose materialized values must be checked."""
+    if mode is None:
+        return range(0)
+    if mode == "full":
+        return range(length)
+    count = min(sample_count, length)
+    generator = np.random.default_rng(seed)
+    return frozenset(int(index) for index in generator.choice(length, size=count, replace=False))
+
+
+def _copy_validation_sample(value: Any) -> Any:
+    """Copy one structured sample without retaining tensor or array storage."""
+    if isinstance(value, Mapping):
+        return {key: _copy_validation_sample(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return tuple(_copy_validation_sample(item) for item in value)
+    if isinstance(value, list):
+        return [_copy_validation_sample(item) for item in value]
+    if isinstance(value, torch.Tensor):
+        return value.detach().cpu().numpy().copy()
+    return np.asarray(value).copy()
+
+
+def _format_validation_path(path: tuple[str | int, ...]) -> str:
+    result = "$"
+    for part in path:
+        result += f"[{part}]" if isinstance(part, int) else f"[{part!r}]"
+    return result
+
+
+def _validate_materialized_samples(
+    reader: StructuredHDF5Reader,
+    expected: Mapping[int, Any],
+    *,
+    rtol: float,
+    atol: float,
+) -> None:
+    """Compare captured source samples with their staged representations."""
+    for index in sorted(expected):
+        actual = reader.read(index)
+        try:
+            expected_leaves = reader.schema.validate(expected[index])
+            actual_leaves = reader.schema.validate(actual)
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"Structured validation failed at sample {index}: {error}") from error
+        for field, expected_value, actual_value in zip(reader.schema.fields, expected_leaves, actual_leaves, strict=True):
+            if rtol == 0.0 and atol == 0.0:  # noqa: SIM108
+                equal = np.array_equal(expected_value, actual_value, equal_nan=True)
+            else:
+                equal = np.allclose(expected_value, actual_value, rtol=rtol, atol=atol, equal_nan=True)
+            if not equal:
+                path = _format_validation_path(field.path)
+                raise ValueError(f"Structured validation failed at sample {index}, field {path}: values differ")
+
+
+def _record_validation_metadata(
+    root: Path,
+    mode: ValidationMode | None,
+    count: int,
+    seed: int,
+    rtol: float,
+    atol: float,
+) -> None:
+    """Record the completed validation configuration and result."""
+    with h5py.File(root / "data.h5", "r+") as handle:
+        handle.attrs["validation_mode"] = mode or "none"
+        handle.attrs["validation_result"] = "passed" if mode is not None else "not_requested"
+        handle.attrs["validation_sample_count"] = count
+        handle.attrs["validation_seed"] = seed
+        handle.attrs["validation_rtol"] = rtol
+        handle.attrs["validation_atol"] = atol
+        handle.flush()
+
+
 def materialize_structured_dataset(
     source: Dataset | DataLoader,
     root: str | PathLike[str],
@@ -162,6 +240,11 @@ def materialize_structured_dataset(
     expected_length: int | None = None,
     progress: bool = True,
     overwrite: bool = False,
+    validation: ValidationMode | None = None,
+    validation_samples: int = 100,
+    validation_seed: int = 0,
+    validation_rtol: float = 0.0,
+    validation_atol: float = 0.0,
     writer_kwargs: Mapping[str, Any] | None = None,
 ) -> StructuredHDF5Dataset:
     """Materialize a PyTorch Dataset or DataLoader into structured HDF5.
@@ -181,6 +264,12 @@ def materialize_structured_dataset(
         progress: Whether to display materialization progress.
         overwrite: Whether to atomically replace an existing destination after
             the new dataset has been completed and validated.
+        validation: Optional ``"full"`` or deterministic ``"sampled"``
+            source/output validation.
+        validation_samples: Maximum number of samples checked in sampled mode.
+        validation_seed: Seed controlling deterministic sampled indices.
+        validation_rtol: Relative tolerance for value comparisons.
+        validation_atol: Absolute tolerance for value comparisons.
         writer_kwargs: Optional keyword arguments for StructuredHDF5Writer.
 
     Returns:
@@ -190,6 +279,15 @@ def materialize_structured_dataset(
         raise TypeError("source must be a PyTorch Dataset or DataLoader")
     if not isinstance(overwrite, bool):
         raise TypeError("overwrite must be a boolean")
+    if validation not in (None, "full", "sampled"):
+        raise ValueError("validation must be None, 'full', or 'sampled'")
+    if not isinstance(validation_samples, int) or isinstance(validation_samples, bool) or validation_samples < 1:
+        raise ValueError("validation_samples must be a positive integer")
+    if not isinstance(validation_seed, int) or isinstance(validation_seed, bool):
+        raise TypeError("validation_seed must be an integer")
+    for name, value in (("validation_rtol", validation_rtol), ("validation_atol", validation_atol)):
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or not np.isfinite(value) or value < 0:
+            raise ValueError(f"{name} must be a finite non-negative number")
     destination = Path(root).resolve()
     if _destination_conflicts(destination) and not overwrite:
         raise FileExistsError(f"Structured dataset destination already exists: {destination}")
@@ -216,6 +314,8 @@ def materialize_structured_dataset(
         raise ValueError("Cannot infer a structured schema from an empty source")
     kwargs = dict(writer_kwargs or {})
     written = 0
+    selected_indices = _validation_indices(required_count, validation, validation_samples, validation_seed)
+    validation_expected: dict[int, Any] = {}
     destination.parent.mkdir(parents=True, exist_ok=True)
     staging_root = Path(tempfile.mkdtemp(prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent))
     try:
@@ -234,6 +334,10 @@ def materialize_structured_dataset(
                     raise ValueError(f"Source produced an empty batch at index {batch_index}")
                 if written + len(samples) > required_count:
                     raise RuntimeError(f"Source produced more than the expected {required_count} samples")
+                for offset, sample in enumerate(samples):
+                    sample_index = written + offset
+                    if sample_index in selected_indices:
+                        validation_expected[sample_index] = _copy_validation_sample(sample)
                 writer.write(batch_index, samples)
                 written += len(samples)
                 progress_bar.update(len(samples))
@@ -243,6 +347,21 @@ def materialize_structured_dataset(
 
         with StructuredHDF5Reader(staging_root) as staged_reader:
             len(staged_reader)
+            if validation is not None:
+                _validate_materialized_samples(
+                    staged_reader,
+                    validation_expected,
+                    rtol=float(validation_rtol),
+                    atol=float(validation_atol),
+                )
+        _record_validation_metadata(
+            staging_root,
+            validation,
+            len(validation_expected),
+            validation_seed,
+            float(validation_rtol),
+            float(validation_atol),
+        )
         _publish_structured_dataset(staging_root, destination, overwrite)
     finally:
         if staging_root.exists():

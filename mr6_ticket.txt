@@ -1,0 +1,17 @@
+Title: Add source/output equivalence validation for structured materialization
+
+Add optional post-write validation to materialize_structured_dataset so callers can verify that staged structured HDF5 samples preserve the source container contract, field names, shapes, dtypes, and values before atomic publication.
+
+Acceptance criteria:
+
+* Support opt-in full validation and deterministic sampled validation.
+* Select sampled indices reproducibly from a configurable seed and sample count.
+* Compare the exact samples emitted by the materialization DataLoader rather than rerunning a potentially randomized source.
+* Require exact value equality by default, including NaN and complex-valued data.
+* Support explicitly configured relative and absolute tolerances for lossy workflows.
+* Report validation errors with the source sample index and structured field path.
+* Record validation mode, result, checked count, seed, and tolerances in HDF5 metadata.
+* Complete validation before MR4 atomic publication so a failure publishes no new output and preserves any existing valid destination.
+* Add deterministic tests for successful full and sampled validation, value/dtype/structure failures, NaN and complex values, tolerances, metadata, and replacement safety.
+
+Documentation and performance examples remain deferred to MR7.

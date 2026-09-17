@@ -272,3 +272,141 @@ def test_publication_failure_restores_existing_dataset(tmp_path, monkeypatch) ->
     finally:
         unchanged.close()
     assert [path.name for path in tmp_path.iterdir()] == ["dataset"]
+
+
+def test_full_validation_records_success_metadata(tmp_path) -> None:
+    result = materialize_structured_dataset(_TupleDataset(5), tmp_path, progress=False, validation="full")
+    result.close()
+
+    with h5py.File(tmp_path / "data.h5", "r") as handle:
+        assert handle.attrs["validation_mode"] == "full"
+        assert handle.attrs["validation_result"] == "passed"
+        assert handle.attrs["validation_sample_count"] == 5
+        assert handle.attrs["validation_rtol"] == 0.0
+        assert handle.attrs["validation_atol"] == 0.0
+
+
+def test_sampled_validation_uses_deterministic_indices(tmp_path, monkeypatch) -> None:
+    seed = 13
+    checked = []
+    original_read = structured_module.StructuredHDF5Reader.read
+
+    def record_read(reader, index):
+        checked.append(index)
+        return original_read(reader, index)
+
+    monkeypatch.setattr(structured_module.StructuredHDF5Reader, "read", record_read)
+    result = materialize_structured_dataset(
+        _TupleDataset(12),
+        tmp_path,
+        progress=False,
+        validation="sampled",
+        validation_samples=4,
+        validation_seed=seed,
+    )
+    result.close()
+
+    expected = sorted(int(index) for index in np.random.default_rng(seed).choice(12, size=4, replace=False))
+    assert checked == expected
+    with h5py.File(tmp_path / "data.h5", "r") as handle:
+        assert handle.attrs["validation_mode"] == "sampled"
+        assert handle.attrs["validation_sample_count"] == 4
+        assert handle.attrs["validation_seed"] == seed
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda sample: (sample[0] + 1, sample[1]), r"sample 0, field \$\[0\]: values differ"),
+        (lambda sample: (sample[0].astype(np.float64), sample[1]), r"sample 0: Dtype mismatch at \$\[0\]"),
+        (lambda sample: (sample[0][:1], sample[1]), r"sample 0: Shape mismatch at \$\[0\]"),
+        (lambda sample: [sample[0], sample[1]], r"sample 0: Container mismatch at \$: expected tuple"),
+        (lambda sample: (sample[0], {"other": sample[1]["class"]}), r"sample 0: Mapping keys mismatch at \$\[1\]"),
+    ],
+)
+def test_validation_reports_sample_and_field_failures(tmp_path, monkeypatch, mutation, message) -> None:
+    original_read = structured_module.StructuredHDF5Reader.read
+
+    def mutate_read(reader, index):
+        sample = original_read(reader, index)
+        return mutation(sample) if index == 0 else sample
+
+    monkeypatch.setattr(structured_module.StructuredHDF5Reader, "read", mutate_read)
+    with pytest.raises(ValueError, match=message):
+        materialize_structured_dataset(_TupleDataset(2), tmp_path, progress=False, validation="full")
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_validation_supports_nan_complex_values_and_configured_tolerance(tmp_path, monkeypatch) -> None:
+    class _SpecialDataset(Dataset):
+        def __len__(self):
+            return 2
+
+        def __getitem__(self, index):
+            return np.array([np.nan + 1j * index, index + 2j], dtype=np.complex64)
+
+    exact = materialize_structured_dataset(_SpecialDataset(), tmp_path / "exact", progress=False, validation="full")
+    exact.close()
+
+    original_read = structured_module.StructuredHDF5Reader.read
+
+    def perturb_read(reader, index):
+        sample = original_read(reader, index).copy()
+        sample[1] += np.complex64(1e-4)
+        return sample
+
+    monkeypatch.setattr(structured_module.StructuredHDF5Reader, "read", perturb_read)
+    tolerant = materialize_structured_dataset(
+        _SpecialDataset(),
+        tmp_path / "tolerant",
+        progress=False,
+        validation="full",
+        validation_atol=1e-3,
+    )
+    tolerant.close()
+
+
+def test_validation_failure_preserves_existing_output(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "dataset"
+    original = materialize_structured_dataset(_TupleDataset(2), root, progress=False)
+    original.close()
+    original_read = structured_module.StructuredHDF5Reader.read
+
+    def corrupt_read(reader, index):
+        sample = original_read(reader, index)
+        return (sample[0] + 1, sample[1])
+
+    monkeypatch.setattr(structured_module.StructuredHDF5Reader, "read", corrupt_read)
+    with pytest.raises(ValueError, match="values differ"):
+        materialize_structured_dataset(
+            _TupleDataset(3),
+            root,
+            progress=False,
+            overwrite=True,
+            validation="full",
+        )
+
+    monkeypatch.setattr(structured_module.StructuredHDF5Reader, "read", original_read)
+    unchanged = StructuredHDF5Dataset(root)
+    try:
+        assert len(unchanged) == 2
+        _assert_tuple_sample(unchanged[1], 1)
+    finally:
+        unchanged.close()
+    assert [path.name for path in tmp_path.iterdir()] == ["dataset"]
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "error", "message"),
+    [
+        ({"validation": "invalid"}, ValueError, "validation must be"),
+        ({"validation_samples": 0}, ValueError, "validation_samples"),
+        ({"validation_seed": True}, TypeError, "validation_seed"),
+        ({"validation_rtol": -1.0}, ValueError, "validation_rtol"),
+        ({"validation_atol": np.nan}, ValueError, "validation_atol"),
+    ],
+)
+def test_rejects_invalid_validation_configuration(tmp_path, kwargs, error, message) -> None:
+    with pytest.raises(error, match=message):
+        materialize_structured_dataset(_TupleDataset(1), tmp_path, progress=False, **kwargs)
