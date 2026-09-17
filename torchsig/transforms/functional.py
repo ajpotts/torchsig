@@ -13,13 +13,15 @@ from scipy import signal as sp
 from scipy.constants import c as speed_of_light
 from scipy.interpolate import interp1d as sp_interp1d
 
-from torchsig.utils import dsp
 from torchsig.utils.dsp import (
     TorchSigComplexDataType,
     TorchSigRealDataType,
+    compute_spectrogram,
     is_even,
+    low_pass,
     multistage_polyphase_resampler,
     multistage_polyphase_resampler_actual_rate,
+    noise_generator,
     prototype_polyphase_filter,
     sampling_clock_impairments,
 )
@@ -33,7 +35,7 @@ try:
     from torchsig.utils.dsp_numba import (
         sampling_clock_impairments_numba_wrapper as _sampling_clock_impairments,
     )
-except Exception:  # pragma: no cover - exercised only when numba is unavailable
+except ImportError:  # pragma: no cover - exercised only when numba is unavailable
     _sampling_clock_impairments = sampling_clock_impairments
     _digital_agc_numba = None
 
@@ -124,7 +126,7 @@ def additive_noise(
     """
     rng = rng or np.random.default_rng()
     n = len(data)
-    noise_samples = dsp.noise_generator(n, power, color, continuous, rng)
+    noise_samples = noise_generator(n, power, color, continuous, rng)
     return (data + noise_samples).astype(TorchSigComplexDataType)
 
 
@@ -159,7 +161,7 @@ def adjacent_channel_interference(
         Data with added adjacent interference.
     """
     rng = rng or np.random.default_rng()
-    filter_weights = dsp.low_pass(0.25, 0.25, 4.0) if filter_weights is None else filter_weights
+    filter_weights = low_pass(0.25, 0.25, 4.0) if filter_weights is None else filter_weights
 
     n = len(data)
     t = np.arange(n) / sample_rate
@@ -376,10 +378,10 @@ def cochannel_interference(
         Data with added uncorrelated co-channel interference.
     """
     rng = rng or np.random.default_rng()
-    filter_weights = dsp.low_pass(0.25, 0.25, 4.0) if filter_weights is None else filter_weights
+    filter_weights = low_pass(0.25, 0.25, 4.0) if filter_weights is None else filter_weights
 
     n = len(data)
-    noise_samples = dsp.noise_generator(n, power, color, continuous, rng)
+    noise_samples = noise_generator(n, power, color, continuous, rng)
     shaped_noise = np.convolve(noise_samples, filter_weights)[-n:]
 
     # correct shaped noise power (do not assume filter is prescaled)
@@ -1554,7 +1556,7 @@ def spectrogram(data: np.ndarray, fft_size: int, fft_stride: int) -> np.ndarray:
     Returns:
         Spectrogram computed from IQ data.
     """
-    return dsp.compute_spectrogram(data, fft_size=fft_size, fft_stride=fft_stride)
+    return compute_spectrogram(data, fft_size=fft_size, fft_stride=fft_stride)
 
 
 def spectrogram_drop_samples(data: np.ndarray, drop_starts: np.ndarray, drop_sizes: np.ndarray, fill: Literal["ffill", "bfill", "mean", "zero", "max", "low", "ones"]) -> np.ndarray:

@@ -4,7 +4,7 @@ which is used to represent and manipulate signal data and metadata.
 
 Examples:
     Signal:
-        >>> from torchsig.signals import Signal
+        >>> from torchsig.signals.signal_types import Signal
         >>> import numpy as np
         >>> data = np.array([1.0, 2.0])
         >>> new_sig = Signal(data=data)
