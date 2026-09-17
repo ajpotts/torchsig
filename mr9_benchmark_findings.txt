@@ -1,0 +1,144 @@
+MR9 Unified HDF5 Reader Benchmark Findings
+===========================================
+
+Scope
+-----
+
+The representative MR9 benchmark completed 128 measurements across:
+
+* legacy standard, packed, homogeneous, and structured HDF5 formats;
+* complex IQ and floating-point spectrogram workloads;
+* individual sequential, individual random, contiguous batch, and shuffled
+  batch access;
+* uncompressed and LZF-compressed storage; and
+* chunk sizes of 1, 8, and 32 samples where the writer supports that control.
+
+The run used 256 generated samples, 128 reads per measurement, a batch size of
+32, one warmup, and three repetitions. Values, shapes, and dtypes were checked
+for equivalence before timing. Steady-state results used a warm filesystem
+cache.
+
+Fastest configurations
+----------------------
+
+Complex IQ:
+
+* Individual sequential: structured, LZF, chunk 1 at 44,885 samples/second.
+* Individual random: structured, LZF, chunk 8 at 44,739 samples/second.
+* Contiguous batch: homogeneous, uncompressed, chunk 8 at 324,980
+  samples/second.
+* Shuffled batch: structured, uncompressed, chunk 8 at 45,810 samples/second.
+
+Spectrogram:
+
+* Individual sequential: structured, uncompressed, chunk 8 at 175,899
+  samples/second.
+* Individual random: structured, uncompressed, chunk 1 at 177,255
+  samples/second.
+* Contiguous batch: homogeneous, uncompressed, chunk 32 at 221,884
+  samples/second.
+* Shuffled batch: structured, uncompressed, chunk 1 at 164,210 samples/second.
+
+Shuffled format comparison
+--------------------------
+
+For shuffled IQ reads, each format's best result was:
+
+* Standard: 1,862 samples/second.
+* Packed: 7,576 samples/second.
+* Homogeneous: 11,965 samples/second.
+* Structured: 45,810 samples/second.
+
+The best structured result was approximately 24.6x faster than standard, 6.0x
+faster than packed, and 3.8x faster than homogeneous.
+
+For shuffled spectrogram reads, each format's best result was:
+
+* Standard: 2,183 samples/second.
+* Packed: 8,288 samples/second.
+* Homogeneous: 16,393 samples/second.
+* Structured: 164,210 samples/second.
+
+The best structured result was approximately 10x faster than homogeneous and
+75x faster than standard.
+
+Chunk-size findings
+-------------------
+
+Chunk size was especially important for shuffled access to large spectrogram
+samples. Uncompressed structured throughput was:
+
+* Chunk 1: 164,210 samples/second.
+* Chunk 8: 43,435 samples/second.
+* Chunk 32: 26,372 samples/second.
+
+One-sample chunks prevent a random read from loading unrelated large samples.
+For contiguous structured spectrogram reads, chunk 32 reached 218,670
+samples/second compared with 179,964 samples/second for chunk 1. This shows a
+real access-pattern tradeoff: one-sample chunks favor shuffled training, while
+larger chunks can favor sequential or bulk access.
+
+IQ samples were less sensitive to chunk size. Native contiguous reads were
+still substantially faster than the current per-sample shuffled path.
+
+Compression and storage
+-----------------------
+
+LZF achieved modest savings because the generated random data was not very
+compressible:
+
+* Structured IQ: approximately 8.01 MiB uncompressed versus 7.47-7.58 MiB
+  compressed.
+* Structured spectrogram: approximately 16.01 MiB uncompressed versus
+  14.92-14.99 MiB compressed.
+
+The roughly 6-7% reduction generally did not justify the additional latency
+for spectrogram data. Uncompressed storage is the stronger provisional default
+for model-ready training data. Production data should be measured because its
+compressibility may differ.
+
+First-read latency
+------------------
+
+Typical first-read latency was approximately:
+
+* Standard: 1.1 ms.
+* Packed: 3.6 ms.
+* Homogeneous: 1.2-1.6 ms.
+* Structured: 1.6 ms.
+
+Packed incurred additional validation and reconstruction work when opened.
+
+Conclusion
+----------
+
+For predominantly shuffled model training, the evidence supports uncompressed
+structured HDF5 with one-sample chunks, particularly for large samples. For
+contiguous bulk access, homogeneous or structured HDF5 with larger chunks can
+provide the greatest throughput. Legacy and packed formats remain appropriate
+for their compatibility and flexible Signal storage roles but are substantially
+slower on the tested model-facing hot paths.
+
+MR10 remains justified. Structured shuffled reads are already the fastest
+model-ready path, but shuffled IQ throughput was 45,810 samples/second while
+the same uncompressed chunk-8 configuration reached 300,397 samples/second for
+contiguous batches. This gap indicates substantial overhead from issuing
+shuffled reads one sample at a time and provides the baseline for a batched,
+sorted, and coalesced indexed-read implementation.
+
+Limitations
+-----------
+
+These are warm-cache raw-reader measurements, not end-to-end training results.
+The homogeneous contiguous fast path returns top-level arrays without decoding
+metadata, while legacy and packed reads reconstruct complete Signal objects.
+Structured reads reconstruct fixed model-facing samples. Results are specific
+to the generated workloads, software versions, filesystem, and hardware used
+for this run. Production decisions should also consider the confirmed Stage-2
+benchmark and measurements from representative production data.
+
+Result files
+------------
+
+* .benchmarks/hdf5-reader-results.json
+* .benchmarks/hdf5-reader-results.csv

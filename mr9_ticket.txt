@@ -62,4 +62,3 @@ Out of scope
 * Measuring model compute or end-to-end training throughput.
 * Claiming a universal fastest format from one machine.
 * Implementing sharding.
-
