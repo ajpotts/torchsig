@@ -139,3 +139,4 @@ Reader details
    hdf5_homogeneous
    hdf5_structured
    hdf5_structured_findings
+   hdf5_sharding_investigation

@@ -1,0 +1,35 @@
+Title: Add the structured HDF5 sharding investigation and decision gate
+
+Summary
+This MR evaluates whether the remaining structured-loading gap justifies a
+sharded file format. It adds a reusable analyzer for MR12 artifacts and records
+a prospective sharding design. Current evidence produces a no-go for MR14:
+single-file contention has not been isolated and no stable matched shard benefit
+has been demonstrated.
+
+Changes
+- Added benchmarks/analyze_stage2_bottlenecks.py to combine MR12 JSON artifacts
+  and report device-ceiling utilization, worker scaling, compression and layout
+  comparisons, evidence gaps, and the MR14 decision.
+- Defined a default 10% material-benefit threshold, a minimum of three
+  repetitions, and a maximum 5% throughput standard deviation.
+- Required both a stable multi-worker contention signal and a matched sharded
+  improvement before the analyzer can return a go decision.
+- Added focused tests for no-go and go gates, matched comparisons, and CLI JSON
+  output.
+- Documented the current no-go recommendation, prospective manifest and index
+  design, process-local handle caching, global shuffle behavior, atomic
+  publication, corruption handling, append/resume semantics, operational
+  tradeoffs, and an 8--12 engineering-day implementation estimate.
+
+Current conclusion
+The quick IQ result improved by 1.27x from zero to two workers, used no
+compression, and included only one repetition and the full layout. It therefore
+does not isolate single-file contention. Retain the existing single-file
+structured format and do not open MR14 unless later representative measurements
+pass the documented gate.
+
+Validation
+- pytest -q tests/test_stage2_bottleneck_analysis.py
+- ruff check benchmarks/analyze_stage2_bottlenecks.py tests/test_stage2_bottleneck_analysis.py
+- ruff format --check benchmarks/analyze_stage2_bottlenecks.py tests/test_stage2_bottleneck_analysis.py

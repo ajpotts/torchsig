@@ -1,0 +1,32 @@
+Title: Investigate structured HDF5 sharding and define the MR14 decision gate
+
+Summary
+The MR12 benchmark shows a substantial improvement from structured
+materialization but retains a gap to the device-only ceiling. Determine whether
+that gap demonstrates single-file HDF5 contention before committing to a new
+sharded format. Document the prospective format and lifecycle so implementation
+can proceed safely if later evidence passes the gate.
+
+Requirements
+- Analyze MR12 JSON artifacts for worker scaling, compression effects, layout
+  effects, device-ceiling utilization, repetition count, and variability.
+- Keep causal conclusions conservative: distinguish measured indicators from
+  unmeasured storage, collation, transfer, and model costs.
+- Require at least three stable repetitions, a material contention signal, and
+  a matched sharded improvement before recommending MR14.
+- Define the versioned manifest, global-to-local lookup, worker handle locality,
+  global shuffle semantics, and file-descriptor controls.
+- Define atomic multi-file publication, validation, missing/corrupt shard
+  errors, and safe append/resume behavior.
+- Produce a go/no-go recommendation and implementation estimate.
+
+Acceptance criteria
+- A standalone analyzer consumes one or more MR12 JSON artifacts and can emit a
+  reviewable JSON decision artifact.
+- The decision threshold is explicit and tested.
+- Compression and full/separate layout comparisons are matched by relevant
+  benchmark configuration.
+- MR14 is recommended only when stable contention evidence and a material
+  matched sharded benefit are both present.
+- Documentation records the current decision, evidence limitations,
+  prospective design, operational tradeoffs, and estimate.

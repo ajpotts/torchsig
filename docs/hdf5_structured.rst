@@ -234,3 +234,5 @@ epoch, or training is limited by model/device compute rather than input. The
 device-only ceiling helps identify that last case.
 
 See :doc:`hdf5_structured_findings` for the current evidence and its limits.
+The follow-up sharding decision and prospective format design are documented in
+:doc:`hdf5_sharding_investigation`.
