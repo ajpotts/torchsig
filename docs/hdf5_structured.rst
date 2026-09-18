@@ -202,3 +202,35 @@ Use representative sample sizes and worker counts. Compare compression modes:
 a smaller LZF file may be slower when CPU decompression or shuffled chunk reads
 dominate. Break-even is reported only when materialized epochs are faster than
 online epochs.
+
+For an end-to-end production gate, use
+``benchmarks/benchmark_stage2_materialization.py``. Declare the success target
+before running, use at least three repetitions, and run ``--workload iq``,
+``spectrogram``, and ``detection`` separately. Supply the application's real
+factories with ``--stage2-transforms`` and ``--model-factory``. The JSON output
+records software/hardware metadata, process CPU utilization, peak host and GPU
+memory, first-batch latency, throughput, storage, and break-even epochs.
+Pass ``--datamodule-factory package.module:build_datamodule`` to measure through
+the application DataModule. The factory receives ``pipeline``, ``source_root``,
+``structured_root``, ``batch_size``, ``num_workers``, ``shuffle``, and ``seed``;
+it must return a DataModule whose ``setup("fit")`` and ``train_dataloader()``
+select the requested online or structured path.
+
+Operational guidance
+---------------------
+
+Start with uncompressed, one-sample chunks and benchmark worker counts 0, 2,
+and 4. Retain three repetitions before promoting a setting. Increase worker
+count only when the measured shuffled end-to-end rate improves; extra workers
+can add process startup and single-file contention. Treat compression as a
+storage tradeoff, not a default throughput optimization.
+
+Materialization is generally worthwhile when deterministic transforms,
+metadata decoding, target construction, or Python collation repeat every epoch
+and the job runs beyond the measured break-even point. It is not worthwhile
+when the online path already meets the throughput target, the job ends before
+break-even, storage cost is unacceptable, transforms must remain random each
+epoch, or training is limited by model/device compute rather than input. The
+device-only ceiling helps identify that last case.
+
+See :doc:`hdf5_structured_findings` for the current evidence and its limits.

@@ -138,3 +138,4 @@ Reader details
    hdf5_packed
    hdf5_homogeneous
    hdf5_structured
+   hdf5_structured_findings

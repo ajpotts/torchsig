@@ -1,0 +1,31 @@
+Title: Add the structured HDF5 production benchmark gate and operating guidance
+
+Summary
+This MR turns the Stage-2 materialization benchmark into a reviewable production
+evidence gate. It adds the required workload schemas and resource/environment
+reporting, evaluates a speedup target declared on the command line, and checks
+in conservative guidance based on the confirmed benchmark results.
+
+Changes
+- Added IQ/scalar-class, spectrogram/image, and fixed-shape multi-field
+  detection fallback workloads while preserving the existing combined workload.
+- Added a DataModule factory hook that benchmarks the production setup("fit")
+  and train_dataloader() path for online and structured cases.
+- Added process CPU utilization, peak resident host memory, and peak allocated
+  GPU memory to individual measurements and aggregates.
+- Added platform, Python, NumPy, h5py, PyTorch, CPU-count, CUDA, and GPU metadata
+  to JSON output.
+- Added --minimum-speedup (default 1.5x) and explicit pass/fail reporting in the
+  benchmark recommendation.
+- Included workload and production factory selections in manifests,
+  checkpoints, and result configuration.
+- Added tests for the three workload contracts, environment metadata, target
+  evaluation, aggregation, equivalence, and the standalone CLI.
+- Added operating guidance and a checked-in findings document summarizing the
+  confirmed three-repetition run and clearly identifying remaining production
+  measurements.
+
+Validation
+- pytest -q tests/test_stage2_materialization_benchmark.py
+- ruff check benchmarks/benchmark_stage2_materialization.py tests/test_stage2_materialization_benchmark.py
+- ruff format --check benchmarks/benchmark_stage2_materialization.py tests/test_stage2_materialization_benchmark.py

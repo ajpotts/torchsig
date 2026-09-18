@@ -1,0 +1,35 @@
+Title: Validate structured HDF5 on production-shaped workloads and publish operating guidance
+
+Summary
+The structured HDF5 implementation and DataModule integration need a
+repeatable production evidence gate. Extend the Stage-2 benchmark so results
+cover representative model inputs, resource consumption, environment context,
+and a success target declared before measurement. Publish conservative guidance
+without checking large generated datasets into Git.
+
+Requirements
+- Support fixed-size complex IQ with a scalar class target, image-like
+  spectrogram input, and a fixed-shape multi-field detection target.
+- Continue supporting import hooks for the real Stage-2 transform and model
+  factories.
+- Support a production DataModule factory so measurements exercise the MR11
+  setup and train_dataloader integration.
+- Compare online and materialized sequential/shuffled loading with persistent
+  workers and representative worker counts.
+- Compare full-dataset and physically separate split layouts.
+- Record process CPU utilization and peak host/device memory alongside latency,
+  throughput, storage, materialization time, and break-even epochs.
+- Capture Python, library, platform, CPU, CUDA, and GPU metadata in the JSON
+  artifact.
+- Require a predeclared minimum shuffled speedup and report whether it was met.
+- Base promoted recommendations on at least three repetitions.
+- Check in concise findings and operating guidance while leaving generated
+  datasets and raw local benchmark artifacts untracked.
+
+Acceptance criteria
+- Each required fallback workload has a stable, structured-compatible schema.
+- JSON results contain benchmark configuration and environment metadata.
+- Aggregates include CPU and peak host/device memory metrics.
+- The recommendation explicitly evaluates the declared throughput target.
+- Documentation explains initial settings, the evidence collected so far, its
+  limitations, and when materialization is not worthwhile.

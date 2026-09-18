@@ -55,6 +55,35 @@ def test_fallback_pipeline_static_reader_and_materialized_equivalence(tmp_path) 
         stored.close()
 
 
+def test_required_fallback_workload_schemas(tmp_path) -> None:
+    source_root = tmp_path / "source"
+    _write_source(source_root)
+
+    for workload in ("iq", "spectrogram", "detection"):
+        online = stage2.OnlineStage2Dataset(source_root, None, 2, workload)
+        sample = online[0]
+        if workload == "iq":
+            assert sample["features"].shape == (2, 256)
+            assert sample["labels"].shape == ()
+        elif workload == "spectrogram":
+            assert sample["features"].shape == (2, 64, 64)
+        else:
+            assert sample["labels"]["boxes"].shape == (4, 4)
+            assert sample["labels"]["classes"].shape == (4,)
+            assert sample["labels"]["valid"].dtype == np.bool_
+        stored = materialize_structured_dataset(
+            online,
+            tmp_path / f"structured-{workload}",
+            batch_size=2,
+            progress=False,
+        )
+        try:
+            stage2._assert_equivalent(online[0], stored[0])
+        finally:
+            stored.close()
+            online.source.reader.teardown()
+
+
 def test_storage_estimate_and_split_indices_are_deterministic() -> None:
     sample = {"x": np.zeros((2, 4), dtype=np.float32), "y": np.int64(1)}
     assert stage2.estimate_storage_bytes(sample, samples=10, copies=2) == (32 + 8) * 20
@@ -76,9 +105,36 @@ def test_aggregation_break_even_and_recommendation() -> None:
         }
         results.extend(
             [
-                {**common, "pipeline": "online", "compression": "n/a", "chunk_samples": 0, "layout": "full", "samples_per_second": online_rate, "epoch_seconds": 1000 / online_rate, "materialization_seconds": 0.0},
-                {**common, "pipeline": "materialized", "compression": "none", "chunk_samples": 1, "layout": "full", "samples_per_second": materialized_rate, "epoch_seconds": 1000 / materialized_rate, "materialization_seconds": 10.0},
-                {**common, "pipeline": "device_only", "compression": "memory", "chunk_samples": 0, "layout": "full", "samples_per_second": ceiling_rate, "epoch_seconds": 1000 / ceiling_rate, "materialization_seconds": 0.0},
+                {
+                    **common,
+                    "pipeline": "online",
+                    "compression": "n/a",
+                    "chunk_samples": 0,
+                    "layout": "full",
+                    "samples_per_second": online_rate,
+                    "epoch_seconds": 1000 / online_rate,
+                    "materialization_seconds": 0.0,
+                },
+                {
+                    **common,
+                    "pipeline": "materialized",
+                    "compression": "none",
+                    "chunk_samples": 1,
+                    "layout": "full",
+                    "samples_per_second": materialized_rate,
+                    "epoch_seconds": 1000 / materialized_rate,
+                    "materialization_seconds": 10.0,
+                },
+                {
+                    **common,
+                    "pipeline": "device_only",
+                    "compression": "memory",
+                    "chunk_samples": 0,
+                    "layout": "full",
+                    "samples_per_second": ceiling_rate,
+                    "epoch_seconds": 1000 / ceiling_rate,
+                    "materialization_seconds": 0.0,
+                },
             ]
         )
 
@@ -87,7 +143,8 @@ def test_aggregation_break_even_and_recommendation() -> None:
     assert materialized["speedup_vs_online"] > 1.8
     assert materialized["break_even_epochs"] is not None
     recommendation = stage2.recommend(aggregates)
-    assert "compression=none" in recommendation[0]
+    assert "target (1.50x shuffled speedup): met" in recommendation[0]
+    assert "compression=none" in recommendation[1]
     assert any("device-only ceiling" in line for line in recommendation)
     assert "stability (<=5% standard deviation): yes" in recommendation[-2]
     assert recommendation[-1] == "Physical split separation was not measured."
@@ -110,6 +167,13 @@ def test_single_repetition_does_not_claim_stability() -> None:
     }
     recommendation = stage2.recommend(stage2.aggregate_results([result]))
     assert "not established" in recommendation[-2]
+
+
+def test_environment_metadata_is_reviewable() -> None:
+    environment = stage2._environment_metadata()
+    assert environment["python"]
+    assert environment["platform"]
+    assert environment["logical_cpu_count"] > 0
 
 
 def test_standalone_cli_smoke(tmp_path) -> None:
