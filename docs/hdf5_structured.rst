@@ -101,6 +101,48 @@ augmentation freezes the particular outputs observed during materialization.
 A common pattern is to materialize the deterministic base representation and
 wrap the returned dataset with lightweight randomized transforms.
 
+DataModule integration
+----------------------
+
+``TorchSigDataModule`` and ``SplitTorchSigDataModule`` can create and load a
+structured copy as part of their normal ``prepare_data`` and ``setup``
+lifecycle. This behavior is explicitly opt-in; existing DataModule defaults
+continue to use the configured Signal-oriented reader.
+
+.. code-block:: python
+
+   data_module = TorchSigDataModule(
+       # Existing source-generation arguments...
+       root="/data/torchsig/train",
+       structured_materialization=True,
+       structured_root="/data/model-ready/train",
+       structured_num_workers=4,
+       structured_validation="sampled",
+       structured_validation_samples=256,
+       structured_writer_kwargs={
+           "compression": None,
+           "chunk_samples": 1,
+       },
+       structured_train_transforms=randomized_training_transforms,
+   )
+
+   data_module.prepare_data()
+   data_module.setup("fit")
+
+The source and structured roots must differ. If ``structured_root`` is omitted,
+the single-dataset module uses a ``-structured`` sibling of ``root``. The split
+module stores physically separate ``train``, ``val``, and ``test`` structured
+datasets beneath its structured root. Seeded logical splits in the
+single-dataset module are preserved.
+
+Each output has a sibling JSON manifest recording the source fingerprint,
+reader, layout, labels, validation settings, and writer options. Compatible
+outputs are reused. Missing, stale, or mismatched manifests fail explicitly;
+set ``structured_overwrite=True`` to rebuild them. Deterministic source work is
+captured during materialization, while transforms passed through
+``structured_train_transforms`` run only on training samples at load time and
+can continue to vary between epochs.
+
 Atomic publication and overwrite
 --------------------------------
 
