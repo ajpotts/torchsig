@@ -1,0 +1,35 @@
+Title: Add opt-in structured HDF5 materialization to TorchSig DataModules
+
+Summary
+TorchSig's structured HDF5 path can precompute deterministic, model-ready
+samples, but users currently have to manage conversion and dataset selection
+outside the Lightning DataModules. Add an explicit opt-in integration for both
+TorchSigDataModule and SplitTorchSigDataModule without changing their existing
+default behavior.
+
+Requirements
+- Allow both DataModules to materialize structured HDF5 datasets during
+  prepare_data and select them during setup.
+- Keep the current Signal-oriented dataset path as the default.
+- Require separate source and structured output roots.
+- Preserve seeded logical splits for TorchSigDataModule and physical
+  train/validation/test separation for SplitTorchSigDataModule.
+- Store compatibility manifests and reuse only outputs whose source,
+  configuration, layout, labels, and expected length still match.
+- Reject stale or incompatible outputs unless overwrite is explicitly enabled.
+- Expose materialization batch size, worker count, validation, and writer
+  options.
+- Keep explicitly supplied randomized training transforms online instead of
+  freezing them into the materialized data.
+- Support zero-worker and multi-worker DataLoaders.
+
+Acceptance criteria
+- Existing DataModule construction and loading are unchanged when structured
+  materialization is disabled.
+- Compatible structured outputs are reused; mismatch and overwrite behavior is
+  covered by deterministic tests.
+- Single-dataset and split-dataset layouts load the expected samples and
+  preserve their split semantics.
+- Online training transforms apply only to the training dataset.
+- User documentation includes an end-to-end DataModule example and explains
+  manifests, output roots, and overwrite behavior.

@@ -1,0 +1,34 @@
+Title: Integrate structured HDF5 materialization with TorchSig DataModules
+
+Summary
+This MR adds an explicit, opt-in structured-materialization lifecycle to
+TorchSigDataModule and SplitTorchSigDataModule. Existing callers retain the
+current source dataset behavior unless structured_materialization=True is set.
+
+Changes
+- Added shared structured materialization configuration, compatibility
+  manifests, atomic manifest publication, reuse checks, and explicit overwrite
+  handling.
+- Added DataModule options for the output root, materialization batch size and
+  workers, validation settings, writer settings, and training-only online
+  transforms.
+- Integrated materialization into prepare_data and structured dataset selection
+  into setup.
+- Preserved seeded logical splits for TorchSigDataModule and separate physical
+  train/validation/test outputs for SplitTorchSigDataModule.
+- Generalized worker seeding so structured datasets and online-transform
+  wrappers work with DataLoader workers.
+- Documented the opt-in DataModule workflow, manifest compatibility rules, and
+  deterministic-versus-random transform boundary.
+
+Compatibility and safety
+- Structured materialization remains disabled by default.
+- Source and output roots must be different.
+- A structured output is reused only when its manifest and sample count match
+  the active configuration and source fingerprint.
+- Incompatible output fails with an actionable error unless
+  structured_overwrite=True is explicitly requested.
+
+Validation
+- pytest -q tests/datasets/test_datamodule_structured.py
+- pytest -q tests/datasets/test_datamodules.py
