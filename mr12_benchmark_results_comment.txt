@@ -1,0 +1,30 @@
+MR12 benchmark results
+
+The quick synthetic IQ benchmark strongly favors structured materialization.
+The recommended tested configuration was uncompressed HDF5 with one sample per
+chunk, two DataLoader workers, and the full-dataset layout.
+
+For shuffled access with two workers, throughput increased from 3,729.8
+samples/s online to 22,609.1 samples/s materialized, a 6.06x end-to-end
+speedup. This comfortably exceeds the predeclared 1.50x throughput target.
+Materialization reached 46.5% of the 48,593.4 samples/s device-only ceiling and
+is estimated to pay for itself after 2.04 epochs. The structured copy added
+approximately 0.01 GiB for this test.
+
+Worker behavior depended on access pattern. Two workers improved shuffled
+materialized throughput from 17,862.9 to 22,609.1 samples/s, while sequential
+materialized access was faster with zero workers: 24,520.7 versus 19,920.8
+samples/s. The fair shuffled comparison uses matching worker counts; the 6.06x
+two-worker result is therefore the relevant headline rather than the 11.00x
+zero-worker result.
+
+This was a short directional run using one repetition, a small synthetic IQ
+dataset, and only the full layout. Repetition stability is not established and
+physical split separation was not measured. The result supports proceeding
+with the uncompressed, one-sample-chunk, two-worker configuration, but a final
+production recommendation should be confirmed with at least three repetitions
+and the representative production transform and model factories.
+
+Artifacts:
+- JSON: .benchmarks/stage2-quick-results.json
+- CSV: .benchmarks/stage2-quick-results.csv
