@@ -1,0 +1,39 @@
+Title: Persist physical support vectors for generated spectrograms
+
+Summary
+
+The `Spectrogram` transform replaces IQ samples with a two-dimensional array,
+but the resulting signal metadata does not identify the physical coordinate of
+each row or column. Consumers must inspect TorchSig source code and reconstruct
+the STFT convention before they can plot the data or align annotations.
+
+Impact
+
+Generated HDF5 spectrogram datasets are not self-describing. Frequency order,
+bin spacing, time-window placement, and units are unavailable from the stored
+sample itself, which makes downstream visualization and label conversion
+fragile.
+
+Proposed change
+
+Attach two support vectors to every transformed signal:
+
+- `spectrogram_frequency`: descending baseband-frequency bin centers in hertz,
+  aligned with array axis 0; and
+- `spectrogram_time`: FFT-window centers in seconds, aligned with array axis 1.
+
+Also store `spectrogram_frequency_units="Hz"` and
+`spectrogram_time_units="seconds"`. Use the signal's `sample_rate` metadata by
+default and allow an explicit sample-rate override for standalone signals. If
+no rate is available, preserve compatibility by storing normalized coordinates
+in cycles per sample and samples with corresponding unit fields.
+
+Acceptance criteria
+
+- Support-vector lengths exactly match the corresponding spectrogram axes.
+- Frequency values match the FFT-shifted and vertically flipped output order.
+- Time values identify the center of each unpadded STFT window.
+- Signals without sample-rate metadata receive normalized coordinates with
+  explicit units.
+- Nonfinite and nonpositive sample rates are rejected.
+- Support vectors and units persist in generated HDF5 metadata.

@@ -13,7 +13,10 @@ dist/
 *.p
 *.png
 *.txt
+!MR_DESCRIPTION_480.txt
 !tickets/*.txt
+!tickets/github/
+!tickets/github/480_add_spectrogram_support_vectors.txt
 !tickets/documentation/
 !tickets/documentation/*.txt
 *.npy

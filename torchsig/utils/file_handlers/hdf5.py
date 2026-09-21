@@ -78,7 +78,7 @@ def populate_hdf5_group_with_metadata(group, metadata_obj) -> bool:
         return False
     metadata_group = group.create_group(key)
     for k in metadata_obj.keys():
-        if not metadata_obj[k] == None:
+        if metadata_obj[k] is not None:
             metadata_group.create_dataset(k, data=metadata_obj[k])
     if not metadata_obj.parent == None:
         try:
