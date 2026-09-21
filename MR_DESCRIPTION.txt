@@ -1,0 +1,13 @@
+Title: Make constellation pulse shaping configurable
+
+Summary:
+- Allow constellation signal generators to use a fixed `pulse_shape_name` of
+  `srrc` or `rectangular`.
+- Allow callers to fix the SRRC `alpha_rolloff`, while retaining the existing
+  `alpha` configuration alias.
+- Preserve randomized pulse-shape and rolloff selection when neither setting is
+  supplied.
+- Validate incompatible, conflicting, and out-of-range settings.
+
+Testing:
+- `pytest tests/signals/builders/test_constellation.py`
