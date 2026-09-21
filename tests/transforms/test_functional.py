@@ -842,7 +842,6 @@ def test_iq_imbalance(data: Any, params: dict, expected: bool, is_error: bool) -
 
     """
     amplitude_imbalance = params["amplitude_imbalance"]
-    amplitude_imbalance_linear = 10 ** (amplitude_imbalance / 10.0)
     phase_imbalance = params["phase_imbalance"]
     dc_offset_db = params["dc_offset_db"]
     dc_offset_phase_rads = params["dc_offset_phase_rads"]
@@ -857,6 +856,29 @@ def test_iq_imbalance(data: Any, params: dict, expected: bool, is_error: bool) -
 
         assert (type(data) == type(data_test)) == expected
         assert (data.dtype == TorchSigComplexDataType) == expected
+
+
+@pytest.mark.parametrize("amplitude_imbalance", [-6.0, 0.0, 6.0])
+def test_iq_imbalance_applies_relative_channel_gain(amplitude_imbalance: float) -> None:
+    """The requested dB value must equal the I-to-Q voltage imbalance."""
+    channel = np.tile(np.array([1.0, -1.0], dtype=np.float32), 512)
+    data = (channel + 1j * channel).astype(TorchSigComplexDataType)
+
+    result = iq_imbalance(
+        data,
+        amplitude_imbalance=amplitude_imbalance,
+        phase_imbalance=0.0,
+        dc_offset_db=-300.0,
+        dc_offset_phase_rads=0.0,
+        noise_power_db=0.0,
+    )
+
+    i_rms = np.sqrt(np.mean(np.square(result.real)))
+    q_rms = np.sqrt(np.mean(np.square(result.imag)))
+    measured_imbalance_db = 20 * np.log10(i_rms / q_rms)
+
+    assert measured_imbalance_db == pytest.approx(amplitude_imbalance, abs=1e-5)
+    assert result.dtype == TorchSigComplexDataType
 
 
 @pytest.mark.parametrize(

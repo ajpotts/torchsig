@@ -770,7 +770,9 @@ def iq_imbalance(
 
     Args:
         data: IQ data.
-        amplitude_imbalance: IQ amplitude imbalance in dB.
+        amplitude_imbalance: Relative voltage imbalance between the I and Q
+            channels in dB. Positive values amplify I relative to Q; negative
+            values amplify Q relative to I.
         phase_imbalance: IQ phase imbalance in radians [-pi, pi].
         dc_offset_db: Relative power of additive DC offset in dB.
         dc_offset_phase_rads: Phase of additive DC offset in radians.
@@ -779,8 +781,12 @@ def iq_imbalance(
     Returns:
         IQ data with IQ Imbalance applied.
     """
-    # amplitude imbalance
-    data = 10 ** (amplitude_imbalance / 10.0) * np.real(data) + 1j * 10 ** (amplitude_imbalance / 10.0) * np.imag(data)
+    # Split the requested voltage imbalance symmetrically between I and Q so
+    # their relative gain is exactly ``amplitude_imbalance`` dB without adding
+    # an unnecessary common gain to both channels.
+    i_gain = 10 ** (amplitude_imbalance / 40.0)
+    q_gain = 10 ** (-amplitude_imbalance / 40.0)
+    data = i_gain * np.real(data) + 1j * q_gain * np.imag(data)
 
     # phase imbalance
     data = np.exp(-1j * phase_imbalance / 2.0) * np.real(data) + np.exp(1j * (np.pi / 2.0 + phase_imbalance / 2.0)) * np.imag(data)
