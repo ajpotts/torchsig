@@ -8,6 +8,9 @@ Summary:
 - Preserve randomized pulse-shape and rolloff selection when neither setting is
   supplied.
 - Validate incompatible, conflicting, and out-of-range settings.
+- Include a runnable script demonstrating fixed rectangular, fixed SRRC, and
+  randomized pulse shaping.
 
 Testing:
 - `pytest tests/signals/builders/test_constellation.py`
+- `python examples/scripts/demo_constellation_pulse_shaping.py`
