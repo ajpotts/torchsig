@@ -1,0 +1,45 @@
+Add physical support vectors to generated spectrograms
+
+Summary
+
+This MR fixes #480 by making `Spectrogram` outputs self-describing. Every
+transformed signal now includes time and baseband-frequency support vectors that
+align directly with the two dimensions of the spectrogram array.
+
+Implementation
+
+`Spectrogram` adds the following metadata:
+
+- `spectrogram_frequency`: descending frequency-bin centers for axis 0,
+  matching TorchSig's FFT-shifted and vertically flipped image order;
+- `spectrogram_time`: STFT-window centers for axis 1;
+- `spectrogram_frequency_units`: `"Hz"` or `"cycles/sample"`; and
+- `spectrogram_time_units`: `"seconds"` or `"samples"`.
+
+The transform reads `sample_rate` from signal metadata by default. Callers
+working with standalone signals can instead provide `sample_rate` to the
+constructor. If neither is available, the transform emits normalized axes in
+samples and cycles per sample, preserving existing standalone usage. Explicit
+sample rates must be finite and positive.
+
+The frequency vector describes baseband offsets. Applications with an external
+RF tuning frequency can add that value to obtain absolute RF coordinates.
+
+Testing
+
+Focused transform tests verify frequency ordering, time-bin centers, axis
+lengths, units, explicit sample-rate behavior, and invalid rates. A legacy HDF5
+writer test verifies that both vectors and their units are persisted.
+
+Validation
+
+    pytest -q tests/transforms/test_transforms.py -k Spectrogram
+    pytest -q tests/utils/file_handlers/test_hdf5_writer.py
+    git diff --check
+
+Compatibility
+
+Existing spectrogram array values, shape, orientation, and dtype are unchanged.
+The new metadata is additive. Existing calls continue to work with or without
+sample-rate metadata; standalone signals may supply the new optional constructor
+argument when physical coordinates are required.
