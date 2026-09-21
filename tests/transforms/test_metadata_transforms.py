@@ -36,6 +36,7 @@ def component_signal():
         duration_in_samples=500,
         num_iq_samples_dataset=1000,
         bandwidth=200.0,
+        estimated_occupied_bandwidth=100.0,
         center_freq=100.0,
         sample_rate=1000.0,
         dataset_metadata={"sample_rate": 1000.0},
@@ -189,10 +190,11 @@ def test_yolo_label_initializes_expected_metadata_fields():
     assert transform.required_metadata == [
         "class_index",
         "start",
-        "bandwidth",
+        "estimated_occupied_bandwidth",
         "center_freq",
         "dataset_metadata",
     ]
+    assert transform.bandwidth_key == "estimated_occupied_bandwidth"
     assert transform.targets_metadata == ["yolo_label"]
 
 
@@ -208,7 +210,7 @@ def test_yolo_label_adds_expected_label_to_component_signal(parent_signal):
             0.5,  # start + duration / 2
             0.4,  # 1 - ((sample_rate / 2 + center_freq) / sample_rate)
             0.5,  # duration
-            0.2,  # bandwidth / sample_rate
+            0.1,  # estimated_occupied_bandwidth / sample_rate
         )
     )
 
@@ -219,7 +221,33 @@ def test_yolo_label_apply_returns_component_signal(component_signal):
     transformed_component = transform.__apply__(component_signal)
 
     assert transformed_component is component_signal
-    assert transformed_component.yolo_label == pytest.approx((3, 0.5, 0.4, 0.5, 0.2))
+    assert transformed_component.yolo_label == pytest.approx((3, 0.5, 0.4, 0.5, 0.1))
+
+
+def test_yolo_label_can_use_canonical_bandwidth(component_signal):
+    transform = YOLOLabel(bandwidth_key="bandwidth")
+
+    transformed_component = transform(component_signal)
+
+    assert transform.required_metadata[2] == "bandwidth"
+    assert transformed_component.yolo_label == pytest.approx(
+        (3, 0.5, 0.4, 0.5, 0.2)
+    )
+
+
+def test_yolo_label_rejects_invalid_bandwidth_key():
+    with pytest.raises(ValueError, match="bandwidth_key must be"):
+        YOLOLabel(bandwidth_key="occupied_bandwidth")
+
+
+def test_yolo_label_requires_selected_bandwidth(component_signal):
+    del component_signal["estimated_occupied_bandwidth"]
+
+    with pytest.raises(
+        ValueError,
+        match="estimated_occupied_bandwidth is missing",
+    ):
+        YOLOLabel()(component_signal)
 
 
 def test_grouping_label_uses_exact_value_rules(parent_signal):

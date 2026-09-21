@@ -17,6 +17,8 @@ import json
 import math
 import multiprocessing
 import os
+import platform
+import resource
 import statistics
 import sys
 import time
@@ -41,6 +43,7 @@ from torchsig.utils.file_handlers import HDF5Reader, HomogeneousHDF5Reader, Homo
 Access = Literal["shuffled", "sequential"]
 Layout = Literal["full", "separate"]
 Pipeline = Literal["online", "materialized", "device_only"]
+Workload = Literal["combined", "iq", "spectrogram", "detection"]
 
 
 def _import_object(spec: str) -> Any:
@@ -110,7 +113,7 @@ def _metadata_int(signal: Signal, names: Sequence[str], default: int) -> int:
     return default
 
 
-def fallback_stage2_transform(signal: Signal, index: int) -> dict[str, Any]:
+def fallback_stage2_transform(signal: Signal, index: int, workload: Workload = "combined") -> dict[str, Any]:
     """Build deterministic typed Stage-2-like features from one Signal."""
     iq = np.asarray(signal.data).reshape(-1).astype(np.complex64, copy=False)
     rms = float(np.sqrt(np.mean(np.abs(iq) ** 2)))
@@ -133,7 +136,7 @@ def fallback_stage2_transform(signal: Signal, index: int) -> dict[str, Any]:
     )
     class_index = _metadata_int(signal, ("class_index",), index % 64)
     family_index = _metadata_int(signal, ("family_index", "modulation_family_index"), class_index % 8)
-    return {
+    combined = {
         "features": {
             "iq": np.stack((normalized.real, normalized.imag)).astype(np.float32),
             "spectral": spectral,
@@ -145,17 +148,38 @@ def fallback_stage2_transform(signal: Signal, index: int) -> dict[str, Any]:
             "family_index": np.int64(family_index),
         },
     }
+    if workload == "combined":
+        return combined
+    if workload == "iq":
+        return {"features": combined["features"]["iq"], "labels": np.int64(class_index)}
+    image = np.resize(combined["features"]["iq"], (2, 64, 64)).astype(np.float32)
+    if workload == "spectrogram":
+        return {"features": image, "labels": np.int64(class_index)}
+    if workload == "detection":
+        return {
+            "features": image,
+            "labels": {
+                "class_index": np.int64(class_index),
+                "boxes": np.array(
+                    [[0.10, 0.15, 0.35, 0.40], [0.45, 0.30, 0.80, 0.75], [0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0]],
+                    dtype=np.float32,
+                ),
+                "classes": np.array([class_index, family_index, -1, -1], dtype=np.int64),
+                "valid": np.array([True, True, False, False]),
+            },
+        }
+    raise ValueError(f"Unknown workload: {workload}")
 
 
 class OnlineStage2Dataset(Dataset):
     """Apply the selected deterministic Stage-2 transform to static Signals."""
 
-    def __init__(self, root: Path, transform_spec: str | None, limit: int | None) -> None:
+    def __init__(self, root: Path, transform_spec: str | None, limit: int | None, workload: Workload = "combined") -> None:
         self.source = StaticTorchSigDataset(root=str(root), file_handler_class=_reader_class(root), transforms=[], target_labels=None)
         self.length = min(len(self.source), limit) if limit is not None else len(self.source)
         if transform_spec is None:
-            self.transform = fallback_stage2_transform
-            self.transform_name = "built-in fallback"
+            self.transform = lambda signal, index: fallback_stage2_transform(signal, index, workload)
+            self.transform_name = f"built-in fallback ({workload})"
         else:
             builder = _import_object(transform_spec)
             built = builder()
@@ -170,6 +194,7 @@ class OnlineStage2Dataset(Dataset):
 
                 self.transform = apply_transforms
             elif callable(built):
+
                 def apply_transform(signal: Signal, _index: int) -> Any:
                     return built(signal)
 
@@ -363,17 +388,35 @@ class Case:
     layout: Layout
     materialization_seconds: float
     file_size: int
+    workload: Workload = "combined"
+    datamodule_spec: str | None = None
 
 
 def _dataset_for_case(case: Case) -> Dataset:
     if case.pipeline == "online":
-        base: Dataset = OnlineStage2Dataset(Path(case.dataset_root), case.transform_spec, case.samples)
+        base: Dataset = OnlineStage2Dataset(Path(case.dataset_root), case.transform_spec, case.samples, case.workload)
     else:
         base = StructuredHDF5Dataset(case.materialized_root)
     return Subset(base, list(case.indices)) if case.indices else base
 
 
 def _loader_for_case(case: Case) -> DataLoader:
+    if case.datamodule_spec is not None and case.pipeline != "device_only":
+        factory = _import_object(case.datamodule_spec)
+        data_module = factory(
+            pipeline=case.pipeline,
+            source_root=Path(case.dataset_root),
+            structured_root=Path(case.materialized_root) if case.materialized_root else None,
+            batch_size=case.batch_size,
+            num_workers=case.workers,
+            shuffle=case.access == "shuffled",
+            seed=case.seed,
+        )
+        data_module.setup("fit")
+        loader = data_module.train_dataloader()
+        if not isinstance(loader, DataLoader):
+            raise TypeError("DataModule factory train_dataloader() must return a DataLoader")
+        return loader
     worker_options = {"prefetch_factor": 1, "multiprocessing_context": "fork"} if case.workers else {}
     return DataLoader(
         _dataset_for_case(case),
@@ -450,11 +493,13 @@ def _measure_case(case: Case) -> dict[str, Any]:
         _sync(device)
         if device.type == "cuda":
             torch.cuda.reset_peak_memory_stats(device)
+        cpu_start = time.process_time()
         start = time.perf_counter()
         for _ in range(case.benchmark_steps):
             step()
         _sync(device)
         elapsed = time.perf_counter() - start
+        cpu_seconds = time.process_time() - cpu_start
 
         for _ in range(case.warmup_steps):
             _features_and_labels(next_batch())
@@ -473,13 +518,26 @@ def _measure_case(case: Case) -> dict[str, Any]:
             "steps_per_second": case.benchmark_steps / elapsed,
             "samples_per_second": measured_samples / elapsed,
             "dataloader_samples_per_second": measured_samples / data_elapsed,
+            "process_cpu_seconds": cpu_seconds,
+            "process_cpu_utilization_percent": 100.0 * cpu_seconds / elapsed,
+            "peak_host_memory_bytes": _peak_host_memory_bytes(),
             "peak_gpu_memory_bytes": torch.cuda.max_memory_allocated(device) if device.type == "cuda" else 0,
             "warm_filesystem_cache": True,
             "epoch_seconds": len(case.indices) / (measured_samples / elapsed) if case.indices else case.samples / (measured_samples / elapsed),
         }
     finally:
         _shutdown_loader(loader, iterator)
+    result["peak_host_memory_bytes"] = max(
+        result["peak_host_memory_bytes"],
+        _peak_host_memory_bytes(resource.RUSAGE_CHILDREN),
+    )
     return result
+
+
+def _peak_host_memory_bytes(who: int = resource.RUSAGE_SELF) -> int:
+    """Return peak resident memory for the benchmark process."""
+    peak = resource.getrusage(who).ru_maxrss
+    return int(peak if sys.platform == "darwin" else peak * 1024)
 
 
 def _case_process(case_payload: dict[str, Any], output_path: str) -> None:
@@ -526,6 +584,9 @@ def aggregate_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
             median_dataloader_samples_per_second=statistics.median(value["dataloader_samples_per_second"] for value in values),
             median_startup_seconds=statistics.median(value["startup_seconds"] for value in values),
             median_epoch_seconds=statistics.median(value["epoch_seconds"] for value in values),
+            median_process_cpu_utilization_percent=statistics.median(value.get("process_cpu_utilization_percent", 0.0) for value in values),
+            peak_host_memory_bytes=max(value.get("peak_host_memory_bytes", 0) for value in values),
+            peak_gpu_memory_bytes=max(value.get("peak_gpu_memory_bytes", 0) for value in values),
             materialization_seconds=values[0]["materialization_seconds"],
             file_size=values[0]["file_size"],
         )
@@ -539,7 +600,7 @@ def aggregate_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return aggregates
 
 
-def recommend(aggregates: list[dict[str, Any]]) -> list[str]:
+def recommend(aggregates: list[dict[str, Any]], minimum_speedup: float = 1.5) -> list[str]:
     """Produce conservative conclusions from shuffled end-to-end medians."""
     shuffled = [row for row in aggregates if row["pipeline"] == "materialized" and row["access"] == "shuffled"]
     if not shuffled:
@@ -562,7 +623,9 @@ def recommend(aggregates: list[dict[str, Any]]) -> list[str]:
         separation = "Physical split separation did not improve throughput by more than 5%."
     stability = "not established" if best["repetitions"] < 2 else "yes" if stable else "no"
     speedup = best["speedup_vs_online"]
+    target = f"Throughput target ({minimum_speedup:.2f}x shuffled speedup): {'met' if speedup is not None and speedup >= minimum_speedup else 'not met'}."
     return [
+        target,
         f"Recommended shuffled layout: compression={best['compression']}, chunk_samples={best['chunk_samples']}, workers={best['workers']}, layout={best['layout']}.",
         f"Shuffled end-to-end speedup versus online: {speedup:.2f}x." if speedup is not None else "No matching online baseline completed.",
         f"It reaches {100 * best_rate / ceiling:.1f}% of the device-only ceiling." if math.isfinite(ceiling) else "No device-only ceiling completed.",
@@ -580,7 +643,9 @@ def _print_table(rows: list[dict[str, Any]]) -> None:
     for row in sorted(rows, key=lambda item: (item["pipeline"], item["access"], item["workers"], item["compression"], item["chunk_samples"], item["layout"])):
         speedup = "-" if row["speedup_vs_online"] is None else f"{row['speedup_vs_online']:.2f}x"
         break_even = "never" if row["break_even_epochs"] is None else f"{row['break_even_epochs']:.2f}"
-        print(f"{row['pipeline']:12} {row['access']:10} {row['workers']:7} {row['compression']:11} {row['chunk_samples']:5} {row['layout']:8} {row['median_samples_per_second']:9.1f} {speedup:7} {break_even}")
+        print(
+            f"{row['pipeline']:12} {row['access']:10} {row['workers']:7} {row['compression']:11} {row['chunk_samples']:5} {row['layout']:8} {row['median_samples_per_second']:9.1f} {speedup:7} {break_even}"
+        )
 
 
 def _csv_value(value: Any) -> Any:
@@ -593,9 +658,23 @@ def _write_results(
     aggregates: list[dict[str, Any]],
     recommendation: list[str],
     failures: list[dict[str, Any]] | None = None,
+    environment: Mapping[str, Any] | None = None,
+    benchmark_config: Mapping[str, Any] | None = None,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"measurements": results, "aggregates": aggregates, "recommendation": recommendation, "failures": failures or []}, indent=2))
+    path.write_text(
+        json.dumps(
+            {
+                "environment": environment or {},
+                "benchmark_config": benchmark_config or {},
+                "measurements": results,
+                "aggregates": aggregates,
+                "recommendation": recommendation,
+                "failures": failures or [],
+            },
+            indent=2,
+        )
+    )
     csv_path = path.with_suffix(".csv")
     fields = sorted({key for row in results for key in row})
     with csv_path.open("w", newline="", encoding="utf-8") as handle:
@@ -625,6 +704,8 @@ def _case_key(value: Case | Mapping[str, Any]) -> tuple[Any, ...]:
         "compression",
         "chunk_samples",
         "layout",
+        "workload",
+        "datamodule_spec",
     )
     return tuple(getattr(value, field) if isinstance(value, Case) else value[field] for field in fields)
 
@@ -639,6 +720,22 @@ def _checkpoint(path: Path, results: list[dict[str, Any]], failures: list[dict[s
 
 def _parse_csv(value: str, converter: Callable[[str], Any]) -> tuple[Any, ...]:
     return tuple(converter(item.strip()) for item in value.split(",") if item.strip())
+
+
+def _environment_metadata() -> dict[str, Any]:
+    """Capture enough software and hardware context to review benchmark results."""
+    return {
+        "platform": platform.platform(),
+        "python": platform.python_version(),
+        "processor": platform.processor(),
+        "logical_cpu_count": os.cpu_count(),
+        "torch": torch.__version__,
+        "numpy": np.__version__,
+        "h5py": h5py.__version__,
+        "cuda_available": torch.cuda.is_available(),
+        "cuda": torch.version.cuda,
+        "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
+    }
 
 
 def _parse_args() -> argparse.Namespace:
@@ -666,8 +763,14 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--large-storage-gib", type=float, default=50.0)
     parser.add_argument("--stage2-transforms", help="Import path module:build_stage2_transforms")
     parser.add_argument("--model-factory", help="Import path module:build_model")
+    parser.add_argument(
+        "--datamodule-factory",
+        help="Import path module:build_datamodule; exercises setup('fit') and train_dataloader() for online/materialized cases",
+    )
     parser.add_argument("--classes", type=int, default=64)
     parser.add_argument("--split-layouts", default="full,separate", help="Comma-separated full,separate")
+    parser.add_argument("--workload", choices=("combined", "iq", "spectrogram", "detection"), default="combined")
+    parser.add_argument("--minimum-speedup", type=float, default=1.5, help="Predeclared shuffled throughput success target")
     return parser.parse_args()
 
 
@@ -679,7 +782,7 @@ def main() -> None:
     if dataset_root is None:
         dataset_root = args.output_dir / "synthetic-source"
         _generate_synthetic_source(dataset_root, args.samples, args.synthetic_iq_length, args.seed, args.batch_size)
-    source = OnlineStage2Dataset(dataset_root, args.stage2_transforms, args.samples)
+    source = OnlineStage2Dataset(dataset_root, args.stage2_transforms, args.samples, args.workload)
     if not len(source):
         raise ValueError("The source dataset is empty")
     sample_count = len(source)
@@ -689,6 +792,8 @@ def main() -> None:
     layouts = _parse_csv(args.split_layouts, str)
     if args.samples < 1 or args.batch_size < 1 or args.warmup_steps < 0 or args.benchmark_steps < 1 or args.repetitions < 1:
         raise ValueError("samples, batch size, benchmark steps, and repetitions must be positive; warmup steps must be non-negative")
+    if args.minimum_speedup <= 0:
+        raise ValueError("minimum speedup must be positive")
     if any(worker < 0 for worker in workers) or any(chunk < 1 for chunk in chunk_sizes):
         raise ValueError("worker counts must be non-negative and chunk sizes must be positive")
     if not compressions or any(compression not in {"none", "lzf"} for compression in compressions):
@@ -721,6 +826,7 @@ def main() -> None:
                     "layout": layout,
                     "seed": args.seed,
                     "transform": source.transform_name,
+                    "workload": args.workload,
                 }
                 elapsed, size = _materialize(materialization_source, root, manifest, args.batch_size, compression, chunk_size, args.reuse_materialized)
                 indices = tuple(train_indices) if layout == "full" else tuple(range(len(train_indices)))
@@ -779,6 +885,8 @@ def main() -> None:
                         layout="full",
                         materialization_seconds=0.0,
                         file_size=0,
+                        workload=args.workload,
+                        datamodule_spec=args.datamodule_factory,
                     )
                 )
                 for (compression_name, chunk_size, layout), (root, elapsed, size, indices) in materialized.items():
@@ -805,6 +913,8 @@ def main() -> None:
                             layout=layout,
                             materialization_seconds=elapsed,
                             file_size=size,
+                            workload=args.workload,
+                            datamodule_spec=args.datamodule_factory,
                         )
                     )
         cases.append(
@@ -830,6 +940,8 @@ def main() -> None:
                 layout="full",
                 materialization_seconds=0.0,
                 file_size=0,
+                workload=args.workload,
+                datamodule_spec=None,
             )
         )
 
@@ -861,8 +973,25 @@ def main() -> None:
             completed_keys.add(_case_key(case))
         _checkpoint(partial_path, results, failures)
     aggregates = aggregate_results(results)
-    recommendation = recommend(aggregates)
-    _write_results(args.results, results, aggregates, recommendation, failures)
+    recommendation = recommend(aggregates, args.minimum_speedup)
+    _write_results(
+        args.results,
+        results,
+        aggregates,
+        recommendation,
+        failures,
+        environment=_environment_metadata(),
+        benchmark_config={
+            "workload": args.workload,
+            "minimum_speedup": args.minimum_speedup,
+            "repetitions": args.repetitions,
+            "worker_counts": workers,
+            "split_layouts": layouts,
+            "transform_factory": args.stage2_transforms,
+            "model_factory": args.model_factory,
+            "datamodule_factory": args.datamodule_factory,
+        },
+    )
     _print_table(aggregates)
     for line in recommendation:
         print(line)
