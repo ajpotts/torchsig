@@ -13,6 +13,9 @@ dist/
 *.p
 *.png
 *.txt
+!tickets/*.txt
+!tickets/documentation/
+!tickets/documentation/*.txt
 *.npy
 *.jpg
 *.pt*
@@ -54,6 +57,9 @@ examples/datasets/
 !examples/transforms/*.ipynb
 !examples/*.py
 !examples/*.yaml
+!examples/scripts/
+examples/scripts/*
+!examples/scripts/*.py
 
 # Pytest Files
 *.coverage

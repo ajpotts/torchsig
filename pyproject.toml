@@ -54,7 +54,7 @@ dev = [
 ]
 
 docs = [
-    "Sphinx>=7.2,<10",
+    "Sphinx>=8.2,<10",
     "sphinx-rtd-theme>=3.1,<4",
     "sphinxcontrib-jquery>=4,<5",
     "six==1.17.0",
@@ -164,7 +164,6 @@ ignore = [
     "D203",  # One blank line required before class docstring
     "D213",  # Multi-line docstring summary should start at the second line
     "T201", # `print` found
-    "CPY001",  # Missing copyright notice at top of file
 ]
 
 [tool.ruff.format]
