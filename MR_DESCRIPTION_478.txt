@@ -1,0 +1,44 @@
+Prevent HDF5 parent metadata key collisions
+
+Summary
+
+This MR fixes #478 by extending the legacy `HDF5Writer`'s stable key assignment
+from signals and component signals to their complete metadata-parent chains.
+
+Previously, parent metadata fell back to `str(id(obj))`. CPython can recycle an
+object ID after the original parent is garbage collected, causing a later parent
+to resolve to an existing HDF5 group. The writer would then silently skip the
+new metadata and leave signals linked to unrelated values such as
+`class_index`.
+
+Implementation
+
+`HDF5Writer` now walks each signal's parent chain before serialization and
+assigns every parent a key from the same monotonic counter used for signals.
+A per-writer token provides two important behaviors:
+
+- a genuinely shared parent retains one key throughout a writer session; and
+- a persistent parent reused by another writer receives a fresh key in the new
+  writer's namespace.
+
+Parent traversal records visited object IDs so a malformed cyclic hierarchy
+cannot loop indefinitely. The module-level HDF5 helpers retain their `id()`
+fallback for callers that use them directly without `HDF5Writer`.
+
+Testing
+
+Focused tests verify that distinct and nested parents receive unique keys, two
+signals reference their shared root parent consistently, parent metadata values
+are written to the expected groups, and a parent reused across writer sessions
+is assigned in the new namespace.
+
+Validation
+
+    pytest -q tests/utils/file_handlers/test_hdf5_writer.py
+    git diff --check
+
+Compatibility
+
+The public writer and reader APIs and the on-disk HDF5 schema are unchanged.
+Only internal object keys change, and readers already treat those keys as opaque
+references. The fix retains metadata parents for no longer than before.
