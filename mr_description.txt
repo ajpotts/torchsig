@@ -1,0 +1,34 @@
+## Summary
+
+Preserve the configured class name when a named signal generator expands into
+a `ConcatSignalGenerator`.
+
+Previously, `TorchSigIterableDataset.init_signal_generator()` resolved a string
+name before recursively adding the concat generator's children. The configured
+name was discarded during that recursion. Children without an intrinsic
+`class_name` were consequently unlabeled, causing class-based per-signal
+configuration and sampling groups to fail during dataset initialization.
+
+## Changes
+
+- Add an optional `class_name` argument to `init_signal_generator()`.
+- Capture the configured string name before resolving the signal generator.
+- Propagate that name through recursive concat expansion.
+- Pass the preserved name to `add_signal_generator()` for each child.
+- Add a regression test using a mocked named concat with two unlabeled child
+  generators.
+
+The regression test verifies that both children receive the logical configured
+class name and that the family's aggregate sampling probability is divided
+equally between them.
+
+## Testing
+
+- `pytest -q tests/datasets/test_datasets.py::test_named_concat_propagates_configured_class_name tests/datasets/test_datasets.py::test_string_lookup_expands_concat_signal_generator tests/datasets/test_datasets.py::test_family_sampling_with_fm`
+  - 3 passed
+- `pytest -q tests/datasets/test_datasets.py`
+  - 108 passed, 2 skipped
+- `pytest -q tests/datasets/test_dataset_class_sampling.py`
+  - 17 passed
+- `git diff --check`
+  - passed
