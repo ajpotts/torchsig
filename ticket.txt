@@ -1,0 +1,3 @@
+this might be adding too many parameters, but it would be nice if the pulse shaping parameters in constellation.py were user configurable instead of always random 
+I'm probably not using it the way you guys meant anyway lol, I just want to make fake data so I don't have to turn on a sig gen and actually transmit stuff upstairs
+like all my parameters are the same, I just want random start/stops
