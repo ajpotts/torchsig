@@ -13,6 +13,9 @@ dist/
 *.p
 *.png
 *.txt
+!MR_DESCRIPTION_478.txt
+!tickets/github/
+!tickets/github/478_fix_hdf5_parent_metadata_key_reuse.txt
 *.npy
 *.jpg
 *.pt*

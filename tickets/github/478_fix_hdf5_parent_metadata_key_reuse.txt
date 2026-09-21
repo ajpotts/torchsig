@@ -1,0 +1,36 @@
+Title: Prevent HDF5 metadata corruption from reused parent object IDs
+
+Summary
+
+The legacy `HDF5Writer` assigns counter-based keys to signals and component
+signals, but metadata objects in their parent chains still fall back to
+`str(id(obj))`. Python may reuse an ID after a transient parent is garbage
+collected. If a later, unrelated parent receives that ID, the HDF5 deduplication
+guard mistakes it for metadata already written and silently retains the earlier
+parent's values.
+
+Impact
+
+Multi-worker dataset generation can persist metadata from an unrelated sample.
+Fields such as `class_index` may consequently load with incorrect values or an
+unexpected list shape. The failure is silent and becomes more likely during
+large generation runs.
+
+Proposed change
+
+Extend the writer's monotonic key assignment to every object in each signal's
+metadata-parent chain. Shared parents must keep the same key within a writer
+session, while persistent parents reused by a later writer must receive a key
+from the new writer's namespace. Use a per-writer token to distinguish those
+sessions, and guard parent traversal against cycles.
+
+Acceptance criteria
+
+- Signals, component signals, and all metadata parents use counter-based keys
+  during normal `HDF5Writer` operation.
+- Distinct parent objects cannot collide even if Python reuses memory addresses.
+- A genuinely shared parent is stored once and referenced consistently.
+- Nested parent chains are assigned and serialized correctly.
+- Reusing a persistent parent in a new writer session cannot collide with that
+  session's signal keys.
+- Focused tests cover distinct, shared, nested, and cross-session parents.

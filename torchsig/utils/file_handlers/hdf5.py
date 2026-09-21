@@ -46,16 +46,14 @@ __all__ = [
 def _hdf5_key(obj) -> str:
     """Return the HDF5 group key to use for *obj*.
 
-    Ephemeral objects (generated Signal instances) receive a short sequential
-    integer key that is stamped onto them by ``HDF5Writer._assign_hdf5_keys``
-    immediately before writing. Persistent objects (generators, datasets)
-    that are never garbage-collected within a write session fall back to
-    ``str(id(obj))``, which is stable for the lifetime of the writer.
+    Objects written by :class:`HDF5Writer` receive a short sequential integer
+    key immediately before writing. The ``id()`` fallback supports direct use
+    of the module-level population helpers outside the writer.
 
-    Using a counter for signals avoids the id()-reuse hazard that arises when
-    CPython recycles the memory address of a freed signal and a later signal
-    lands at the same address, causing the "already exists" guard to skip the
-    write silently.
+    Using a counter for signals and their metadata parents avoids the id()-reuse
+    hazard that arises when CPython recycles the memory address of a freed
+    object and a later object lands at the same address, causing the "already
+    exists" guard to skip the write silently.
     """
     try:
         return obj._hdf5_key
@@ -216,6 +214,9 @@ class HDF5Writer(FileWriter):
         # Monotonically-increasing counter used to stamp each Signal with a
         # unique short string key (_hdf5_key attribute) before it is written.
         self._key_counter: int = 0
+        # Distinguishes keys assigned by this writer from attributes left on a
+        # persistent metadata object by an earlier writer session.
+        self._hdf5_writer_token = object()
 
         self._current_sample_index = 0
         super().__init__(root=root)
@@ -277,17 +278,35 @@ class HDF5Writer(FileWriter):
                 pass  # File might already be closed
             del self._file
 
+    def _assign_hdf5_keys_to_parent_chain(self, metadata_obj) -> None:
+        """Assign stable keys to every metadata parent used by this writer.
+
+        Shared parents retain one key within a writer session. A per-writer
+        token ensures that a persistent parent reused by a later writer gets a
+        key from that writer's namespace instead of retaining a stale key.
+        """
+        parent = getattr(metadata_obj, "parent", None)
+        visited: set[int] = set()
+        while parent is not None and id(parent) not in visited:
+            visited.add(id(parent))
+            if getattr(parent, "_hdf5_writer_token", None) is not self._hdf5_writer_token:
+                setattr(parent, "_hdf5_key", str(self._key_counter))
+                setattr(parent, "_hdf5_writer_token", self._hdf5_writer_token)
+                self._key_counter += 1
+            parent = getattr(parent, "parent", None)
+
     def _assign_hdf5_keys(self, signal) -> None:
-        """Stamp *signal* and all its component signals with a unique ``_hdf5_key``.
+        """Stamp a signal, its metadata parents, and components with stable keys.
 
         Called immediately before each batch is written so that every Signal
-        object receives a short, monotonically-increasing string key.  The key
-        is used by the module-level populate helpers instead of ``str(id(signal))``,
-        making the HDF5 layout independent of CPython memory addresses and
-        allowing signals to be garbage-collected as soon as they leave scope.
+        and metadata-parent object receives a short, monotonically-increasing
+        string key. The module-level populate helpers therefore do not depend
+        on recyclable CPython memory addresses for writer-managed objects.
         """
-        signal._hdf5_key = str(self._key_counter)
+        setattr(signal, "_hdf5_key", str(self._key_counter))
+        setattr(signal, "_hdf5_writer_token", self._hdf5_writer_token)
         self._key_counter += 1
+        self._assign_hdf5_keys_to_parent_chain(signal)
         for cs in signal.component_signals:
             self._assign_hdf5_keys(cs)
 
@@ -298,7 +317,8 @@ class HDF5Writer(FileWriter):
             data: Signals to write to the HDF5 file.
         """
         # Assign stable write keys before touching HDF5 so the populate
-        # helpers never fall back to id()-based keys for signal objects.
+        # helpers never fall back to id()-based keys for signals or metadata
+        # objects in their parent chains.
         for signal in data:
             self._assign_hdf5_keys(signal)
 
