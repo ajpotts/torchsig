@@ -1,0 +1,66 @@
+Description
+TorchSigIterableDataset drops the configured class name when an arbitrary named
+signal generator resolves to a ConcatSignalGenerator whose children do not
+provide their own class_name metadata.
+
+The existing "fm" case no longer exposes this problem because
+FMSignalGenerator assigns itself class_name="fm". The underlying initialization
+path remains incorrect, however, and another named concat without self-labeling
+children fails in the same way.
+
+Reproducer
+Configure lookup_signal_generator_by_string("example-family") to return a
+ConcatSignalGenerator containing otherwise valid BaseSignalGenerator children
+without class_name metadata, then initialize:
+
+    TorchSigIterableDataset(
+        metadata=metadata,
+        signal_generators=["example-family"],
+        sampling_grouping={
+            "source": "class_name",
+            "groups": [
+                {"name": "example", "values": ["example-family"]},
+            ],
+        },
+    )
+
+Actual behavior
+Dataset initialization raises:
+
+    ValueError: cannot balance class '<unlabeled>': grouping source
+    'class_name' is not available before generation
+
+Root cause
+init_signal_generator() resolves a string before checking whether the result is
+a ConcatSignalGenerator. During recursive expansion it passes only each child,
+so the original configured name is lost:
+
+    if isinstance(signal_generator, str):
+        signal_generator = lookup_signal_generator_by_string(signal_generator)
+    if isinstance(signal_generator, ConcatSignalGenerator):
+        for child_generator in signal_generator.signal_generators:
+            self.init_signal_generator(child_generator)
+
+This happens to work when every child supplies an appropriate class_name, but
+that is not guaranteed by the concat interface and does not preserve the
+logical class selected by the user.
+
+Expected behavior
+All children expanded from a named concat retain the configured logical class
+name. For "example-family", every expanded child should have
+class_name="example-family". Class-based per-signal metadata and grouping should
+therefore work, and a group probability should be divided across the children.
+
+Suggested fix
+Add an optional class_name argument to init_signal_generator(). Capture a string
+before lookup, forward that value while recursively expanding a concat, and
+pass it to add_signal_generator(). Calls that supply a ConcatSignalGenerator
+object directly should retain their existing behavior unless an explicit class
+name is provided.
+
+Regression coverage
+tests/datasets/test_datasets.py includes
+test_named_concat_propagates_configured_class_name. It uses a mocked lookup so
+the test does not depend on the current built-in families self-labeling their
+children. The test is marked strict xfail until the implementation is fixed;
+after the fix, remove the xfail marker.
