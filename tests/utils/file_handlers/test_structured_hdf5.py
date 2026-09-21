@@ -1,6 +1,7 @@
 """Tests for structured homogeneous HDF5 storage."""
 
 import json
+import pickle
 
 import h5py
 import numpy as np
@@ -70,6 +71,67 @@ def test_contiguous_batch_read_round_trips_samples(tmp_path) -> None:
         _assert_sample_equal(item, expected)
 
 
+def test_index_batch_restores_shuffled_order_and_duplicates(tmp_path) -> None:
+    samples = _samples()
+    _write_samples(tmp_path)
+
+    with StructuredHDF5Reader(tmp_path) as reader:
+        actual = reader.read_indices([4, 1, 2, 1, 0])
+
+    for item, expected_index in zip(actual, [4, 1, 2, 1, 0], strict=True):
+        _assert_sample_equal(item, samples[expected_index])
+
+
+def test_index_batch_coalesces_contiguous_runs_per_leaf(tmp_path) -> None:
+    _write_samples(tmp_path)
+    reader = StructuredHDF5Reader(tmp_path)
+    assert len(reader) == 5
+    keys: list[list[object]] = [[] for _ in reader._datasets]  # noqa: SLF001
+
+    class TrackingDataset:
+        def __init__(self, dataset, field_keys) -> None:
+            self.dataset = dataset
+            self.field_keys = field_keys
+
+        def __getitem__(self, key):
+            self.field_keys.append(key)
+            return self.dataset[key]
+
+    reader._datasets = [TrackingDataset(dataset, field_keys) for dataset, field_keys in zip(reader._datasets, keys, strict=True)]  # noqa: SLF001
+    try:
+        reader.read_indices([4, 0, 2, 1])
+    finally:
+        reader.close()
+
+    assert keys
+    assert all(field_keys == [slice(0, 3), slice(4, 5)] for field_keys in keys)
+
+
+def test_index_batch_avoids_slice_overhead_for_sparse_indices(tmp_path) -> None:
+    _write_samples(tmp_path)
+    reader = StructuredHDF5Reader(tmp_path)
+    assert len(reader) == 5
+    keys: list[list[object]] = [[] for _ in reader._datasets]  # noqa: SLF001
+
+    class TrackingDataset:
+        def __init__(self, dataset, field_keys) -> None:
+            self.dataset = dataset
+            self.field_keys = field_keys
+
+        def __getitem__(self, key):
+            self.field_keys.append(key)
+            return self.dataset[key]
+
+    reader._datasets = [TrackingDataset(dataset, field_keys) for dataset, field_keys in zip(reader._datasets, keys, strict=True)]  # noqa: SLF001
+    try:
+        reader.read_indices([4, 2, 0])
+    finally:
+        reader.close()
+
+    assert keys
+    assert all(field_keys == [4, 2, 0] for field_keys in keys)
+
+
 def test_writer_persists_schema_metadata_and_leaf_datasets(tmp_path) -> None:
     _write_samples(tmp_path)
 
@@ -118,7 +180,7 @@ def test_reader_rejects_malformed_files(tmp_path, mutation, message) -> None:
         mutation(handle)
 
     with pytest.raises(ValueError, match=message):
-        StructuredHDF5Reader(tmp_path)
+        len(StructuredHDF5Reader(tmp_path))
 
 
 def test_reader_rejects_field_dtype_mismatch(tmp_path) -> None:
@@ -129,7 +191,7 @@ def test_reader_rejects_field_dtype_mismatch(tmp_path) -> None:
         handle.create_dataset("fields/1", data=values)
 
     with pytest.raises(ValueError, match="has dtype"):
-        StructuredHDF5Reader(tmp_path)
+        len(StructuredHDF5Reader(tmp_path))
 
 
 def test_invalid_indices_and_ranges_are_rejected(tmp_path) -> None:
@@ -139,6 +201,15 @@ def test_invalid_indices_and_ranges_are_rejected(tmp_path) -> None:
             reader.read(-1)
         with pytest.raises(IndexError, match="out of bounds"):
             reader.read_batch(3, 6)
+        assert reader.read_indices([]) == []
+        with pytest.raises(TypeError, match="sequence"):
+            reader.read_indices(1)
+        with pytest.raises(TypeError, match="integers"):
+            reader.read_indices([1.5])
+        with pytest.raises(TypeError, match="integers"):
+            reader.read_indices([True])
+        with pytest.raises(IndexError, match="out of range"):
+            reader.read_indices([5])
 
 
 def test_existing_homogeneous_version_one_remains_compatible(tmp_path) -> None:
@@ -151,3 +222,33 @@ def test_existing_homogeneous_version_one_remains_compatible(tmp_path) -> None:
         np.testing.assert_array_equal(reader.read(0).data, signal.data)
     finally:
         reader.teardown()
+
+
+def test_reader_is_lazy_and_reopens_after_explicit_close(tmp_path) -> None:
+    _write_samples(tmp_path)
+    reader = StructuredHDF5Reader(tmp_path)
+
+    assert reader._file is None  # noqa: SLF001
+    _assert_sample_equal(reader.read(0), _samples()[0])
+    assert reader._file is not None  # noqa: SLF001
+    reader.close()
+    assert reader._file is None  # noqa: SLF001
+    assert reader._datasets == []  # noqa: SLF001
+    _assert_sample_equal(reader.read(1), _samples()[1])
+    reader.close()
+
+
+def test_reader_pickle_state_excludes_hdf5_handles(tmp_path) -> None:
+    _write_samples(tmp_path)
+    reader = StructuredHDF5Reader(tmp_path)
+    assert len(reader) == 5
+
+    restored = pickle.loads(pickle.dumps(reader))  # noqa: S301
+    try:
+        assert restored._file is None  # noqa: SLF001
+        assert restored._pid is None  # noqa: SLF001
+        assert restored._datasets == []  # noqa: SLF001
+        _assert_sample_equal(restored.read(4), _samples()[4])
+    finally:
+        reader.close()
+        restored.close()

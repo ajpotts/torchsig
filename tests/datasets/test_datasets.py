@@ -24,7 +24,7 @@ from torchsig.datasets.datasets import (
 )
 from torchsig.signals.builder import BaseSignalGenerator
 from torchsig.signals.signal_types import Signal
-from torchsig.transforms.metadata_transforms import MultiHotLabel, YOLOLabel
+from torchsig.transforms.metadata_transforms import GroupingLabel, MultiHotLabel, YOLOLabel
 from torchsig.transforms.transforms import ComplexTo2D, Spectrogram
 from torchsig.utils.data_loading import WorkerSeedingDataLoader
 from torchsig.utils.defaults import TorchSigDefaults
@@ -1997,3 +1997,128 @@ def test_string_lookup_expands_concat_signal_generator():
         dataset.signal_probabilities,
         [0.5, 0.5],
     )
+
+
+# =============================================================================
+# Bug Reproducers
+# =============================================================================
+
+
+def test_family_sampling_with_fm():
+    grouping = GroupingLabel(
+        {
+            "source": "class_name",
+            "groups": [
+                {"name": "fm", "values": ["fm"]},
+            ],
+        }
+    )
+
+    dataset = TorchSigIterableDataset(
+        metadata={
+            "sample_rate": 10_000_000,
+            "bandwidth_min": 100_000,
+            "bandwidth_max": 1_000_000,
+            "signal_duration_in_samples_min": 52_428,
+            "signal_duration_in_samples_max": 262_144,
+            "num_iq_samples_dataset": 1_048_576,
+            "num_signals_min": 5,
+            "num_signals_max": 7,
+        },
+        signal_generators=["fm"],
+        sampling_grouping=grouping,
+    )
+
+    assert dataset.signal_generators
+
+def test_sampling_grouping_all_wideband_classes():
+    groups = [
+        {"name": "am", "values": ["am-dsb", "am-dsb-sc", "am-lsb", "am-usb"]},
+        {
+            "name": "ask",
+            "values": [
+                "4ask", "8ask", "16ask", "32ask", "64ask",
+                "adsb-long", "adsb-short", "ook",
+            ],
+        },
+        {
+            "name": "chirp",
+            "values": ["chirpss", "lfm-data", "lfm-radar", "lora", "zigbee"],
+        },
+        {"name": "fm", "values": ["fm"]},
+        {
+            "name": "fsk",
+            "values": [
+                "2fsk", "2gfsk", "2gmsk", "2msk",
+                "4fsk", "4gfsk", "4gmsk", "4msk",
+                "8fsk", "8gfsk", "8gmsk", "8msk",
+                "16fsk", "16gfsk", "16gmsk", "16msk",
+                "btle", "dmr", "gsm", "p25",
+            ],
+        },
+        {
+            "name": "ofdm",
+            "values": [
+                "80211a", "80211a_ack", "80211a_cts", "80211a_rts",
+                "ofdm-64", "ofdm-72", "ofdm-128", "ofdm-180",
+                "ofdm-256", "ofdm-300", "ofdm-512", "ofdm-600",
+                "ofdm-900", "ofdm-1024", "ofdm-1200", "ofdm-2048",
+            ],
+        },
+        {
+            "name": "psk",
+            "values": [
+                "bpsk", "qpsk", "8psk", "16psk", "32psk",
+                "64psk", "16apsk", "32apsk", "dvbs2",
+            ],
+        },
+        {
+            "name": "qam",
+            "values": [
+                "16qam", "32qam", "32qam_cross", "64qam",
+                "128qam_cross", "256qam", "512qam_cross", "1024qam",
+            ],
+        },
+        {"name": "tone", "values": ["tone"]},
+    ]
+
+    enabled_classes = [
+        class_name
+        for group in groups
+        for class_name in group["values"]
+    ]
+
+    grouping = GroupingLabel(
+        {
+            "source": "class_name",
+            "groups": groups,
+        }
+    )
+
+    dataset = TorchSigIterableDataset(
+        metadata={
+            "bandwidth_max": 1_000_000,
+            "bandwidth_min": 100_000,
+            "cochannel_overlap_probability": 0.0,
+            "fft_size": 1024,
+            "fft_stride": 256,
+            "frequency_max": 4_999_999,
+            "frequency_min": -5_000_000,
+            "noise_power_db": 0.0,
+            "num_iq_samples_dataset": 1_048_576,
+            "num_signals_max": 7,
+            "num_signals_min": 5,
+            "sample_rate": 10_000_000,
+            "seed": 83_763_046,
+            "signal_center_freq_max": 4_499_999,
+            "signal_center_freq_min": -4_500_000,
+            "signal_duration_in_samples_max": 262_144,
+            "signal_duration_in_samples_min": 52_428,
+            "snr_db_max": 30.0,
+            "snr_db_min": -10.0,
+        },
+        signal_generators=enabled_classes,
+        sampling_grouping=grouping,
+    )
+
+    assert dataset.signal_generators

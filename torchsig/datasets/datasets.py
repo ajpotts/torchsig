@@ -397,6 +397,7 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         if not self.signal_generators:
             raise ValueError("cannot balance groups without signal generators")
 
+
         generator_groups = []
         for generator in self.signal_generators:
             if not hasattr(generator, grouping.source):

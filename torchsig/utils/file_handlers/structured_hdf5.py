@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Sequence
 from typing import Any
 
@@ -190,18 +191,42 @@ class StructuredHDF5Writer(FileWriter):
 
 
 class StructuredHDF5Reader(FileReader):
-    """Read and validate structured homogeneous HDF5 samples."""
+    """Read structured homogeneous HDF5 samples with process-local handles."""
 
     def __init__(self, root) -> None:
-        """Open ``root/data.h5`` and validate its complete physical schema."""
+        """Initialize a process-safe lazy reader for ``root/data.h5``."""
         super().__init__(root=root)
         self.datapath = self.root / "data.h5"
-        self._file = h5py.File(self.datapath, "r")
+        self._file: h5py.File | None = None
+        self._pid: int | None = None
+        self._datasets: list[h5py.Dataset] = []
+
+    def _ensure_open(self) -> None:
+        pid = os.getpid()
+        if self._file is not None and self._pid != pid:
+            self._file.close()
+            self._file = None
+            self._datasets = []
+        if self._file is not None:
+            return
+        self._file = h5py.File(self.datapath, "r", locking=False)
+        self._pid = pid
         try:
             self.schema, self._length, self._datasets = self._validate_file()
         except Exception:
             self._file.close()
+            self._file = None
+            self._pid = None
+            self._datasets = []
             raise
+
+    def __getstate__(self) -> dict[str, Any]:
+        """Return pickle state without process-local HDF5 objects."""
+        state = self.__dict__.copy()
+        state["_file"] = None
+        state["_pid"] = None
+        state["_datasets"] = []
+        return state
 
     def _validate_file(self) -> tuple[StructuredSampleSchema, int, list[h5py.Dataset]]:
         if self._file.attrs.get("format") != STRUCTURED_FORMAT:
@@ -240,10 +265,12 @@ class StructuredHDF5Reader(FileReader):
 
     def __len__(self) -> int:
         """Return the declared and validated sample count."""
+        self._ensure_open()
         return self._length
 
     def read(self, idx: int) -> Any:
         """Read and reconstruct one sample by non-negative index."""
+        self._ensure_open()
         if not isinstance(idx, int) or isinstance(idx, bool):
             raise TypeError("Structured HDF5 sample index must be an integer")
         if idx < 0 or idx >= self._length:
@@ -252,6 +279,7 @@ class StructuredHDF5Reader(FileReader):
 
     def read_batch(self, start: int, stop: int) -> list[Any]:
         """Read samples in ``[start, stop)`` using one slice per field."""
+        self._ensure_open()
         if not isinstance(start, int) or isinstance(start, bool) or not isinstance(stop, int) or isinstance(stop, bool):
             raise TypeError("Structured HDF5 batch bounds must be integers")
         if start < 0 or stop < start or stop > self._length:
@@ -259,10 +287,48 @@ class StructuredHDF5Reader(FileReader):
         leaves = [dataset[start:stop] for dataset in self._datasets]
         return [_reconstruct(self.schema.root, [field_values[index] for field_values in leaves]) for index in range(stop - start)]
 
+    def read_indices(self, indices: Sequence[int]) -> list[Any]:
+        """Read an index batch efficiently and restore its requested order.
+
+        Indices are validated, sorted, and deduplicated before accessing each
+        schema leaf. Adjacent runs are coalesced when doing so materially
+        reduces the operation count. Sparse requests and fragmented
+        single-leaf samples retain direct reads because h5py point selection,
+        sorting, and batch copying are slower for those cases. Duplicate
+        indices are reconstructed in their original positions.
+        """
+        self._ensure_open()
+        if not isinstance(indices, Sequence) or isinstance(indices, (str, bytes)):
+            raise TypeError("Structured HDF5 indices must be a sequence of integers")
+        if not indices:
+            return []
+        for index in indices:
+            if not isinstance(index, int) or isinstance(index, bool):
+                raise TypeError("Structured HDF5 sample indices must be integers")
+            if index < 0 or index >= self._length:
+                raise IndexError(f"Structured HDF5 sample index out of range: {index}")
+
+        if len(self._datasets) == 1:
+            dataset = self._datasets[0]
+            if all(index == indices[0] + offset for offset, index in enumerate(indices)):
+                values = dataset[indices[0] : indices[-1] + 1]
+                return [_reconstruct(self.schema.root, [value]) for value in values]
+            return [_reconstruct(self.schema.root, [dataset[index]]) for index in indices]
+        unique_indices, inverse = np.unique(np.asarray(indices, dtype=np.intp), return_inverse=True)
+        breaks = np.flatnonzero(np.diff(unique_indices) != 1) + 1
+        runs = np.split(unique_indices, breaks)
+        if len(runs) * 2 > len(unique_indices):
+            return [_reconstruct(self.schema.root, [dataset[index] for dataset in self._datasets]) for index in indices]
+        leaves = [np.concatenate([dataset[int(run[0]) : int(run[-1]) + 1] for run in runs], axis=0) for dataset in self._datasets]
+        return [_reconstruct(self.schema.root, [field_values[position] for field_values in leaves]) for position in inverse]
+
     def teardown(self) -> None:
-        """Close the HDF5 file."""
-        if self._file:
+        """Close the process-local HDF5 file and field handles."""
+        if self._file is not None:
             self._file.close()
+            self._file = None
+            self._pid = None
+            self._datasets = []
 
     close = teardown
 
