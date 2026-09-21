@@ -1,0 +1,39 @@
+Fix IQ amplitude imbalance applying uniform gain
+
+Summary
+
+This MR fixes #487 by making `iq_imbalance` apply a relative amplitude mismatch
+between the in-phase and quadrature channels. Previously, both channels were
+multiplied by the same factor, so the transform applied common gain instead of
+the requested IQ amplitude distortion.
+
+Implementation
+
+The requested imbalance is now interpreted as the I-to-Q voltage ratio in dB
+and distributed symmetrically:
+
+    i_gain = 10 ** (amplitude_imbalance / 40)
+    q_gain = 10 ** (-amplitude_imbalance / 40)
+
+Consequently, `20 * log10(i_gain / q_gain)` equals the requested imbalance.
+Positive values amplify I relative to Q, negative values amplify Q relative to
+I, and zero leaves both channel amplitudes unchanged. Symmetric gains also avoid
+introducing an unnecessary common gain.
+
+Testing
+
+A deterministic parameterized unit test covers -6 dB, 0 dB, and +6 dB. It
+measures the output I/Q RMS voltage ratio, checks it against the requested value,
+and verifies that the output retains TorchSig's complex dtype. The test isolates
+amplitude imbalance by using zero phase imbalance and a negligible DC offset.
+
+Validation
+
+    pytest -q tests/transforms/test_functional.py -k iq_imbalance
+    git diff --check
+
+Compatibility
+
+The function signature and output dtype are unchanged. Phase-imbalance and
+DC-offset processing are unchanged. Output samples change intentionally for any
+nonzero `amplitude_imbalance`, correcting the transform's physical meaning.

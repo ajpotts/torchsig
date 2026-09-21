@@ -1,0 +1,35 @@
+Title: Correct IQ amplitude-imbalance channel gains
+
+Summary
+
+The `iq_imbalance` functional currently applies the same gain to the in-phase
+and quadrature channels. Multiplying both channels by
+`10 ** (amplitude_imbalance / 10)` changes overall signal power but does not
+create an amplitude mismatch between I and Q.
+
+Impact
+
+Datasets using the IQ-imbalance impairment do not contain the requested
+physical amplitude distortion. Models trained with this transform therefore
+see common gain in place of an I/Q channel mismatch.
+
+Proposed change
+
+Interpret `amplitude_imbalance` as the I-to-Q voltage ratio in decibels and
+split it symmetrically between the two channels:
+
+    i_gain = 10 ** (amplitude_imbalance / 40)
+    q_gain = 10 ** (-amplitude_imbalance / 40)
+
+This produces an I/Q voltage ratio of
+`20 * log10(i_gain / q_gain) == amplitude_imbalance` while avoiding an
+unnecessary common gain. Positive values favor I and negative values favor Q.
+
+Acceptance criteria
+
+- Positive, zero, and negative amplitude imbalances produce the requested
+  I-to-Q RMS voltage ratio in decibels.
+- Phase imbalance and DC-offset behavior remain unchanged.
+- The functional continues to return TorchSig's complex data dtype.
+- Focused deterministic unit tests fail with the old common-gain behavior and
+  pass with the corrected channel gains.

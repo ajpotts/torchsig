@@ -13,6 +13,9 @@ dist/
 *.p
 *.png
 *.txt
+!MR_DESCRIPTION_487.txt
+!tickets/github/
+!tickets/github/487_fix_iq_imbalance_amplitude_mismatch.txt
 *.npy
 *.jpg
 *.pt*
