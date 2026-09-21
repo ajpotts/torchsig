@@ -65,7 +65,6 @@ install:
 build: .build-stamp
 
 .build-stamp:
-	pip install --upgrade build
 	python -m build --sdist --wheel
 
 verify: build
