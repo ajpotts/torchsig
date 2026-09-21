@@ -1,0 +1,73 @@
+Description
+TorchSigIterableDataset fails when using sampling_grouping with a named signal generator that resolves to a ConcatSignalGenerator.
+For example, "fm" resolves to a ConcatSignalGenerator. During init_signal_generator(), the concat generator is expanded into its child generators, but the original configured class name ("fm") is not propagated to those children.
+As a result, the child generators do not have a class_name. Group-based sampling using a GroupingLabel whose source is class_name therefore fails during dataset initialization.
+Example
+A dataset configured with:
+dataset = TorchSigIterableDataset( metadata=dataset_metadata, signal_generators=enabled_classes,  # includes "fm" sampling_grouping=family_grouping, ... ) 
+fails with:
+ValueError: cannot balance class '<unlabeled>': grouping source 'class_name' is not available before generation 
+The "<unlabeled>" value is the fallback used in the error message; the configured class itself is "fm".
+Root cause
+lookup_signal_generator_by_string("fm") returns a ConcatSignalGenerator.
+init_signal_generator() currently expands a concat generator recursively:
+`if isinstance(signal_generator, str):
+signal_generator = lookup_signal_generator_by_string(signal_generator)
+if isinstance(signal_generator, ConcatSignalGenerator):
+for child_generator in signal_generator.signal_generators:
+self.init_signal_generator(child_generator)
+return
+`
+This discards the fact that the concat generator was originally configured as "fm".
+The resulting FM child generators therefore have no class_name, while other standard generators retain class names such as "bpsk", "qpsk", etc.
+balance_signal_generators_by_group() subsequently requires the grouping source to exist on every generator:
+if not hasattr(generator, grouping.source): class_name = getattr(generator, "class_name", "<unlabeled>") raise ValueError(...) 
+For a grouping with source: class_name, this fails for the expanded FM generators.
+Expected behavior
+When a named generator such as "fm" expands into multiple internal generators, those generators should retain the logical configured class name "fm".
+This allows:
+
+
+        
+      generated signals to retain the expected class label;
+
+        
+      per_signal_metadata and other class-based configuration to work consistently;
+
+        
+      group-based sampling to identify the configured family;
+
+        
+      the probability assigned to the FM family to be divided among its underlying generators rather than treating them as unlabeled generators.
+
+Proposed fix
+Preserve the configured class name while recursively expanding a named ConcatSignalGenerator:
+`def init_signal_generator(
+self,
+signal_generator: str | callable,
+class_name: str | None = None,
+) -> None:
+if isinstance(signal_generator, str):
+class_name = signal_generator
+signal_generator = lookup_signal_generator_by_string(signal_generator)
+if isinstance(signal_generator, ConcatSignalGenerator):
+    for child_generator in signal_generator.signal_generators:
+        self.init_signal_generator(
+            child_generator,
+            class_name=class_name,
+        )
+    return
+
+self.add_signal_generator(
+    signal_generator,
+    class_name=class_name,
+)
+`
+add_signal_generator() already supports this behavior by assigning:
+if class_name is not None: signal_generator["class_name"] = class_name 
+Suggested regression tests
+Add a test verifying that initializing with:
+signal_generators=["fm"] 
+results in all expanded FM generators having:
+generator.class_name == "fm" 
+Also add an integration test using "fm" with a GroupingLabel based on class_name and verify that TorchSigIterableDataset initializes successfully and assigns the intended aggregate group probability to the FM generators.
