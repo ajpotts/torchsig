@@ -62,5 +62,4 @@ Regression coverage
 tests/datasets/test_datasets.py includes
 test_named_concat_propagates_configured_class_name. It uses a mocked lookup so
 the test does not depend on the current built-in families self-labeling their
-children. The test is marked strict xfail until the implementation is fixed;
-after the fix, remove the xfail marker.
+children.

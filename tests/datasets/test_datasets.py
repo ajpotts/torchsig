@@ -2095,10 +2095,6 @@ def test_string_lookup_expands_concat_signal_generator():
         dataset.signal_probabilities,
         [0.5, 0.5],
     )
-@pytest.mark.xfail(
-    strict=True,
-    reason="named concat expansion does not propagate its configured class name",
-)
 def test_named_concat_propagates_configured_class_name(monkeypatch):
     """A named concat labels all expanded children with its logical class."""
     named_concat = ConcatSignalGenerator(
