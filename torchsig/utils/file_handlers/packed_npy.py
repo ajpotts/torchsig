@@ -12,10 +12,12 @@ import json
 import os
 import threading
 from copy import deepcopy
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from torchsig.signals.signal_types import Signal
 from torchsig.utils.file_handlers.base_handler import FileReader, FileWriter
@@ -219,7 +221,7 @@ class PackedNPYReader(FileReader):
         except (OSError, json.JSONDecodeError) as exc:
             raise ValueError(f"Cannot read packed NPY metadata: {exc}") from exc
         if not isinstance(raw_metadata, list):
-            raise ValueError("Packed NPY metadata must be a list")
+            raise TypeError("Packed NPY metadata must be a list")
         self._metadata = raw_metadata
 
         data = np.load(self.root / "data.npy", mmap_mode="r", allow_pickle=False)

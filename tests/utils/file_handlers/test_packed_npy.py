@@ -3,14 +3,26 @@
 from __future__ import annotations
 
 import multiprocessing
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
 from torch.utils.data import DataLoader, Dataset
 
+from torchsig.datasets.datamodules import _resolve_file_reader as resolve_datamodule_reader
 from torchsig.signals.signal_types import Signal
+from torchsig.utils.file_handlers import NPYReader
 from torchsig.utils.file_handlers.packed_npy import PackedNPYReader, PackedNPYWriter
+from torchsig.utils.writer import _resolve_file_reader as resolve_creator_reader
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+_COMPLEX64 = np.dtype("complex64")
+
+
+def _identity_collate(batch):
+    return batch
 
 
 class _PackedDataset(Dataset):
@@ -27,15 +39,11 @@ class _PackedDataset(Dataset):
         return index, np.asarray(signal.data).copy()
 
 
-def _signals(dtype: np.dtype = np.dtype("complex64")) -> list[Signal]:
+def _signals(dtype: np.dtype = _COMPLEX64) -> list[Signal]:
     lengths = (1, 5, 0, 9)
     return [
         Signal(
-            data=(
-                np.arange(length, dtype=np.float32) + index * 1j
-                if np.issubdtype(dtype, np.complexfloating)
-                else np.arange(length, dtype=np.float32) + index
-            ).astype(dtype),
+            data=(np.arange(length, dtype=np.float32) + index * 1j if np.issubdtype(dtype, np.complexfloating) else np.arange(length, dtype=np.float32) + index).astype(dtype),
             record_name=f"record-{index}",
         )
         for index, length in enumerate(lengths)
@@ -90,15 +98,14 @@ def test_round_trip_multidimensional_shapes(tmp_path: Path) -> None:
 
 
 def test_rejects_mixed_dtypes_without_publishing_dataset(tmp_path: Path) -> None:
-    with pytest.raises(TypeError, match="requires one dtype"):
-        with PackedNPYWriter(tmp_path) as writer:
-            writer.write(
-                0,
-                [
-                    Signal(data=np.ones(2, dtype=np.complex64)),
-                    Signal(data=np.ones(2, dtype=np.complex128)),
-                ],
-            )
+    with pytest.raises(TypeError, match="requires one dtype"), PackedNPYWriter(tmp_path) as writer:
+        writer.write(
+            0,
+            [
+                Signal(data=np.ones(2, dtype=np.complex64)),
+                Signal(data=np.ones(2, dtype=np.complex128)),
+            ],
+        )
 
     assert not (tmp_path / "packed_npy.json").exists()
 
@@ -144,9 +151,8 @@ def test_bounds_and_incomplete_batch_sequence(tmp_path: Path) -> None:
         reader.read(len(reader))
 
     incomplete = tmp_path / "incomplete"
-    with pytest.raises(ValueError, match="missing batch index 0"):
-        with PackedNPYWriter(incomplete) as writer:
-            writer.write(1, _signals())
+    with pytest.raises(ValueError, match="missing batch index 0"), PackedNPYWriter(incomplete) as writer:
+        writer.write(1, _signals())
 
 
 @pytest.mark.parametrize("context", ["fork", "spawn"])
@@ -162,20 +168,25 @@ def test_shuffled_multiworker_access(tmp_path: Path, context: str) -> None:
     sampler = expected_order
     loader = DataLoader(
         _PackedDataset(tmp_path),
-        batch_size=None,
+        batch_size=4,
         sampler=sampler,
         num_workers=2,
         multiprocessing_context=context,
+        collate_fn=_identity_collate,
     )
 
     observed = []
-    for index, data in loader:
-        observed.append(int(index))
-        np.testing.assert_array_equal(data, signals[int(index)].data)
+    for batch in loader:
+        for index, data in batch:
+            observed.append(int(index))
+            np.testing.assert_array_equal(data, signals[int(index)].data)
     assert observed == expected_order
 
 
 def test_legacy_one_file_per_record_reader_remains_available() -> None:
-    from torchsig.utils.file_handlers import NPYReader
-
     assert NPYReader.__name__ == "NPYReader"
+
+
+def test_dataset_creation_integrations_resolve_matching_reader() -> None:
+    assert resolve_creator_reader(PackedNPYWriter, None) is PackedNPYReader
+    assert resolve_datamodule_reader(PackedNPYWriter, None) is PackedNPYReader
