@@ -59,6 +59,17 @@ def load_config_from_yaml(path: Path) -> "TorchSigDatasetConfig":
     mode = ss.get("mode")
     _require(mode in ("per_signal", "per_family"), "signal_sampling.mode must be 'per_signal' or 'per_family'")
 
+    storage = cfg.get("storage")
+    if storage is None:
+        storage = {}
+    _require(isinstance(storage, dict), "storage must be a dict")
+    writer_name = storage.get("writer", "legacy")
+    _require(writer_name in ("legacy", "packed", "homogeneous"), "storage.writer must be 'legacy', 'packed', or 'homogeneous'")
+    writer_options = storage.get("options")
+    if writer_options is None:
+        writer_options = {}
+    _require(isinstance(writer_options, dict), "storage.options must be a dict")
+
     config_kwargs = {
         "dataset_id": str(cfg.get("dataset_id", path.stem)),
         "dataset_length": int(cfg["dataset_length"]),
@@ -68,6 +79,8 @@ def load_config_from_yaml(path: Path) -> "TorchSigDatasetConfig":
         "output_spectrogram_fft": cfg["dataset_metadata"].get("fft_size"),
         "signal_sampling_mode": mode,
         "dataset_metadata": dict(cfg["dataset_metadata"]),
+        "file_writer_name": writer_name,
+        "file_writer_kwargs": dict(writer_options),
     }
     if "signals" in cfg:
         config_kwargs["experiment_config"] = load_experiment_config({"signals": cfg["signals"]})
