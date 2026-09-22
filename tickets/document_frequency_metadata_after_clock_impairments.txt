@@ -1,0 +1,29 @@
+Title: Document frequency metadata semantics after sampling-clock impairments
+
+Summary
+
+`ClockDrift` and `ClockJitter` modify sample timing but leave `center_freq`,
+`bandwidth`, and `sample_rate` metadata unchanged. For time-varying drift or
+jitter, there may be no single exact center frequency or bandwidth that
+describes the impaired data, so retaining nominal metadata can be appropriate.
+The current behavior is not documented, however, and consumers may assume that
+frequency metadata describes the measured post-impairment spectrum exactly.
+
+Proposed change
+
+- Document that frequency and sample-rate metadata remain nominal after these
+  impairments.
+- Determine whether transforms with a constant sample-rate offset should update
+  metadata or add impairment parameters that allow consumers to derive apparent
+  values.
+- Do not attempt to replace time-varying behavior with a misleading single
+  corrected center frequency.
+
+Acceptance criteria
+
+- Public transform documentation states whether `center_freq`, `bandwidth`, and
+  `sample_rate` are nominal or measured after impairment.
+- Tests explicitly verify the selected metadata behavior.
+- If impairment parameters are exposed in metadata, their units and sign
+  convention are documented and deterministic tests validate them.
+

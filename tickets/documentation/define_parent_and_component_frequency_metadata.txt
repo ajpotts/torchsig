@@ -1,0 +1,36 @@
+Title: Document parent and component frequency metadata semantics
+
+Summary
+
+A TorchSIG `Signal` can represent an individual component or a composite
+wideband sample. Both objects may expose `center_freq` and `bandwidth`, but the
+documentation does not define whether parent metadata describes the complete
+capture, the union of occupied component frequencies, or another quantity.
+
+This documentation depends on the implementation ticket that selects and
+enforces aggregate wideband sample semantics.
+
+Proposed documentation
+
+After the aggregate semantics are decided, document:
+
+- The meaning of `center_freq`, `bandwidth`, `lower_freq`, and `upper_freq` for
+  an individual component.
+- The meaning of those fields on a composite wideband parent.
+- The expected values for a parent containing no components.
+- Which metadata should be used for component detection labels versus
+  capture-level processing.
+- How parent and component metadata are affected by dataset-level transforms.
+
+Include examples with zero, one, and multiple components at asymmetric center
+frequencies.
+
+Acceptance criteria
+
+- Parent metadata has one explicit, implementation-consistent definition.
+- Component occupancy and parent capture/occupancy semantics cannot be
+  confused.
+- Empty and multi-component samples are covered.
+- Relevant API docstrings and user-facing guides use the same terminology.
+- The source documentation builds without warnings.
+
