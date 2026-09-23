@@ -962,3 +962,105 @@ def test_constellation_signal_generator_generate_with_rectangular():
     )
 
     assert result is expected_signal
+
+
+@pytest.mark.parametrize(
+    ("configured_shape", "configured_alpha", "expected_shape", "expected_alpha"),
+    [
+        ("rectangular", None, "rectangular", None),
+        ("srrc", 0.35, "srrc", 0.35),
+    ],
+)
+def test_constellation_signal_generator_honors_fixed_pulse_shaping(
+    configured_shape,
+    configured_alpha,
+    expected_shape,
+    expected_alpha,
+):
+    """Configured pulse-shaping values should replace the random draws."""
+    metadata = {
+        "constellation_name": "qpsk",
+        "sample_rate": 10_000,
+        "bandwidth_min": 800,
+        "bandwidth_max": 800,
+        "signal_duration_in_samples_min": 128,
+        "signal_duration_in_samples_max": 128,
+        "pulse_shape_name": configured_shape,
+    }
+    if configured_alpha is not None:
+        metadata["alpha_rolloff"] = configured_alpha
+
+    generator = ConstellationSignalGenerator(metadata=metadata, seed=42)
+    generator.random_generator = MagicMock(spec=np.random.Generator)
+    generator.random_generator.integers.side_effect = [128, 800]
+
+    with patch(
+        f"{MODULE_PATH}.constellation_modulator",
+        return_value=np.ones(128, dtype=TorchSigComplexDataType),
+    ) as modulator:
+        signal = generator.generate()
+
+    generator.random_generator.uniform.assert_not_called()
+    modulator.assert_called_once_with(
+        "qpsk",
+        expected_shape,
+        800,
+        10_000,
+        128,
+        expected_alpha,
+        generator.random_generator,
+    )
+    assert signal.pulse_shape_name == expected_shape
+    assert signal.alpha_rolloff == expected_alpha
+
+
+def test_constellation_signal_generator_fixed_srrc_randomizes_missing_alpha():
+    """A fixed SRRC shape may retain randomized rolloff selection."""
+    generator = ConstellationSignalGenerator(
+        constellation_name="qpsk",
+        sample_rate=10_000,
+        bandwidth_min=800,
+        bandwidth_max=800,
+        signal_duration_in_samples_min=128,
+        signal_duration_in_samples_max=128,
+        pulse_shape_name="srrc",
+        seed=42,
+    )
+    generator.random_generator = MagicMock(spec=np.random.Generator)
+    generator.random_generator.integers.side_effect = [128, 800]
+    generator.random_generator.uniform.return_value = 0.4
+
+    with patch(
+        f"{MODULE_PATH}.constellation_modulator",
+        return_value=np.ones(128, dtype=TorchSigComplexDataType),
+    ) as modulator:
+        generator.generate()
+
+    generator.random_generator.uniform.assert_called_once_with(0.1, 0.5)
+    assert modulator.call_args.args[5] == 0.4
+
+
+@pytest.mark.parametrize(
+    ("parameters", "message"),
+    [
+        ({"pulse_shape_name": "triangle"}, "pulse_shape_name must be"),
+        ({"pulse_shape_name": "rectangular", "alpha_rolloff": 0.2}, "can only be configured with SRRC"),
+        ({"pulse_shape_name": "srrc", "alpha_rolloff": 1.0}, "alpha_rolloff must be between"),
+        ({"alpha": 0.2, "alpha_rolloff": 0.3}, "alpha_rolloff and alpha must match"),
+    ],
+)
+def test_constellation_signal_generator_rejects_invalid_pulse_configuration(parameters, message):
+    """Invalid or contradictory fixed pulse settings should be rejected."""
+    generator = ConstellationSignalGenerator(
+        constellation_name="qpsk",
+        sample_rate=10_000,
+        bandwidth_min=800,
+        bandwidth_max=800,
+        signal_duration_in_samples_min=128,
+        signal_duration_in_samples_max=128,
+        seed=42,
+        **parameters,
+    )
+
+    with pytest.raises(ValueError, match=message):
+        generator.generate()

@@ -452,24 +452,38 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         self._sampling_generator_groups = generator_groups
         self._validate_signal_sampling_configuration(require_complete=True)
 
-    def init_signal_generator(self, signal_generator: str | callable) -> None:
+    def init_signal_generator(
+        self,
+        signal_generator: str | callable,
+        class_name: str | None = None,
+    ) -> None:
         """Initializes the signal generator.
 
         Args:
             signal_generator: The signal generator to be initialized. If a string, it is first looked up to retrieve the corresponding signal generator function.
+            class_name: Optional class name to assign to the initialized
+                generator. Used internally to preserve the configured name when
+                a named concatenated generator is expanded.
 
         Raises:
             TypeError: If the signal_generator is neither a string nor a callable.
         """
         if isinstance(signal_generator, str):
+            class_name = signal_generator
             signal_generator = lookup_signal_generator_by_string(signal_generator)
 
         if isinstance(signal_generator, ConcatSignalGenerator):
             for child_generator in signal_generator.signal_generators:
-                self.init_signal_generator(child_generator)
+                self.init_signal_generator(
+                    child_generator,
+                    class_name=class_name,
+                )
             return
 
-        self.add_signal_generator(signal_generator)
+        self.add_signal_generator(
+            signal_generator,
+            class_name=class_name,
+        )
 
     def add_signal_generator(
         self,
