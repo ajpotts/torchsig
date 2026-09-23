@@ -220,15 +220,28 @@ def channel_swap(data: np.ndarray) -> np.ndarray:
     return new_data.astype(TorchSigComplexDataType)
 
 
-def _restore_sampling_clock_length(data: np.ndarray, target_length: int) -> np.ndarray:
+def _restore_sampling_clock_length(
+    data: np.ndarray,
+    target_length: int,
+    boundary_mode: Literal["zeros", "edge", "wrap", "raise"],
+) -> np.ndarray:
     """Trim or tail-pad aligned sampling-clock output to the requested length."""
+    if boundary_mode not in {"zeros", "edge", "wrap", "raise"}:
+        raise ValueError("boundary_mode must be 'zeros', 'edge', 'wrap', or 'raise'")
     if len(data) >= target_length:
         return data[:target_length]
 
+    if boundary_mode == "raise":
+        raise ValueError("sampling-clock drift requires samples beyond the input boundary")
+
+    if len(data) == 0 and boundary_mode != "zeros":
+        raise ValueError(f"cannot use boundary_mode={boundary_mode!r} with empty output")
+
+    pad_mode = "constant" if boundary_mode == "zeros" else boundary_mode
     return np.pad(
         data,
         (0, target_length - len(data)),
-        mode="constant",
+        mode=pad_mode,
     )
 
 
@@ -239,6 +252,10 @@ def clock_drift(
     initial_phase: float = 0.0,
     drift_model: Literal["linear", "random_walk", "filtered_noise"] = "linear",
     filtered_noise_alpha: float = 0.99,
+    initial_drift_ppm: float = 0.0,
+    drift_rate_ppm_per_second: float | None = None,
+    sample_rate: float | None = None,
+    boundary_mode: Literal["zeros", "edge", "wrap", "raise"] = "edge",
 ) -> np.ndarray:
     """Apply time-varying sampling-clock drift.
 
@@ -255,6 +272,17 @@ def clock_drift(
         drift_model: Time-varying drift model. Defaults to ``"linear"``.
         filtered_noise_alpha: Correlation coefficient for filtered noise.
             Defaults to 0.99.
+        initial_drift_ppm: Initial sampling-rate error in PPM. Defaults to 0.
+        drift_rate_ppm_per_second: Optional physical linear drift rate. When
+            provided, ``sample_rate`` is required.
+        sample_rate: Input sample rate in samples per second.
+        boundary_mode: Policy when drift exhausts the available input:
+            ``"zeros"``, ``"edge"``, ``"wrap"``, or ``"raise"``.
+
+    Notes:
+        The polyphase prototype is intended for signals comfortably inside
+        Nyquist. Signals occupying the band edge can experience attenuation
+        unrelated to the requested clock impairment.
 
     Returns:
         Data with sampling-clock drift applied.
@@ -286,9 +314,16 @@ def clock_drift(
         initial_phase=initial_phase,
         drift_model=drift_model,
         filtered_noise_alpha=filtered_noise_alpha,
+        initial_drift_ppm=initial_drift_ppm,
+        drift_rate_ppm_per_second=drift_rate_ppm_per_second,
+        sample_rate=sample_rate,
     )
 
-    data_with_drift = _restore_sampling_clock_length(data_with_drift, len(data))
+    data_with_drift = _restore_sampling_clock_length(
+        data_with_drift,
+        len(data),
+        boundary_mode,
+    )
 
     # ensure data type
     return data_with_drift.astype(TorchSigComplexDataType)
@@ -299,6 +334,7 @@ def clock_jitter(
     jitter_ppm: float = 10,
     rng: np.random.Generator | None = None,
     initial_phase: float = 0.0,
+    boundary_mode: Literal["zeros", "edge", "wrap", "raise"] = "edge",
 ) -> np.ndarray:
     """Apply independent Gaussian sampling-time jitter.
 
@@ -312,6 +348,13 @@ def clock_jitter(
         rng: Random number generator. Defaults to np.random.default_rng(seed=None).
         initial_phase: Initial sampling phase in input-sample periods. Must be
             in the half-open interval ``[0, 1)``. Defaults to 0.
+        boundary_mode: Policy when resampling exhausts the available input:
+            ``"zeros"``, ``"edge"``, ``"wrap"``, or ``"raise"``.
+
+    Notes:
+        The polyphase prototype is intended for signals comfortably inside
+        Nyquist. Signals occupying the band edge can experience attenuation
+        unrelated to the requested jitter.
 
     Returns:
         Data with sampling-time jitter applied.
@@ -343,7 +386,11 @@ def clock_jitter(
         initial_phase=initial_phase,
     )
 
-    data_with_jitter = _restore_sampling_clock_length(data_with_jitter, len(data))
+    data_with_jitter = _restore_sampling_clock_length(
+        data_with_jitter,
+        len(data),
+        boundary_mode,
+    )
 
     # ensure data type
     return data_with_jitter.astype(TorchSigComplexDataType)

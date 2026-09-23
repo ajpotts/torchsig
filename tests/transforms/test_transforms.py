@@ -505,14 +505,15 @@ def test_ClockDrift(signal: Signal, params: dict, is_error: bool) -> None:
         assert signal.data.dtype == TorchSigComplexDataType
 
 
-def test_clock_drift_defaults_to_linear_drift_and_random_phase() -> None:
+def test_clock_drift_defaults_to_linear_drift_and_zero_phase() -> None:
     transform = ClockDrift(seed=42)
 
     assert transform.drift_ppm == (-10, 10)
     assert transform.drift_sampling == "linear"
-    assert transform.initial_phase == (0.0, 1.0)
+    assert transform.initial_phase == (0.0, 0.0)
     assert transform.drift_model == "linear"
     assert transform.filtered_noise_alpha == 0.99
+    assert transform.boundary_mode == "edge"
     assert -10 <= transform.drift_ppm_distribution() <= 10
     assert 0 <= transform.initial_phase_distribution() < 1
 
@@ -530,6 +531,19 @@ def test_clock_drift_defaults_to_linear_drift_and_random_phase() -> None:
         ({"initial_phase": (1.0, 1.0)}, "values below 1"),
         ({"drift_model": "invalid"}, "drift_model"),
         ({"filtered_noise_alpha": 1.0}, "filtered_noise_alpha"),
+        ({"boundary_mode": "invalid"}, "boundary_mode"),
+        (
+            {"drift_rate_ppm_per_second": (1.0, 2.0)},
+            "sample_rate must be finite and positive",
+        ),
+        (
+            {
+                "drift_model": "random_walk",
+                "drift_rate_ppm_per_second": (1.0, 2.0),
+                "sample_rate": 1.0,
+            },
+            "requires drift_model='linear'",
+        ),
     ],
 )
 def test_clock_drift_rejects_invalid_initialization(kwargs, match) -> None:
@@ -592,11 +606,12 @@ def test_ClockJitter(signal: Signal, params: dict, is_error: bool) -> None:
         assert signal.data.dtype == TorchSigComplexDataType
 
 
-def test_clock_jitter_defaults_randomize_initial_phase() -> None:
+def test_clock_jitter_defaults_to_zero_initial_phase() -> None:
     transform = ClockJitter(seed=42)
 
-    assert transform.initial_phase == (0.0, 1.0)
-    assert 0 <= transform.initial_phase_distribution() < 1
+    assert transform.initial_phase == (0.0, 0.0)
+    assert transform.initial_phase_distribution() == 0.0
+    assert transform.boundary_mode == "edge"
 
 
 @pytest.mark.parametrize(
@@ -610,6 +625,11 @@ def test_clock_jitter_defaults_randomize_initial_phase() -> None:
 def test_clock_jitter_rejects_invalid_initial_phase(initial_phase, match) -> None:
     with pytest.raises(ValueError, match=match):
         ClockJitter(initial_phase=initial_phase)
+
+
+def test_clock_jitter_rejects_invalid_boundary_mode() -> None:
+    with pytest.raises(ValueError, match="boundary_mode"):
+        ClockJitter(boundary_mode="invalid")
 
 
 @pytest.mark.parametrize(
