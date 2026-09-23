@@ -33,6 +33,7 @@ CLASS_FAMILY_DICT: Final[dict[str, str]] = {
     "16gfsk": "fsk",
     "16msk": "fsk",
     "16gmsk": "fsk",
+    "fhss": "fhss",
     "bpsk": "psk",
     "qpsk": "psk",
     "8psk": "psk",
@@ -100,6 +101,7 @@ class TorchSigSignalLists:
         family_dict: Dictionary containing all signal types and their associated signal family.
         family_list: List of all signal families.
         fsk_signals: Frequency shift keying and FSK-related signals.
+        fhss_signals: Frequency-hopping spread-spectrum signals.
         ofdm_signals: Orthogonal frequency division multiplexing signals.
         constellation_signals: Linearly modulated constellation-based signals.
         am_signals: Amplitude modulation-based signals.
@@ -123,6 +125,7 @@ class TorchSigSignalLists:
     family_list: ClassVar[list[str]] = FAMILY_SHARED_LIST
 
     fsk_signals: list[str] = field(default_factory=list)
+    fhss_signals: list[str] = field(default_factory=list)
     ofdm_signals: list[str] = field(default_factory=list)
     constellation_signals: list[str] = field(default_factory=list)
     am_signals: list[str] = field(default_factory=list)
@@ -159,6 +162,8 @@ class TorchSigSignalLists:
         for name in self.all_signals:
             if check_signal_class(name, self.fsk_names):
                 self.fsk_signals.append(name)
+            elif name == "fhss":
+                self.fhss_signals.append(name)
             elif check_signal_class(name, self.ofdm_names):
                 self.ofdm_signals.append(name)
             elif check_signal_class(name, self.constellation_names):
