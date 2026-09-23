@@ -1,0 +1,27 @@
+Title: Correct sampling-clock offset and jitter semantics
+
+Target branch: 3.0.0-dev
+
+Summary
+
+This MR gives the existing NumPy and Numba sampling-clock engines one explicit
+contract: drift_ppm is a fixed rate offset, while jitter_ppm independently
+perturbs each sampling instant and does not accumulate.
+
+Changes
+
+- Replace accumulated random drift with a signed constant position increment.
+- Scale jitter by the polyphase up-rate so PPM is measured in input periods.
+- Track nominal sampling position independently from current-sample jitter.
+- Clamp jittered reads to valid padded-signal boundaries.
+- Use equivalent seeded random streams in the NumPy and Numba paths.
+- Add small behavioral, reproducibility, and parity tests.
+
+Verification
+
+pytest -q tests/utils/test_sampling_clock_models.py
+
+Stack
+
+This is the first replacement MR for 165-clock-resampler-foundation and should
+merge directly into 3.0.0-dev.
