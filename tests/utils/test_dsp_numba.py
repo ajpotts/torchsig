@@ -14,6 +14,7 @@ from torchsig.transforms import functional as F
 from torchsig.utils.dsp import (
     TorchSigRealDataType,
     _sampling_clock_drift_trajectory,
+    _sampling_clock_nominal_positions,
     prototype_polyphase_filter,
     sampling_clock_impairments,
 )
@@ -91,6 +92,32 @@ def test_clock_drift_one_sample_excess_never_returns_empty(drift_ppm):
 
     assert out.shape == x.shape
     assert out.dtype == np.complex64
+
+
+@pytest.mark.parametrize(
+    ("boundary_mode", "expected"),
+    [
+        ("zeros", [1.0, 2.0, 0.0, 0.0, 0.0]),
+        ("edge", [1.0, 2.0, 2.0, 2.0, 2.0]),
+        ("wrap", [1.0, 2.0, 1.0, 2.0, 1.0]),
+    ],
+)
+def test_sampling_clock_boundary_modes_preserve_dtype(boundary_mode, expected):
+    data = np.array([1.0, 2.0], dtype=np.complex64)
+
+    out = F._restore_sampling_clock_length(data, 5, boundary_mode)
+
+    np.testing.assert_array_equal(out, np.asarray(expected, dtype=np.complex64))
+    assert out.dtype == np.complex64
+
+
+def test_sampling_clock_raise_boundary_mode_reports_exhaustion():
+    with pytest.raises(ValueError, match="beyond the input boundary"):
+        F._restore_sampling_clock_length(
+            np.ones(2, dtype=np.complex64),
+            3,
+            "raise",
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -324,6 +351,26 @@ def test_sampling_clock_implementations_match_with_drift_models(
     np.testing.assert_allclose(actual, reference, rtol=1e-6, atol=1e-6)
 
 
+def test_sampling_clock_implementations_match_with_physical_drift_rate():
+    kwargs = {
+        "h": np.array([1.0, 0.5, -0.25, 0.125], dtype=np.float32),
+        "x": np.arange(64, dtype=np.float32).astype(np.complex64),
+        "uprate": 4,
+        "drate": 4.0,
+        "jitter_ppm": 1_000.0,
+        "drift_ppm": 0.0,
+        "drift_model": "linear",
+        "initial_drift_ppm": 5.0,
+        "drift_rate_ppm_per_second": 2_000.0,
+        "sample_rate": 64.0,
+    }
+
+    reference = sampling_clock_impairments(rng=np.random.default_rng(123), **kwargs)
+    actual = sampling_clock_impairments_numba_wrapper(rng=np.random.default_rng(123), **kwargs)
+
+    np.testing.assert_allclose(actual, reference, rtol=1e-6, atol=1e-6)
+
+
 def test_linear_drift_trajectory_ramps_to_endpoint_and_holds():
     trajectory = _sampling_clock_drift_trajectory(
         num_samples=7,
@@ -335,6 +382,77 @@ def test_linear_drift_trajectory_ramps_to_endpoint_and_holds():
     )
 
     np.testing.assert_allclose(trajectory, [0.0, 5.0, 10.0, 15.0, 20.0, 20.0, 20.0])
+
+
+def test_linear_drift_trajectory_supports_physical_rate():
+    trajectory = _sampling_clock_drift_trajectory(
+        num_samples=4,
+        reference_samples=4,
+        drift_ppm=999.0,
+        drift_model="linear",
+        filtered_noise_alpha=0.99,
+        rng=np.random.default_rng(1),
+        initial_drift_ppm=1.0,
+        drift_rate_ppm_per_second=10.0,
+        sample_rate=2.0,
+    )
+
+    np.testing.assert_allclose(trajectory, [1.0, 6.0, 11.0, 16.0])
+
+
+def test_capture_normalized_linear_positions_use_closed_form_integration():
+    trajectory = _sampling_clock_drift_trajectory(
+        num_samples=5,
+        reference_samples=3,
+        drift_ppm=2_000_000.0,
+        drift_model="linear",
+        filtered_noise_alpha=0.99,
+        rng=np.random.default_rng(1),
+    )
+
+    positions = _sampling_clock_nominal_positions(
+        num_samples=5,
+        initial_position=5.0,
+        drate=1.0,
+        drift_trajectory=trajectory,
+        drift_model="linear",
+        reference_samples=3,
+        drift_ppm=2_000_000.0,
+        initial_drift_ppm=0.0,
+        drift_rate_ppm_per_second=None,
+        sample_rate=None,
+    )
+
+    np.testing.assert_array_equal(positions, [5.0, 6.0, 8.0, 11.0, 14.0])
+
+
+def test_physical_linear_positions_use_closed_form_quadratic():
+    trajectory = _sampling_clock_drift_trajectory(
+        num_samples=4,
+        reference_samples=4,
+        drift_ppm=0.0,
+        drift_model="linear",
+        filtered_noise_alpha=0.99,
+        rng=np.random.default_rng(1),
+        initial_drift_ppm=1_000_000.0,
+        drift_rate_ppm_per_second=2_000_000.0,
+        sample_rate=2.0,
+    )
+
+    positions = _sampling_clock_nominal_positions(
+        num_samples=4,
+        initial_position=7.0,
+        drate=2.0,
+        drift_trajectory=trajectory,
+        drift_model="linear",
+        reference_samples=4,
+        drift_ppm=0.0,
+        initial_drift_ppm=1_000_000.0,
+        drift_rate_ppm_per_second=2_000_000.0,
+        sample_rate=2.0,
+    )
+
+    np.testing.assert_array_equal(positions, [7.0, 11.0, 17.0, 25.0])
 
 
 @pytest.mark.parametrize("drift_model", ["random_walk", "filtered_noise"])
@@ -371,11 +489,11 @@ def test_sampling_clock_implementations_match_with_initial_phase():
     actual = sampling_clock_impairments_numba_wrapper(rng=np.random.default_rng(123), **kwargs)
 
     np.testing.assert_allclose(actual, reference, rtol=1e-6, atol=1e-6)
-    legacy = sampling_clock_impairments(
+    zero_phase = sampling_clock_impairments(
         **{**kwargs, "initial_phase": 0.0},
         rng=np.random.default_rng(123),
     )
-    assert not np.array_equal(reference, legacy)
+    assert not np.array_equal(reference, zero_phase)
 
 
 @pytest.mark.parametrize(
@@ -393,6 +511,18 @@ def test_sampling_clock_implementations_match_with_initial_phase():
         ({"initial_phase": np.nan}, "initial_phase"),
         ({"drift_model": "invalid"}, "drift_model"),
         ({"filtered_noise_alpha": 1.0}, "filtered_noise_alpha"),
+        (
+            {"drift_rate_ppm_per_second": 1.0},
+            "sample_rate must be finite and positive",
+        ),
+        (
+            {
+                "drift_model": "random_walk",
+                "drift_rate_ppm_per_second": 1.0,
+                "sample_rate": 1.0,
+            },
+            "requires drift_model='linear'",
+        ),
     ],
 )
 @pytest.mark.parametrize(
@@ -466,9 +596,10 @@ def test_sampling_clock_interpolates_across_final_phase_with_input_carry():
     assert out[0] == pytest.approx(12.0)
 
 
-def test_zero_clock_impairment_is_aligned_for_a_passband_tone():
+@pytest.mark.parametrize("frequency", [0.05, 0.25, 0.35])
+def test_zero_clock_impairment_is_aligned_for_a_passband_tone(frequency):
     sample_indices = np.arange(4096)
-    tone = np.exp(2j * np.pi * 0.05 * sample_indices).astype(np.complex64)
+    tone = np.exp(2j * np.pi * frequency * sample_indices).astype(np.complex64)
 
     out = F.clock_jitter(
         tone,
@@ -549,13 +680,12 @@ def test_sampling_clock_numba_kernel_raises_before_output_overflow():
             np.ones(4, dtype=np.float32),
             np.zeros(4, dtype=np.float32),
             1,
-            np.zeros(1, dtype=np.float64),
+            np.zeros(2, dtype=np.float64),
             np.array([[1.0]], dtype=np.float32),
             1,
             5,
             4,
-            np.ones(1, dtype=np.float64),
-            1.0,
+            np.array([1.0, 2.0], dtype=np.float64),
             1,
         )
 
@@ -668,8 +798,7 @@ def test_sampling_clock_impairments_numba_py_func_handles_empty_output():
         1,
         1,
         0,
-        1.0,
-        1.0,
+        np.array([1.0], dtype=np.float64),
         1,
     )
 

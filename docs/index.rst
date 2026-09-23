@@ -19,6 +19,7 @@ TorchSig
     datasets
     signals
     transforms
+    sampling_clock_impairments
     metadata_transforms
     metadata_debugging
     hdf5_readers

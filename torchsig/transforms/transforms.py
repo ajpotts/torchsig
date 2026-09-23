@@ -645,10 +645,14 @@ class ClockDrift(SignalTransform):
     def __init__(
         self,
         drift_ppm: tuple[float, float] = (-10, 10),
-        initial_phase: tuple[float, float] = (0.0, 1.0),
+        initial_phase: tuple[float, float] = (0.0, 0.0),
         drift_sampling: Literal["linear", "log10"] = "linear",
         drift_model: Literal["linear", "random_walk", "filtered_noise"] = "linear",
         filtered_noise_alpha: float = 0.99,
+        initial_drift_ppm: tuple[float, float] = (0.0, 0.0),
+        drift_rate_ppm_per_second: tuple[float, float] | None = None,
+        sample_rate: float | None = None,
+        boundary_mode: Literal["zeros", "edge", "wrap", "raise"] = "edge",
         **kwargs,
     ):
         """Initialize the ClockDrift transform.
@@ -657,12 +661,19 @@ class ClockDrift(SignalTransform):
             drift_ppm: Range of signed sampling-clock offsets in PPM.
                 Defaults to (-10, 10).
             initial_phase: Range of initial sampling phases in input-sample
-                periods. Defaults to (0, 1).
+                periods. Defaults to (0, 0).
             drift_sampling: Distribution used for the PPM range. Signed ranges
                 require ``"linear"``. Defaults to ``"linear"``.
             drift_model: Time-varying model. Defaults to ``"linear"``.
             filtered_noise_alpha: Correlation coefficient for filtered noise.
                 Defaults to 0.99.
+            initial_drift_ppm: Range of initial sampling-rate errors in PPM.
+                Defaults to (0, 0).
+            drift_rate_ppm_per_second: Optional range of physical linear drift
+                rates. Requires ``sample_rate``.
+            sample_rate: Input sample rate in samples per second.
+            boundary_mode: Policy when drift exhausts the input. Defaults to
+                ``"edge"``.
             **kwargs: Additional keyword arguments passed to the parent class.
         """
         super().__init__(required_metadata=[], data_dtype=TorchSigComplexDataType, **kwargs)
@@ -671,6 +682,10 @@ class ClockDrift(SignalTransform):
         self.drift_sampling = drift_sampling
         self.drift_model = drift_model
         self.filtered_noise_alpha = filtered_noise_alpha
+        self.initial_drift_ppm = initial_drift_ppm
+        self.drift_rate_ppm_per_second = drift_rate_ppm_per_second
+        self.sample_rate = sample_rate
+        self.boundary_mode = boundary_mode
         if drift_sampling not in {"linear", "log10"}:
             raise ValueError("drift_sampling must be 'linear' or 'log10'")
         if drift_model not in {"linear", "random_walk", "filtered_noise"}:
@@ -679,12 +694,25 @@ class ClockDrift(SignalTransform):
             raise ValueError("log10 drift_sampling requires positive drift_ppm bounds")
         if not np.isfinite(filtered_noise_alpha) or not 0.0 <= filtered_noise_alpha < 1.0:
             raise ValueError("filtered_noise_alpha must be finite and in the interval [0, 1)")
+        if boundary_mode not in {"zeros", "edge", "wrap", "raise"}:
+            raise ValueError("boundary_mode must be 'zeros', 'edge', 'wrap', or 'raise'")
+        if drift_rate_ppm_per_second is not None:
+            if drift_model != "linear":
+                raise ValueError("drift_rate_ppm_per_second requires drift_model='linear'")
+            if sample_rate is None or not np.isfinite(sample_rate) or sample_rate <= 0.0:
+                raise ValueError("sample_rate must be finite and positive when drift rate is used")
         if not 0.0 <= initial_phase[0] <= initial_phase[1] <= 1.0:
             raise ValueError("initial_phase bounds must satisfy 0 <= min <= max <= 1")
         if initial_phase[0] == 1.0:
             raise ValueError("initial_phase must contain values below 1")
         self.drift_ppm_distribution = self.get_distribution(self.drift_ppm, drift_sampling)
         self.initial_phase_distribution = self.get_distribution(self.initial_phase)
+        self.initial_drift_ppm_distribution = self.get_distribution(self.initial_drift_ppm)
+        self.drift_rate_ppm_per_second_distribution = (
+            None
+            if self.drift_rate_ppm_per_second is None
+            else self.get_distribution(self.drift_rate_ppm_per_second)
+        )
 
     def __apply__(self, signal: Signal) -> Signal:
         """Apply clock drift to the signal.
@@ -697,6 +725,12 @@ class ClockDrift(SignalTransform):
         """
         drift_ppm = self.drift_ppm_distribution()
         initial_phase = self.initial_phase_distribution()
+        initial_drift_ppm = self.initial_drift_ppm_distribution()
+        drift_rate_ppm_per_second = (
+            None
+            if self.drift_rate_ppm_per_second_distribution is None
+            else self.drift_rate_ppm_per_second_distribution()
+        )
 
         signal.data = F.clock_drift(
             data=signal.data,
@@ -705,6 +739,10 @@ class ClockDrift(SignalTransform):
             initial_phase=initial_phase,
             drift_model=self.drift_model,
             filtered_noise_alpha=self.filtered_noise_alpha,
+            initial_drift_ppm=initial_drift_ppm,
+            drift_rate_ppm_per_second=drift_rate_ppm_per_second,
+            sample_rate=self.sample_rate,
+            boundary_mode=self.boundary_mode,
         )
 
         return signal
@@ -716,7 +754,8 @@ class ClockJitter(SignalTransform):
     def __init__(
         self,
         jitter_ppm: tuple[float, float] = (1, 10),
-        initial_phase: tuple[float, float] = (0.0, 1.0),
+        initial_phase: tuple[float, float] = (0.0, 0.0),
+        boundary_mode: Literal["zeros", "edge", "wrap", "raise"] = "edge",
         **kwargs,
     ):
         """Initialize the ClockJitter transform.
@@ -725,16 +764,21 @@ class ClockJitter(SignalTransform):
             jitter_ppm: Range of nonnegative RMS timing jitter in PPM of one
                 input-sample period. Default (1, 10).
             initial_phase: Range of initial sampling phases in input-sample
-                periods. Defaults to (0, 1).
+                periods. Defaults to (0, 0).
+            boundary_mode: Policy when resampling exhausts the input. Defaults
+                to ``"edge"``.
             **kwargs: Additional keyword arguments passed to the parent class.
         """
         super().__init__(required_metadata=[], data_dtype=TorchSigComplexDataType, **kwargs)
         self.jitter_ppm = jitter_ppm
         self.initial_phase = initial_phase
+        self.boundary_mode = boundary_mode
         if not 0.0 <= initial_phase[0] <= initial_phase[1] <= 1.0:
             raise ValueError("initial_phase bounds must satisfy 0 <= min <= max <= 1")
         if initial_phase[0] == 1.0:
             raise ValueError("initial_phase must contain values below 1")
+        if boundary_mode not in {"zeros", "edge", "wrap", "raise"}:
+            raise ValueError("boundary_mode must be 'zeros', 'edge', 'wrap', or 'raise'")
         self.jitter_ppm_distribution = self.get_distribution(self.jitter_ppm, "log10")
         self.initial_phase_distribution = self.get_distribution(self.initial_phase)
 
@@ -755,6 +799,7 @@ class ClockJitter(SignalTransform):
             jitter_ppm=jitter_ppm,
             rng=self.random_generator,
             initial_phase=initial_phase,
+            boundary_mode=self.boundary_mode,
         )
 
         return signal
