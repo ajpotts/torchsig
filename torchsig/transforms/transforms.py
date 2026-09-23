@@ -640,7 +640,7 @@ class ChannelSwap(SignalTransform):
 
 
 class ClockDrift(SignalTransform):
-    """Apply a sampling-clock offset or selectable time-varying drift model."""
+    """Apply a selectable time-varying sampling-clock drift model."""
 
     def __init__(
         self,
@@ -713,17 +713,30 @@ class ClockDrift(SignalTransform):
 class ClockJitter(SignalTransform):
     """Apply independent Gaussian error to each sampling instant."""
 
-    def __init__(self, jitter_ppm: tuple[float, float] = (1, 10), **kwargs):
+    def __init__(
+        self,
+        jitter_ppm: tuple[float, float] = (1, 10),
+        initial_phase: tuple[float, float] = (0.0, 1.0),
+        **kwargs,
+    ):
         """Initialize the ClockJitter transform.
 
         Args:
             jitter_ppm: Range of nonnegative RMS timing jitter in PPM of one
                 input-sample period. Default (1, 10).
+            initial_phase: Range of initial sampling phases in input-sample
+                periods. Defaults to (0, 1).
             **kwargs: Additional keyword arguments passed to the parent class.
         """
         super().__init__(required_metadata=[], data_dtype=TorchSigComplexDataType, **kwargs)
         self.jitter_ppm = jitter_ppm
+        self.initial_phase = initial_phase
+        if not 0.0 <= initial_phase[0] <= initial_phase[1] <= 1.0:
+            raise ValueError("initial_phase bounds must satisfy 0 <= min <= max <= 1")
+        if initial_phase[0] == 1.0:
+            raise ValueError("initial_phase must contain values below 1")
         self.jitter_ppm_distribution = self.get_distribution(self.jitter_ppm, "log10")
+        self.initial_phase_distribution = self.get_distribution(self.initial_phase)
 
     def __apply__(self, signal: Signal) -> Signal:
         """Apply clock jitter to the signal.
@@ -735,8 +748,14 @@ class ClockJitter(SignalTransform):
             Signal with clock jitter applied.
         """
         jitter_ppm = self.jitter_ppm_distribution()
+        initial_phase = self.initial_phase_distribution()
 
-        signal.data = F.clock_jitter(data=signal.data, jitter_ppm=jitter_ppm, rng=self.random_generator)
+        signal.data = F.clock_jitter(
+            data=signal.data,
+            jitter_ppm=jitter_ppm,
+            rng=self.random_generator,
+            initial_phase=initial_phase,
+        )
 
         return signal
 

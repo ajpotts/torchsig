@@ -859,7 +859,7 @@ def sampling_clock_impairments(
     drift_model: DriftModel = "linear",
     filtered_noise_alpha: float = 0.99,
 ) -> np.ndarray:
-    """Apply sampling-clock offset and jitter using polyphase filtering.
+    """Apply sampling-clock drift and jitter using polyphase filtering.
 
     ``"linear"`` ramps from zero to ``drift_ppm`` across the input capture.
     ``"random_walk"`` treats ``abs(drift_ppm)`` as the RMS endpoint scale,
@@ -878,8 +878,8 @@ def sampling_clock_impairments(
         drate: Nominal position increment in polyphase units.
         jitter_ppm: Nonnegative RMS timing jitter in PPM of one input-sample
             period.
-        drift_ppm: Signed fractional offset applied to the nominal position
-            increment, in PPM.
+        drift_ppm: Linear endpoint or stochastic RMS scale for the sampling-
+            rate error, in PPM.
         rng: Random number generator. A new generator is used when omitted.
         initial_phase: Initial sampling phase in input-sample periods. Must be
             in the half-open interval ``[0, 1)``. Defaults to 0.
@@ -925,9 +925,9 @@ def sampling_clock_impairments(
     max_input_idx = len(input_padded) - taps_per_phase
     max_sample_position = max_input_idx * uprate + (uprate - 1)
 
-    # Add the receiver's initial fractional sampling phase to the legacy
-    # one-commutator-step filter alignment.
-    nominal_position = uprate / drate + uprate * initial_phase
+    # Begin at the prototype's group delay so zero impairment is aligned with
+    # the input. The user phase is measured in input-sample periods.
+    nominal_position = (len(h) - 1) / 2 + uprate * initial_phase
     jitter_std = uprate * jitter_ppm * 1e-6
 
     estimated_output_size = int(np.ceil(len(input_padded) * uprate / drate)) + 1
@@ -969,20 +969,34 @@ def sampling_clock_impairments(
         )
         input_idx = int(input_idx)
         phase = int(fractional_position)
-
-        if input_idx > max_input_idx:
-            break
+        subphase = fractional_position - phase
 
         delay_slice = input_padded[
             input_idx : input_idx + taps_per_phase
         ]
 
         h_phase = h_pfb[phase][:taps_per_phase]
+        phase_output = np.sum(h_phase * delay_slice[::-1])
 
-        # The filter taps are real, so applying them to the complex samples
-        # directly is equivalent to filtering the real and imaginary parts
-        # separately.
-        pfb_out = np.sum(h_phase * delay_slice[::-1])
+        # Interpolate between neighboring branches instead of discarding the
+        # sub-branch remainder. Wrapping from the final branch advances the
+        # input window by one sample.
+        next_phase = phase + 1
+        next_input_idx = input_idx
+        if next_phase == uprate:
+            next_phase = 0
+            next_input_idx += 1
+
+        if subphase > 0.0 and next_input_idx <= max_input_idx:
+            next_delay_slice = input_padded[
+                next_input_idx : next_input_idx + taps_per_phase
+            ]
+            next_output = np.sum(
+                h_pfb[next_phase][:taps_per_phase] * next_delay_slice[::-1]
+            )
+            pfb_out = (1.0 - subphase) * phase_output + subphase * next_output
+        else:
+            pfb_out = phase_output
 
         if output_idx >= len(output_samples):
             if len(output_samples) >= max_output_samples:
@@ -994,7 +1008,12 @@ def sampling_clock_impairments(
                 2 * len(output_samples),
                 max_output_samples,
             )
-            output_samples.resize(new_size, refcheck=False)
+            expanded_output = np.zeros(
+                new_size,
+                dtype=TorchSigComplexDataType,
+            )
+            expanded_output[:output_idx] = output_samples[:output_idx]
+            output_samples = expanded_output
 
         output_samples[output_idx] = pfb_out
         output_idx += 1

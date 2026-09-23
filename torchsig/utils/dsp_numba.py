@@ -50,7 +50,7 @@ def sampling_clock_impairments_numba(
     initial_position,
     num_output_samples,
 ):
-    """Apply sampling-clock offset and jitter using polyphase filtering.
+    """Apply sampling-clock drift and jitter using polyphase filtering.
 
     The nominal clock is represented by one absolute position in polyphase
     units. Jitter perturbs only the current sampling position and does not
@@ -90,6 +90,7 @@ def sampling_clock_impairments_numba(
         input_idx = int(sample_position // uprate)
         phase_position = sample_position - input_idx * uprate
         phase = int(phase_position)
+        subphase = phase_position - phase
 
         acc_re = 0.0
         acc_im = 0.0
@@ -100,6 +101,24 @@ def sampling_clock_impairments_numba(
 
             acc_re += coefficient * input_padded_real[input_position]
             acc_im += coefficient * input_padded_imag[input_position]
+
+        next_phase = phase + 1
+        next_input_idx = input_idx
+        if next_phase == uprate:
+            next_phase = 0
+            next_input_idx += 1
+
+        if subphase > 0.0 and next_input_idx <= max_input_idx:
+            next_acc_re = 0.0
+            next_acc_im = 0.0
+            for tap_idx in range(taps_per_phase):
+                coefficient = h_pfb_reversed[next_phase, tap_idx]
+                input_position = next_input_idx + tap_idx
+                next_acc_re += coefficient * input_padded_real[input_position]
+                next_acc_im += coefficient * input_padded_imag[input_position]
+
+            acc_re = (1.0 - subphase) * acc_re + subphase * next_acc_re
+            acc_im = (1.0 - subphase) * acc_im + subphase * next_acc_im
 
         output_real[output_idx] = acc_re
         output_imag[output_idx] = acc_im
@@ -127,7 +146,7 @@ def sampling_clock_impairments_numba_wrapper(
     drift_model="linear",
     filtered_noise_alpha=0.99,
 ):
-    """Apply sampling-clock offset and jitter using the Numba implementation.
+    """Apply sampling-clock drift and jitter using the Numba implementation.
 
     ``"linear"`` ramps from zero to ``drift_ppm`` across the capture.
     ``"random_walk"`` and ``"filtered_noise"`` use ``abs(drift_ppm)`` as
@@ -167,9 +186,9 @@ def sampling_clock_impairments_numba_wrapper(
     padded_len = len(x) + 2 * taps_per_phase - 1
     max_input_idx = padded_len - taps_per_phase
 
-    # Add the receiver's initial fractional sampling phase to the legacy
-    # alignment used by the NumPy implementation.
-    initial_position = uprate / drate + uprate * initial_phase
+    # Begin at the prototype's group delay so zero impairment is aligned with
+    # the input. The user phase is measured in input-sample periods.
+    initial_position = (len(h) - 1) / 2 + uprate * initial_phase
 
     # Match the NumPy path's conservative capacity exactly so stochastic drift
     # and jitter consume the same seeded random stream in both implementations.

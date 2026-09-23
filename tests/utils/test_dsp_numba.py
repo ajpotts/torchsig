@@ -83,6 +83,16 @@ def test_clock_transforms_preserve_length(transform):
     assert np.all(np.isfinite(out))
 
 
+@pytest.mark.parametrize("drift_ppm", [5_615.0, 5_750.0, 5_860.0])
+def test_clock_drift_one_sample_excess_never_returns_empty(drift_ppm):
+    _, x = _filter_and_data(n=4096)
+
+    out = F.clock_drift(x, drift_ppm=drift_ppm, rng=np.random.default_rng(5))
+
+    assert out.shape == x.shape
+    assert out.dtype == np.complex64
+
+
 # --------------------------------------------------------------------------- #
 # digital_agc
 # --------------------------------------------------------------------------- #
@@ -428,7 +438,7 @@ def test_sampling_clock_jitter_cannot_select_negative_polyphase_branch():
     np.testing.assert_array_equal(actual, reference)
 
 
-def test_sampling_clock_preserves_legacy_initial_phase_alignment():
+def test_sampling_clock_starts_at_filter_group_delay():
     out = sampling_clock_impairments(
         h=np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32),
         x=np.array([1.0, 2.0], dtype=np.complex64),
@@ -438,7 +448,51 @@ def test_sampling_clock_preserves_legacy_initial_phase_alignment():
         drift_ppm=0.0,
     )
 
-    np.testing.assert_array_equal(out, np.array([8.0, 16.0, 0.0], dtype=np.complex64))
+    np.testing.assert_array_equal(out, np.array([10.0, 20.0, 0.0], dtype=np.complex64))
+
+
+def test_sampling_clock_interpolates_across_final_phase_with_input_carry():
+    out = sampling_clock_impairments(
+        h=np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32),
+        x=np.array([1.0, 2.0], dtype=np.complex64),
+        uprate=4,
+        drate=4.0,
+        jitter_ppm=0.0,
+        drift_ppm=0.0,
+        initial_phase=0.5,
+    )
+
+    # Halfway between phase 3 on x[0] (16) and phase 0 on x[1] (8).
+    assert out[0] == pytest.approx(12.0)
+
+
+def test_zero_clock_impairment_is_aligned_for_a_passband_tone():
+    sample_indices = np.arange(4096)
+    tone = np.exp(2j * np.pi * 0.05 * sample_indices).astype(np.complex64)
+
+    out = F.clock_jitter(
+        tone,
+        jitter_ppm=0.0,
+        initial_phase=0.0,
+        rng=np.random.default_rng(7),
+    )
+
+    np.testing.assert_allclose(out, tone, rtol=0.0, atol=2e-6)
+
+
+def test_low_ppm_jitter_is_not_quantized_and_tracks_requested_scale():
+    sample_indices = np.arange(4096)
+    tone = np.exp(2j * np.pi * 0.2 * sample_indices).astype(np.complex64)
+    baseline = F.clock_jitter(tone, jitter_ppm=0.0, rng=np.random.default_rng(7))
+    jitter_1_ppm = F.clock_jitter(tone, jitter_ppm=1.0, rng=np.random.default_rng(7))
+    jitter_10_ppm = F.clock_jitter(tone, jitter_ppm=10.0, rng=np.random.default_rng(7))
+    interior = slice(64, -64)
+
+    error_1_ppm = np.sqrt(np.mean(np.abs(jitter_1_ppm[interior] - baseline[interior]) ** 2))
+    error_10_ppm = np.sqrt(np.mean(np.abs(jitter_10_ppm[interior] - baseline[interior]) ** 2))
+
+    assert not np.array_equal(jitter_1_ppm, jitter_10_ppm)
+    assert error_10_ppm / error_1_ppm == pytest.approx(10.0, rel=0.02)
 
 
 @pytest.mark.parametrize("length", [0, 1])

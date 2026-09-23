@@ -586,9 +586,30 @@ def test_ClockJitter(signal: Signal, params: dict, is_error: bool) -> None:
         assert isinstance(T, ClockJitter)
         assert isinstance(T.random_generator, np.random.Generator)
         assert isinstance(T.jitter_ppm_distribution(), float)
+        assert isinstance(T.initial_phase_distribution(), float)
 
         assert len(signal.data) == len(signal_test.data)
         assert signal.data.dtype == TorchSigComplexDataType
+
+
+def test_clock_jitter_defaults_randomize_initial_phase() -> None:
+    transform = ClockJitter(seed=42)
+
+    assert transform.initial_phase == (0.0, 1.0)
+    assert 0 <= transform.initial_phase_distribution() < 1
+
+
+@pytest.mark.parametrize(
+    ("initial_phase", "match"),
+    [
+        ((-0.1, 0.5), "initial_phase bounds"),
+        ((0.5, 1.1), "initial_phase bounds"),
+        ((1.0, 1.0), "values below 1"),
+    ],
+)
+def test_clock_jitter_rejects_invalid_initial_phase(initial_phase, match) -> None:
+    with pytest.raises(ValueError, match=match):
+        ClockJitter(initial_phase=initial_phase)
 
 
 @pytest.mark.parametrize(
