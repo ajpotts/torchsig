@@ -5,6 +5,7 @@ from torchsig.signals.builders.am import AMSignalGenerator
 from torchsig.signals.builders.chirpss import ChirpSSSignalGenerator
 from torchsig.signals.builders.constellation import ConstellationSignalGenerator
 from torchsig.signals.builders.constellation_maps import all_symbol_maps
+from torchsig.signals.builders.fhss import FrequencyHoppingSignalGenerator
 from torchsig.signals.builders.fm import FMSignalGenerator
 from torchsig.signals.builders.fsk import FSKSignalGenerator
 from torchsig.signals.builders.lfm import LFMSignalGenerator
@@ -26,6 +27,13 @@ def test_exports_expected_public_symbols():
 def test_tone_generator_entry():
     assert signal_building.signal_generator_lookup_table["tone"] == (
         ToneSignalGenerator,
+        {},
+    )
+
+
+def test_fhss_generator_entry():
+    assert signal_building.signal_generator_lookup_table["fhss"] == (
+        FrequencyHoppingSignalGenerator,
         {},
     )
 
@@ -174,6 +182,7 @@ def test_fm_family_does_not_include_ofdm_generators_regression():
         ("8msk", "msk"),
         ("16gmsk", "msk"),
         ("tone", None),
+        ("fhss", None),
         ("chirpss", None),
     ],
 )

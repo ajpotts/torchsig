@@ -9,6 +9,7 @@ from torchsig.signals.builders.chirpss import ChirpSSSignalGenerator
 from torchsig.signals.builders.constellation import ConstellationSignalGenerator
 from torchsig.signals.builders.constellation_maps import all_symbol_maps
 from torchsig.signals.builders.dvb import DVBS2SignalGenerator
+from torchsig.signals.builders.fhss import FrequencyHoppingSignalGenerator
 from torchsig.signals.builders.fm import FMSignalGenerator
 from torchsig.signals.builders.fsk import FSKSignalGenerator
 from torchsig.signals.builders.lfm import LFMSignalGenerator
@@ -78,6 +79,7 @@ def _family_name(signal_name: str) -> str | None:
 
 # Initialize lookup table with signal generators
 _add_signal_generator("tone", ToneSignalGenerator, {})
+_add_signal_generator("fhss", FrequencyHoppingSignalGenerator, {})
 
 num_subcarrier_values = [64, 72, 128, 180, 256, 300, 512, 600, 900, 1024, 1200, 2048]
 for num_subcarriers in num_subcarrier_values:
