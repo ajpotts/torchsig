@@ -220,26 +220,44 @@ def channel_swap(data: np.ndarray) -> np.ndarray:
     return new_data.astype(TorchSigComplexDataType)
 
 
+def _restore_sampling_clock_length(data: np.ndarray, target_length: int) -> np.ndarray:
+    """Trim or tail-pad aligned sampling-clock output to the requested length."""
+    if len(data) >= target_length:
+        return data[:target_length]
+
+    return np.pad(
+        data,
+        (0, target_length - len(data)),
+        mode="constant",
+    )
+
+
 def clock_drift(
     data: np.ndarray,
     drift_ppm: float = 10,
     rng: np.random.Generator | None = None,
     initial_phase: float = 0.0,
+    drift_model: Literal["linear", "random_walk", "filtered_noise"] = "linear",
+    filtered_noise_alpha: float = 0.99,
 ) -> np.ndarray:
-    """Apply a fixed sampling-clock rate offset.
+    """Apply time-varying sampling-clock drift.
 
-    The offset changes the nominal resampling increment by a signed fractional
-    amount. It remains constant for the duration of this call.
+    ``"linear"`` ramps from zero to ``drift_ppm`` over the capture.
+    ``"random_walk"`` and
+    ``"filtered_noise"`` interpret ``abs(drift_ppm)`` as an RMS scale.
 
     Args:
         data: Complex valued IQ data samples.
-        drift_ppm: Signed sampling-clock rate offset in PPM. Default 10.
+        drift_ppm: Linear endpoint or stochastic RMS scale in PPM. Default 10.
         rng: Random number generator. Defaults to np.random.default_rng(seed=None).
         initial_phase: Initial sampling phase in input-sample periods. Must be
             in the half-open interval ``[0, 1)``. Defaults to 0.
+        drift_model: Time-varying drift model. Defaults to ``"linear"``.
+        filtered_noise_alpha: Correlation coefficient for filtered noise.
+            Defaults to 0.99.
 
     Returns:
-        Data with LO drift applied.
+        Data with sampling-clock drift applied.
     """
     rng = rng or np.random.default_rng()
 
@@ -248,7 +266,7 @@ def clock_drift(
 
     # define up/down rates
     uprate = 5000
-    downrate = copy(uprate)
+    downrate = uprate
 
     # build the prototype filter
     pfb_prototype_filter = prototype_polyphase_filter(num_branches=uprate)
@@ -266,29 +284,11 @@ def clock_drift(
         drift_ppm=drift_ppm,
         rng=rng,
         initial_phase=initial_phase,
+        drift_model=drift_model,
+        filtered_noise_alpha=filtered_noise_alpha,
     )
 
-    # discard extra samples from resampling process, or zero-pad if too short
-    num_samples_to_discard = len(data_with_drift) - len(data)
-
-    if num_samples_to_discard > 0:
-        if is_even(num_samples_to_discard):
-            slice_front = num_samples_to_discard // 2
-            slice_back = num_samples_to_discard // 2
-        else:
-            slice_front = (num_samples_to_discard + 1) // 2
-            slice_back = num_samples_to_discard // 2
-        data_with_drift = data_with_drift[slice_front:-slice_back]
-    else:
-        # calculate number of zeros to pad
-        num_samples_to_pad = len(data) - len(data_with_drift)
-        if is_even(num_samples_to_pad):
-            pad_front = num_samples_to_pad // 2
-            pad_back = num_samples_to_pad // 2
-        else:
-            pad_front = (num_samples_to_pad + 1) // 2
-            pad_back = num_samples_to_pad // 2
-        data_with_drift = np.concatenate((np.zeros(pad_front), data_with_drift, np.zeros(pad_back)))
+    data_with_drift = _restore_sampling_clock_length(data_with_drift, len(data))
 
     # ensure data type
     return data_with_drift.astype(TorchSigComplexDataType)
@@ -298,6 +298,7 @@ def clock_jitter(
     data: np.ndarray,
     jitter_ppm: float = 10,
     rng: np.random.Generator | None = None,
+    initial_phase: float = 0.0,
 ) -> np.ndarray:
     """Apply independent Gaussian sampling-time jitter.
 
@@ -309,6 +310,8 @@ def clock_jitter(
         jitter_ppm: Nonnegative RMS timing displacement in PPM of one input-
             sample period. Default 10.
         rng: Random number generator. Defaults to np.random.default_rng(seed=None).
+        initial_phase: Initial sampling phase in input-sample periods. Must be
+            in the half-open interval ``[0, 1)``. Defaults to 0.
 
     Returns:
         Data with sampling-time jitter applied.
@@ -320,7 +323,7 @@ def clock_jitter(
 
     # define up/down rates
     uprate = 5000
-    downrate = copy(uprate)
+    downrate = uprate
 
     # build the prototype filter
     pfb_prototype_filter = prototype_polyphase_filter(num_branches=uprate)
@@ -337,29 +340,10 @@ def clock_jitter(
         jitter_ppm=jitter_ppm,
         drift_ppm=0,
         rng=rng,
+        initial_phase=initial_phase,
     )
 
-    # discard extra samples from resampling process, or zero-pad if too short
-    num_samples_to_discard = len(data_with_jitter) - len(data)
-
-    if num_samples_to_discard > 0:
-        if is_even(num_samples_to_discard):
-            slice_front = num_samples_to_discard // 2
-            slice_back = num_samples_to_discard // 2
-        else:
-            slice_front = (num_samples_to_discard + 1) // 2
-            slice_back = num_samples_to_discard // 2
-        data_with_jitter = data_with_jitter[slice_front:-slice_back]
-    else:
-        # calculate number of zeros to pad
-        num_samples_to_pad = len(data) - len(data_with_jitter)
-        if is_even(num_samples_to_pad):
-            pad_front = num_samples_to_pad // 2
-            pad_back = num_samples_to_pad // 2
-        else:
-            pad_front = (num_samples_to_pad + 1) // 2
-            pad_back = num_samples_to_pad // 2
-        data_with_jitter = np.concatenate((np.zeros(pad_front), data_with_jitter, np.zeros(pad_back)))
+    data_with_jitter = _restore_sampling_clock_length(data_with_jitter, len(data))
 
     # ensure data type
     return data_with_jitter.astype(TorchSigComplexDataType)

@@ -3,8 +3,8 @@
 Currently provides:
   * ``sampling_clock_impairments_numba_wrapper`` - drop-in replacement for
     ``torchsig.utils.dsp.sampling_clock_impairments`` (clock_drift / clock_jitter).
-    Uses the same fixed-rate-offset and independent-timing-jitter model as the
-    NumPy reference.
+    Uses the same fixed-offset, time-varying drift, and independent-jitter
+    models as the NumPy reference.
   * ``digital_agc_numba`` - the sequential AGC sample loop used by ``digital_agc``.
 
 Importing this module requires numba; callers should fall back to the pure-NumPy
@@ -14,6 +14,8 @@ implementations if the import fails.
 import numpy as np
 from numba import jit
 from numba.types import complex64, float32
+
+from torchsig.utils.dsp import _sampling_clock_drift_trajectory
 
 _OUTPUT_CAPACITY_ERROR = "sampling clock output capacity exhausted"
 _MAX_OUTPUT_CAPACITY_MULTIPLIER = 16
@@ -44,11 +46,11 @@ def sampling_clock_impairments_numba(
     taps_per_phase,
     padded_len,
     max_input_idx,
-    nominal_position_increment,
+    position_increments,
     initial_position,
     num_output_samples,
 ):
-    """Apply sampling-clock offset and jitter using polyphase filtering.
+    """Apply sampling-clock drift and jitter using polyphase filtering.
 
     The nominal clock is represented by one absolute position in polyphase
     units. Jitter perturbs only the current sampling position and does not
@@ -88,6 +90,7 @@ def sampling_clock_impairments_numba(
         input_idx = int(sample_position // uprate)
         phase_position = sample_position - input_idx * uprate
         phase = int(phase_position)
+        subphase = phase_position - phase
 
         acc_re = 0.0
         acc_im = 0.0
@@ -99,11 +102,29 @@ def sampling_clock_impairments_numba(
             acc_re += coefficient * input_padded_real[input_position]
             acc_im += coefficient * input_padded_imag[input_position]
 
+        next_phase = phase + 1
+        next_input_idx = input_idx
+        if next_phase == uprate:
+            next_phase = 0
+            next_input_idx += 1
+
+        if subphase > 0.0 and next_input_idx <= max_input_idx:
+            next_acc_re = 0.0
+            next_acc_im = 0.0
+            for tap_idx in range(taps_per_phase):
+                coefficient = h_pfb_reversed[next_phase, tap_idx]
+                input_position = next_input_idx + tap_idx
+                next_acc_re += coefficient * input_padded_real[input_position]
+                next_acc_im += coefficient * input_padded_imag[input_position]
+
+            acc_re = (1.0 - subphase) * acc_re + subphase * next_acc_re
+            acc_im = (1.0 - subphase) * acc_im + subphase * next_acc_im
+
         output_real[output_idx] = acc_re
         output_imag[output_idx] = acc_im
         output_idx += 1
 
-        nominal_position += nominal_position_increment
+        nominal_position += position_increments[output_idx - 1]
 
     result = np.zeros(output_idx, dtype=np.complex64)
 
@@ -122,12 +143,14 @@ def sampling_clock_impairments_numba_wrapper(
     drift_ppm,
     rng=None,
     initial_phase=0.0,
+    drift_model="linear",
+    filtered_noise_alpha=0.99,
 ):
-    """Apply sampling-clock offset and jitter using the Numba implementation.
+    """Apply sampling-clock drift and jitter using the Numba implementation.
 
-    ``drift_ppm`` is a signed fractional offset applied to the nominal
-    input-position increment. Positive values advance through the input faster
-    and generally produce fewer output samples.
+    ``"linear"`` ramps from zero to ``drift_ppm`` across the capture.
+    ``"random_walk"`` and ``"filtered_noise"`` use ``abs(drift_ppm)`` as
+    their RMS scale.
 
     ``jitter_ppm`` is the standard deviation of independent sampling-time
     displacement, expressed in millionths of one input-sample period. Jitter
@@ -141,12 +164,12 @@ def sampling_clock_impairments_numba_wrapper(
         raise ValueError("jitter_ppm must be finite and nonnegative")
     if not np.isfinite(drift_ppm):
         raise ValueError("drift_ppm must be finite")
+    if drift_model not in {"linear", "random_walk", "filtered_noise"}:
+        raise ValueError("drift_model must be 'linear', 'random_walk', or 'filtered_noise'")
+    if not np.isfinite(filtered_noise_alpha) or not 0.0 <= filtered_noise_alpha < 1.0:
+        raise ValueError("filtered_noise_alpha must be finite and in the interval [0, 1)")
     if not np.isfinite(initial_phase) or not 0.0 <= initial_phase < 1.0:
         raise ValueError("initial_phase must be finite and in the interval [0, 1)")
-
-    nominal_position_increment = drate * (1.0 + drift_ppm * 1e-6)
-    if not np.isfinite(nominal_position_increment) or nominal_position_increment <= 0.0:
-        raise ValueError("drift_ppm produces a nonfinite or nonpositive sampling-position increment")
 
     rng = np.random.default_rng() if rng is None else rng
 
@@ -162,20 +185,27 @@ def sampling_clock_impairments_numba_wrapper(
 
     padded_len = len(x) + 2 * taps_per_phase - 1
     max_input_idx = padded_len - taps_per_phase
-    max_sample_position = max_input_idx * uprate + (uprate - 1)
 
-    # Add the receiver's initial fractional sampling phase to the legacy
-    # alignment used by the NumPy implementation.
-    initial_position = uprate / drate + uprate * initial_phase
+    # Begin at the prototype's group delay so zero impairment is aligned with
+    # the input. The user phase is measured in input-sample periods.
+    initial_position = (len(h) - 1) / 2 + uprate * initial_phase
 
-    if initial_position <= max_sample_position:
-        nominal_output_samples = int(np.floor((max_sample_position - initial_position) / nominal_position_increment)) + 1
-    else:
-        nominal_output_samples = 0
-
-    # Keep at least one slot so capacity growth remains well-defined.
-    num_output_samples = max(nominal_output_samples, 1)
+    # Match the NumPy path's conservative capacity exactly so stochastic drift
+    # and jitter consume the same seeded random stream in both implementations.
+    num_output_samples = int(np.ceil(padded_len * uprate / drate)) + 1
     max_output_samples = num_output_samples * _MAX_OUTPUT_CAPACITY_MULTIPLIER
+
+    drift_trajectory = _sampling_clock_drift_trajectory(
+        max_output_samples,
+        len(x),
+        drift_ppm,
+        drift_model,
+        filtered_noise_alpha,
+        rng,
+    )
+    position_increments = drate * (1.0 + drift_trajectory * 1e-6)
+    if np.any(~np.isfinite(position_increments)) or np.any(position_increments <= 0.0):
+        raise ValueError("drift model produces a nonfinite or nonpositive sampling-position increment")
 
     jitter_std = uprate * jitter_ppm * 1e-6
 
@@ -205,7 +235,7 @@ def sampling_clock_impairments_numba_wrapper(
                 taps_per_phase,
                 padded_len,
                 max_input_idx,
-                nominal_position_increment,
+                position_increments,
                 initial_position,
                 num_output_samples,
             )

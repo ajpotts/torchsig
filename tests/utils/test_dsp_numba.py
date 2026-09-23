@@ -13,6 +13,7 @@ pytest.importorskip("numba")
 from torchsig.transforms import functional as F
 from torchsig.utils.dsp import (
     TorchSigRealDataType,
+    _sampling_clock_drift_trajectory,
     prototype_polyphase_filter,
     sampling_clock_impairments,
 )
@@ -80,6 +81,16 @@ def test_clock_transforms_preserve_length(transform):
     assert len(out) == len(x)
     assert out.dtype == np.complex64
     assert np.all(np.isfinite(out))
+
+
+@pytest.mark.parametrize("drift_ppm", [5_615.0, 5_750.0, 5_860.0])
+def test_clock_drift_one_sample_excess_never_returns_empty(drift_ppm):
+    _, x = _filter_and_data(n=4096)
+
+    out = F.clock_drift(x, drift_ppm=drift_ppm, rng=np.random.default_rng(5))
+
+    assert out.shape == x.shape
+    assert out.dtype == np.complex64
 
 
 # --------------------------------------------------------------------------- #
@@ -284,6 +295,67 @@ def test_sampling_clock_implementations_match_with_fixed_rate_offset_and_jitter(
     np.testing.assert_allclose(actual, reference, rtol=1e-6, atol=1e-6)
 
 
+@pytest.mark.parametrize(
+    ("drift_model", "drift_ppm"),
+    [
+        ("linear", -100_000.0),
+        ("random_walk", 100_000.0),
+        ("filtered_noise", 100_000.0),
+    ],
+)
+def test_sampling_clock_implementations_match_with_drift_models(
+    drift_model,
+    drift_ppm,
+):
+    kwargs = {
+        "h": np.array([1.0, 0.5, -0.25, 0.125], dtype=np.float32),
+        "x": np.arange(64, dtype=np.float32).astype(np.complex64),
+        "uprate": 4,
+        "drate": 4.0,
+        "jitter_ppm": 1_000.0,
+        "drift_ppm": drift_ppm,
+        "drift_model": drift_model,
+        "filtered_noise_alpha": 0.9,
+    }
+
+    reference = sampling_clock_impairments(rng=np.random.default_rng(123), **kwargs)
+    actual = sampling_clock_impairments_numba_wrapper(rng=np.random.default_rng(123), **kwargs)
+
+    np.testing.assert_allclose(actual, reference, rtol=1e-6, atol=1e-6)
+
+
+def test_linear_drift_trajectory_ramps_to_endpoint_and_holds():
+    trajectory = _sampling_clock_drift_trajectory(
+        num_samples=7,
+        reference_samples=5,
+        drift_ppm=20.0,
+        drift_model="linear",
+        filtered_noise_alpha=0.99,
+        rng=np.random.default_rng(1),
+    )
+
+    np.testing.assert_allclose(trajectory, [0.0, 5.0, 10.0, 15.0, 20.0, 20.0, 20.0])
+
+
+@pytest.mark.parametrize("drift_model", ["random_walk", "filtered_noise"])
+def test_stochastic_drift_trajectories_are_seeded(drift_model):
+    kwargs = {
+        "num_samples": 256,
+        "reference_samples": 256,
+        "drift_ppm": 20.0,
+        "drift_model": drift_model,
+        "filtered_noise_alpha": 0.9,
+    }
+
+    first = _sampling_clock_drift_trajectory(rng=np.random.default_rng(7), **kwargs)
+    second = _sampling_clock_drift_trajectory(rng=np.random.default_rng(7), **kwargs)
+    different = _sampling_clock_drift_trajectory(rng=np.random.default_rng(8), **kwargs)
+
+    np.testing.assert_array_equal(first, second)
+    assert not np.array_equal(first, different)
+    assert np.std(first) > 0.0
+
+
 def test_sampling_clock_implementations_match_with_initial_phase():
     kwargs = {
         "h": np.array([1.0, 0.5, -0.25, 0.125], dtype=np.float32),
@@ -319,6 +391,8 @@ def test_sampling_clock_implementations_match_with_initial_phase():
         ({"initial_phase": -0.1}, "initial_phase"),
         ({"initial_phase": 1.0}, "initial_phase"),
         ({"initial_phase": np.nan}, "initial_phase"),
+        ({"drift_model": "invalid"}, "drift_model"),
+        ({"filtered_noise_alpha": 1.0}, "filtered_noise_alpha"),
     ],
 )
 @pytest.mark.parametrize(
@@ -364,7 +438,7 @@ def test_sampling_clock_jitter_cannot_select_negative_polyphase_branch():
     np.testing.assert_array_equal(actual, reference)
 
 
-def test_sampling_clock_preserves_legacy_initial_phase_alignment():
+def test_sampling_clock_starts_at_filter_group_delay():
     out = sampling_clock_impairments(
         h=np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32),
         x=np.array([1.0, 2.0], dtype=np.complex64),
@@ -374,7 +448,51 @@ def test_sampling_clock_preserves_legacy_initial_phase_alignment():
         drift_ppm=0.0,
     )
 
-    np.testing.assert_array_equal(out, np.array([8.0, 16.0, 0.0], dtype=np.complex64))
+    np.testing.assert_array_equal(out, np.array([10.0, 20.0, 0.0], dtype=np.complex64))
+
+
+def test_sampling_clock_interpolates_across_final_phase_with_input_carry():
+    out = sampling_clock_impairments(
+        h=np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32),
+        x=np.array([1.0, 2.0], dtype=np.complex64),
+        uprate=4,
+        drate=4.0,
+        jitter_ppm=0.0,
+        drift_ppm=0.0,
+        initial_phase=0.5,
+    )
+
+    # Halfway between phase 3 on x[0] (16) and phase 0 on x[1] (8).
+    assert out[0] == pytest.approx(12.0)
+
+
+def test_zero_clock_impairment_is_aligned_for_a_passband_tone():
+    sample_indices = np.arange(4096)
+    tone = np.exp(2j * np.pi * 0.05 * sample_indices).astype(np.complex64)
+
+    out = F.clock_jitter(
+        tone,
+        jitter_ppm=0.0,
+        initial_phase=0.0,
+        rng=np.random.default_rng(7),
+    )
+
+    np.testing.assert_allclose(out, tone, rtol=0.0, atol=2e-6)
+
+
+def test_low_ppm_jitter_is_not_quantized_and_tracks_requested_scale():
+    sample_indices = np.arange(4096)
+    tone = np.exp(2j * np.pi * 0.2 * sample_indices).astype(np.complex64)
+    baseline = F.clock_jitter(tone, jitter_ppm=0.0, rng=np.random.default_rng(7))
+    jitter_1_ppm = F.clock_jitter(tone, jitter_ppm=1.0, rng=np.random.default_rng(7))
+    jitter_10_ppm = F.clock_jitter(tone, jitter_ppm=10.0, rng=np.random.default_rng(7))
+    interior = slice(64, -64)
+
+    error_1_ppm = np.sqrt(np.mean(np.abs(jitter_1_ppm[interior] - baseline[interior]) ** 2))
+    error_10_ppm = np.sqrt(np.mean(np.abs(jitter_10_ppm[interior] - baseline[interior]) ** 2))
+
+    assert not np.array_equal(jitter_1_ppm, jitter_10_ppm)
+    assert error_10_ppm / error_1_ppm == pytest.approx(10.0, rel=0.02)
 
 
 @pytest.mark.parametrize("length", [0, 1])
@@ -436,7 +554,7 @@ def test_sampling_clock_numba_kernel_raises_before_output_overflow():
             1,
             5,
             4,
-            1.0,
+            np.ones(1, dtype=np.float64),
             1.0,
             1,
         )
