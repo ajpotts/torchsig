@@ -18,6 +18,7 @@ from torchsig.signals.builders.ofdm import OFDMSignalGenerator
 from torchsig.signals.builders.tone import ToneSignalGenerator
 from torchsig.signals.builders.wifi import Wifi80211aSignalGenerator
 from torchsig.signals.builders.zigbee import ZigBeeSignalGenerator
+from torchsig.signals.signal_lists import OFDM_NUM_SUBCARRIER_VALUES
 
 __all__ = ["family_names", "lookup_signal_generator_by_string", "num_subcarrier_values", "signal_generator_lookup_table"]
 
@@ -79,7 +80,7 @@ def _family_name(signal_name: str) -> str | None:
 # Initialize lookup table with signal generators
 _add_signal_generator("tone", ToneSignalGenerator, {})
 
-num_subcarrier_values = [64, 72, 128, 180, 256, 300, 512, 600, 900, 1024, 1200, 2048]
+num_subcarrier_values = list(OFDM_NUM_SUBCARRIER_VALUES)
 for num_subcarriers in num_subcarrier_values:
     _add_signal_generator(
         f"ofdm-{num_subcarriers}",

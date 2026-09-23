@@ -504,6 +504,47 @@ def test_ofdm_modulator_baseband_leaves_dc_and_guard_bins_zero():
         assert captured_grid[index, 0] == 0
 
 
+def test_ofdm_modulator_baseband_supports_odd_subcarrier_count():
+    """Odd carrier counts should be split around DC without dropping a carrier."""
+    rng = MagicMock(spec=np.random.Generator)
+    rng.integers.side_effect = [
+        0,
+        np.arange(5, dtype=int).reshape(5, 1),
+    ]
+    captured_grid = None
+
+    def capture_ifft(grid, axis):
+        nonlocal captured_grid
+        captured_grid = grid.copy()
+        return np.zeros_like(grid)
+
+    with (
+        patch.object(
+            __import__(MODULE_PATH, fromlist=["TorchSigSignalLists"]).TorchSigSignalLists,
+            "ofdm_subcarrier_modulations",
+            ["test"],
+        ),
+        patch.dict(
+            f"{MODULE_PATH}.all_symbol_maps",
+            {"test": np.arange(1, 6, dtype=np.complex64)},
+        ),
+        patch(f"{MODULE_PATH}.np.fft.ifft", side_effect=capture_ifft),
+    ):
+        ofdm_modulator_baseband(
+            num_subcarriers=5,
+            max_num_samples=20,
+            oversampling_rate_nominal=4,
+            rng=rng,
+            cyclic_prefix_len=0,
+        )
+
+    assert captured_grid is not None
+    assert np.count_nonzero(captured_grid[:, 0]) == 5
+    assert captured_grid[0, 0] == 0
+    assert np.count_nonzero(captured_grid[1:4, 0]) == 3
+    assert np.count_nonzero(captured_grid[-2:, 0]) == 2
+
+
 def test_ofdm_modulator_baseband_requests_expected_symbol_grid_shape():
     """The random symbol-index grid should match carriers by OFDM symbols."""
     rng = MagicMock(spec=np.random.Generator)

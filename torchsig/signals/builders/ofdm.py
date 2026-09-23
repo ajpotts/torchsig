@@ -18,6 +18,8 @@ from torchsig.utils.dsp import (
 
 __all__ = ["OFDMSignalGenerator", "ofdm_modulator", "ofdm_modulator_baseband"]
 
+_MIN_SUBCARRIERS_FOR_TWO_SAMPLE_CP = 6
+
 
 def ofdm_modulator_baseband(
     num_subcarriers: int,
@@ -63,7 +65,14 @@ def ofdm_modulator_baseband(
     cyclic_prefix_probability = 0.50
     cp_len = cyclic_prefix_len
     if cp_len is None:
-        cp_len = 0 if rng.uniform(0, 1) < cyclic_prefix_probability else rng.integers(2, int(num_subcarriers / 2))
+        if rng.uniform(0, 1) < cyclic_prefix_probability:
+            cp_len = 0
+        else:
+            minimum_cyclic_prefix_len = 2 if num_subcarriers >= _MIN_SUBCARRIERS_FOR_TWO_SAMPLE_CP else 1
+            cp_len = rng.integers(
+                minimum_cyclic_prefix_len,
+                max(minimum_cyclic_prefix_len + 1, int(num_subcarriers / 2)),
+            )
     cp_len_oversampled = cp_len * oversampling_rate_nominal
 
     # Calculate OFDM symbol lengths
@@ -88,9 +97,10 @@ def ofdm_modulator_baseband(
 
     # Create time/frequency grid
     time_frequency_grid = np.zeros((ifft_size, num_ofdm_symbols), dtype=TorchSigComplexDataType)
-    half_num_subcarriers = int(num_subcarriers / 2)
-    time_frequency_grid[1 : half_num_subcarriers + 1, :] = symbol_grid[0:half_num_subcarriers, :]
-    time_frequency_grid[ifft_size - half_num_subcarriers :, :] = symbol_grid[half_num_subcarriers:, :]
+    num_positive_subcarriers = (num_subcarriers + 1) // 2
+    num_negative_subcarriers = num_subcarriers - num_positive_subcarriers
+    time_frequency_grid[1 : num_positive_subcarriers + 1, :] = symbol_grid[:num_positive_subcarriers, :]
+    time_frequency_grid[ifft_size - num_negative_subcarriers :, :] = symbol_grid[num_positive_subcarriers:, :]
 
     # Perform IFFT
     modulated_grid = np.fft.ifft(time_frequency_grid, axis=0)
@@ -255,7 +265,16 @@ class OFDMSignalGenerator(BaseSignalGenerator):
         num_subcarriers = self["num_subcarriers"]
 
         has_cyclic_prefix = bool(self.random_generator.uniform(0, 1) >= 0.50)
-        cyclic_prefix_len = int(self.random_generator.integers(2, int(num_subcarriers / 2))) if has_cyclic_prefix else 0
+        if has_cyclic_prefix:
+            minimum_cyclic_prefix_len = 2 if num_subcarriers >= _MIN_SUBCARRIERS_FOR_TWO_SAMPLE_CP else 1
+            cyclic_prefix_len = int(
+                self.random_generator.integers(
+                    minimum_cyclic_prefix_len,
+                    max(minimum_cyclic_prefix_len + 1, int(num_subcarriers / 2)),
+                )
+            )
+        else:
+            cyclic_prefix_len = 0
 
         # Generate signal
         signal_data = ofdm_modulator(
