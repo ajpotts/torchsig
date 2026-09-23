@@ -1,0 +1,1 @@
+OFDM in 1.1+ needs to include windowing of cyclic prefix as done in 0.6.1
