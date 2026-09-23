@@ -505,12 +505,14 @@ def test_ClockDrift(signal: Signal, params: dict, is_error: bool) -> None:
         assert signal.data.dtype == TorchSigComplexDataType
 
 
-def test_clock_drift_defaults_model_signed_offset_and_random_phase() -> None:
+def test_clock_drift_defaults_to_linear_drift_and_random_phase() -> None:
     transform = ClockDrift(seed=42)
 
     assert transform.drift_ppm == (-10, 10)
     assert transform.drift_sampling == "linear"
     assert transform.initial_phase == (0.0, 1.0)
+    assert transform.drift_model == "linear"
+    assert transform.filtered_noise_alpha == 0.99
     assert -10 <= transform.drift_ppm_distribution() <= 10
     assert 0 <= transform.initial_phase_distribution() < 1
 
@@ -526,11 +528,29 @@ def test_clock_drift_defaults_model_signed_offset_and_random_phase() -> None:
         ({"initial_phase": (-0.1, 0.5)}, "initial_phase bounds"),
         ({"initial_phase": (0.5, 1.1)}, "initial_phase bounds"),
         ({"initial_phase": (1.0, 1.0)}, "values below 1"),
+        ({"drift_model": "invalid"}, "drift_model"),
+        ({"filtered_noise_alpha": 1.0}, "filtered_noise_alpha"),
     ],
 )
 def test_clock_drift_rejects_invalid_initialization(kwargs, match) -> None:
     with pytest.raises(ValueError, match=match):
         ClockDrift(**kwargs)
+
+
+@pytest.mark.parametrize("drift_model", ["linear", "random_walk", "filtered_noise"])
+def test_clock_drift_supports_time_varying_models(drift_model) -> None:
+    transform = ClockDrift(
+        drift_model=drift_model,
+        filtered_noise_alpha=0.9,
+        seed=42,
+    )
+    signal = new_test_signal()
+    original_length = len(signal.data)
+
+    transformed = transform(signal)
+
+    assert len(transformed.data) == original_length
+    assert transformed.data.dtype == TorchSigComplexDataType
 
 
 @pytest.mark.parametrize(
