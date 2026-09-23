@@ -1,0 +1,15 @@
+## Summary
+
+- restore cyclic-prefix windowing for generated OFDM signals using the TorchSig 0.6.1 `win_start` behavior
+- append a cyclic suffix, apply complementary Blackman window halves, and overlap-add adjacent OFDM symbols
+- leave OFDM signals without a cyclic prefix unchanged and preserve the requested output length
+- add regression coverage for prefix tapering and overlap-add behavior at symbol boundaries
+
+## Testing
+
+- `pytest -q tests/signals/builders/test_ofdm.py` (37 passed)
+- `git diff --check` (passed)
+
+## Notes
+
+- No public API changes or new dependencies.

@@ -99,8 +99,31 @@ def ofdm_modulator_baseband(
     cp_grid = modulated_grid[ifft_size - cp_len_oversampled :, :]
     modulated_with_cp_grid = np.concatenate((cp_grid, modulated_grid), axis=0)
 
-    # Serialize time series
-    ofdm_signal = np.ravel(np.transpose(modulated_with_cp_grid))
+    if cp_len_oversampled > 0:
+        # Match the ``win_start`` sidelobe suppression used by TorchSig 0.6.1:
+        # extend each symbol with a cyclic suffix, taper both cyclic regions,
+        # and overlap-add symbols at the original cyclic-prefixed stride.
+        cyclic_suffix_grid = modulated_grid[:cp_len_oversampled, :]
+        windowed_grid = np.concatenate(
+            (modulated_with_cp_grid, cyclic_suffix_grid),
+            axis=0,
+        )
+        window = np.blackman(2 * cp_len_oversampled)
+        windowed_grid[:cp_len_oversampled, :] *= window[:cp_len_oversampled, None]
+        windowed_grid[-cp_len_oversampled:, :] *= window[cp_len_oversampled:, None]
+
+        ofdm_signal = np.zeros(
+            modulated_with_cp_grid.shape[0] * num_ofdm_symbols + cp_len_oversampled,
+            dtype=windowed_grid.dtype,
+        )
+        symbol_stride = modulated_with_cp_grid.shape[0]
+        for symbol_index in range(num_ofdm_symbols):
+            start = symbol_index * symbol_stride
+            ofdm_signal[start : start + windowed_grid.shape[0]] += windowed_grid[:, symbol_index]
+        ofdm_signal = ofdm_signal[:-cp_len_oversampled]
+    else:
+        # Serialize time series without windowing when there is no cyclic prefix.
+        ofdm_signal = np.ravel(np.transpose(modulated_with_cp_grid))
 
     # Enforce proper length
     return slice_tail_to_length(ofdm_signal, max_num_samples)
