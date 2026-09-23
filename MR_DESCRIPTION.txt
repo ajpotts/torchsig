@@ -1,37 +1,36 @@
-Title: Add sampling-clock engine regression coverage
+Title: Add initial sampling phase and ClockDrift controls
 
-Target branch: 165-clock-engine-semantics
+Target branch: 165-clock-engine-hardening
 Ultimate target: 3.0.0-dev
 
 Summary
 
-This MR adds comprehensive safety and edge-case coverage for the corrected
-sampling-clock engine introduced by the preceding MR. It intentionally makes
-no production-code changes.
+This MR exposes initial sampling phase consistently through the clock engine,
+functional API, and ClockDrift transform. It also adds signed drift ranges and
+explicit linear or logarithmic range sampling.
 
-Coverage
+Changes
 
-- Parameter validation in both implementations.
-- RNG consumption and deterministic behavior.
-- Jitter-unit conversion.
-- Output capacity and overflow protection.
-- Empty and short input.
-- Dtype and finite-output guarantees.
-- Negative-position clipping.
-- Raw output-length behavior.
-- Direct compiled-kernel coverage.
+- Add initial_phase to NumPy and Numba sampling-clock entry points.
+- Add initial_phase to functional clock_drift and ClockDrift.
+- Validate scalar and range phase values.
+- Change the default drift range to signed values.
+- Add drift_sampling values linear and log10.
+- Add public API, validation, and parity tests.
 
 Review guidance
 
-Review these tests as the executable contract for engine hardening. Core DSP
-semantics are covered by the preceding branch's smaller behavioral tests.
+The underlying fixed-offset and independent-jitter semantics belong to MR 1,
+and the edge-case contract belongs to MR 2. This review should focus on phase
+units, range validation, and public parameter propagation.
 
 Verification
 
 pytest -q tests/utils/test_sampling_clock_models.py \
-  tests/utils/test_dsp_numba.py
+  tests/utils/test_dsp_numba.py \
+  tests/transforms/test_transforms.py
 
 Stack
 
-This is MR 2 of the replacement foundation stack. Merge
-165-clock-engine-semantics first, then retarget this branch to 3.0.0-dev.
+This is MR 3 of the replacement foundation stack. Merge the semantics and
+hardening branches first, then retarget this branch to 3.0.0-dev.

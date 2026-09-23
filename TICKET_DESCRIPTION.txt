@@ -1,22 +1,30 @@
-Title: Add comprehensive sampling-clock engine regressions
+Title: Add initial sampling phase and signed ClockDrift controls
 
 Problem
 
-The corrected engine contract needs explicit regression coverage for invalid
-parameters, buffer capacity, RNG usage, dtype preservation, boundary clipping,
-and empty or short inputs in both NumPy and Numba implementations.
+The corrected clock engine does not expose receiver initial sampling phase
+through every API layer. ClockDrift also needs an explicit signed offset range
+and a selectable linear or logarithmic parameter distribution.
 
-Scope and acceptance criteria
+Scope
 
-- Validate uprate, drate, jitter, drift, and positive position increments.
-- Verify jitter is scaled in input-sample-period units.
-- Verify no RNG samples are consumed when no random impairment is requested.
-- Cover real-valued complex input, empty input, and one-sample input.
-- Cover negative jitter clipping and raw output-length behavior.
-- Verify defensive output-capacity failures and normal capacity estimates.
-- Preserve complex64 output and finite values.
-- Confirm NumPy/Numba parity for all covered cases.
+- Add initial_phase to the NumPy and Numba engine APIs.
+- Add initial_phase to functional clock_drift and ClockDrift.
+- Validate phase in the half-open interval [0, 1).
+- Use a signed default drift_ppm range.
+- Add linear and log10 drift-range sampling.
+- Reject logarithmic sampling for signed or nonpositive ranges.
+- Add public API, validation, and NumPy/Numba parity tests.
+
+Acceptance criteria
+
+- Nonzero phase changes output consistently in both engines.
+- Zero phase retains the prior engine alignment.
+- Invalid phase bounds are rejected.
+- Signed drift ranges use linear sampling.
+- Positive drift ranges may use logarithmic sampling.
+- Public transforms preserve length and complex dtype.
 
 Dependency
 
-Depends on 165-clock-engine-semantics.
+Depends on 165-clock-engine-hardening.
