@@ -821,6 +821,9 @@ def _sampling_clock_drift_trajectory(
     drift_model: DriftModel,
     filtered_noise_alpha: float,
     rng: np.random.Generator,
+    initial_drift_ppm: float = 0.0,
+    drift_rate_ppm_per_second: float | None = None,
+    sample_rate: float | None = None,
 ) -> np.ndarray:
     """Generate the instantaneous sampling-rate error for each output sample."""
     trajectory = np.empty(num_samples, dtype=np.float64)
@@ -831,20 +834,85 @@ def _sampling_clock_drift_trajectory(
     drift_scale = abs(drift_ppm)
     if drift_model == "linear":
         indices = np.arange(num_samples, dtype=np.float64)
-        trajectory[:] = drift_ppm * np.minimum(indices / reference_intervals, 1.0)
+        if drift_rate_ppm_per_second is None:
+            fraction = np.minimum(indices / reference_intervals, 1.0)
+            trajectory[:] = initial_drift_ppm + (
+                drift_ppm - initial_drift_ppm
+            ) * fraction
+        else:
+            trajectory[:] = initial_drift_ppm + (
+                drift_rate_ppm_per_second * indices / sample_rate
+            )
     elif drift_model == "random_walk":
-        trajectory[0] = 0.0
+        trajectory[0] = initial_drift_ppm
         if num_samples > 1:
             step_std = drift_scale / np.sqrt(reference_intervals)
-            trajectory[1:] = np.cumsum(rng.normal(0.0, step_std, num_samples - 1))
+            trajectory[1:] = initial_drift_ppm + np.cumsum(
+                rng.normal(0.0, step_std, num_samples - 1)
+            )
     else:
         innovation_std = drift_scale * np.sqrt(1.0 - filtered_noise_alpha**2)
-        trajectory[0] = rng.normal(0.0, drift_scale)
+        trajectory[0] = initial_drift_ppm + rng.normal(0.0, drift_scale)
         innovations = rng.normal(0.0, innovation_std, max(num_samples - 1, 0))
         for idx in range(1, num_samples):
-            trajectory[idx] = filtered_noise_alpha * trajectory[idx - 1] + innovations[idx - 1]
+            deviation = trajectory[idx - 1] - initial_drift_ppm
+            trajectory[idx] = (
+                initial_drift_ppm
+                + filtered_noise_alpha * deviation
+                + innovations[idx - 1]
+            )
 
     return trajectory
+
+
+def _sampling_clock_nominal_positions(
+    num_samples: int,
+    initial_position: float,
+    drate: float,
+    drift_trajectory: np.ndarray,
+    drift_model: DriftModel,
+    reference_samples: int,
+    drift_ppm: float,
+    initial_drift_ppm: float,
+    drift_rate_ppm_per_second: float | None,
+    sample_rate: float | None,
+) -> np.ndarray:
+    """Integrate rate error into absolute polyphase sampling positions."""
+    sample_indices = np.arange(num_samples, dtype=np.float64)
+
+    if drift_model == "linear":
+        if drift_rate_ppm_per_second is not None:
+            accumulated_drift_ppm = (
+                sample_indices * initial_drift_ppm
+                + (drift_rate_ppm_per_second / sample_rate)
+                * sample_indices
+                * (sample_indices - 1.0)
+                / 2.0
+            )
+        else:
+            reference_intervals = max(reference_samples - 1, 1)
+            ramp_count = np.minimum(sample_indices, reference_intervals + 1.0)
+            accumulated_drift_ppm = (
+                ramp_count * initial_drift_ppm
+                + (drift_ppm - initial_drift_ppm)
+                * ramp_count
+                * (ramp_count - 1.0)
+                / (2.0 * reference_intervals)
+                + np.maximum(sample_indices - ramp_count, 0.0) * drift_ppm
+            )
+
+        return initial_position + drate * (
+            sample_indices + accumulated_drift_ppm * 1e-6
+        )
+
+    positions = np.empty(num_samples, dtype=np.float64)
+    if num_samples == 0:
+        return positions
+
+    position_increments = drate * (1.0 + drift_trajectory * 1e-6)
+    positions[0] = initial_position
+    positions[1:] = initial_position + np.cumsum(position_increments[:-1])
+    return positions
 
 
 def sampling_clock_impairments(
@@ -858,6 +926,9 @@ def sampling_clock_impairments(
     initial_phase: float = 0.0,
     drift_model: DriftModel = "linear",
     filtered_noise_alpha: float = 0.99,
+    initial_drift_ppm: float = 0.0,
+    drift_rate_ppm_per_second: float | None = None,
+    sample_rate: float | None = None,
 ) -> np.ndarray:
     """Apply sampling-clock drift and jitter using polyphase filtering.
 
@@ -886,6 +957,12 @@ def sampling_clock_impairments(
         drift_model: Time-varying drift model. Defaults to ``"linear"``.
         filtered_noise_alpha: Autoregressive coefficient for
             ``"filtered_noise"``. Must be in the half-open interval [0, 1).
+        initial_drift_ppm: Initial sampling-rate error in PPM. Defaults to 0.
+        drift_rate_ppm_per_second: Optional physical linear drift rate. When
+            supplied, ``sample_rate`` is required and ``drift_ppm`` is not
+            used as the linear endpoint.
+        sample_rate: Input sample rate in samples per second, required with
+            ``drift_rate_ppm_per_second``.
 
     Returns:
         One-dimensional complex array containing the resampled signal.
@@ -903,12 +980,21 @@ def sampling_clock_impairments(
         raise ValueError("jitter_ppm must be finite and nonnegative")
     if not np.isfinite(drift_ppm):
         raise ValueError("drift_ppm must be finite")
+    if not np.isfinite(initial_drift_ppm):
+        raise ValueError("initial_drift_ppm must be finite")
     if drift_model not in {"linear", "random_walk", "filtered_noise"}:
         raise ValueError("drift_model must be 'linear', 'random_walk', or 'filtered_noise'")
     if not np.isfinite(filtered_noise_alpha) or not 0.0 <= filtered_noise_alpha < 1.0:
         raise ValueError("filtered_noise_alpha must be finite and in the interval [0, 1)")
     if not np.isfinite(initial_phase) or not 0.0 <= initial_phase < 1.0:
         raise ValueError("initial_phase must be finite and in the interval [0, 1)")
+    if drift_rate_ppm_per_second is not None:
+        if drift_model != "linear":
+            raise ValueError("drift_rate_ppm_per_second requires drift_model='linear'")
+        if not np.isfinite(drift_rate_ppm_per_second):
+            raise ValueError("drift_rate_ppm_per_second must be finite")
+        if sample_rate is None or not np.isfinite(sample_rate) or sample_rate <= 0.0:
+            raise ValueError("sample_rate must be finite and positive when drift rate is used")
 
     rng = np.random.default_rng() if rng is None else rng
 
@@ -943,13 +1029,31 @@ def sampling_clock_impairments(
         drift_model,
         filtered_noise_alpha,
         rng,
+        initial_drift_ppm,
+        drift_rate_ppm_per_second,
+        sample_rate,
     )
     position_increments = drate * (1.0 + drift_trajectory * 1e-6)
     if np.any(~np.isfinite(position_increments)) or np.any(position_increments <= 0.0):
         raise ValueError("drift model produces a nonfinite or nonpositive sampling-position increment")
+    nominal_positions = _sampling_clock_nominal_positions(
+        max_output_samples,
+        nominal_position,
+        drate,
+        drift_trajectory,
+        drift_model,
+        len(x),
+        drift_ppm,
+        initial_drift_ppm,
+        drift_rate_ppm_per_second,
+        sample_rate,
+    )
     output_idx = 0
 
-    while nominal_position <= max_sample_position:
+    while (
+        output_idx < max_output_samples
+        and nominal_positions[output_idx] <= max_sample_position
+    ):
         timing_offset = (
             rng.normal(0.0, jitter_std)
             if jitter_std > 0.0
@@ -958,7 +1062,7 @@ def sampling_clock_impairments(
 
         # Clamp jitter at the representable padded-signal boundaries.
         sample_position = np.clip(
-            nominal_position + timing_offset,
+            nominal_positions[output_idx] + timing_offset,
             0.0,
             max_sample_position,
         )
@@ -1017,9 +1121,6 @@ def sampling_clock_impairments(
 
         output_samples[output_idx] = pfb_out
         output_idx += 1
-
-        # Jitter is deliberately excluded: it affects only the current sample.
-        nominal_position += position_increments[output_idx - 1]
 
     return output_samples[:output_idx]
 
