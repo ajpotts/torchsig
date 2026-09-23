@@ -225,11 +225,14 @@ def clock_drift(
     drift_ppm: float = 10,
     rng: np.random.Generator | None = None,
     initial_phase: float = 0.0,
+    drift_model: Literal["linear", "random_walk", "filtered_noise"] = "linear",
+    filtered_noise_alpha: float = 0.99,
 ) -> np.ndarray:
-    """Apply a fixed sampling-clock rate offset.
+    """Apply a fixed sampling-clock offset or time-varying clock drift.
 
-    The offset changes the nominal resampling increment by a signed fractional
-    amount. It remains constant for the duration of this call.
+    ``"linear"`` ramps from zero to ``drift_ppm`` over the capture.
+    ``"random_walk"`` and
+    ``"filtered_noise"`` interpret ``abs(drift_ppm)`` as an RMS scale.
 
     Args:
         data: Complex valued IQ data samples.
@@ -237,9 +240,12 @@ def clock_drift(
         rng: Random number generator. Defaults to np.random.default_rng(seed=None).
         initial_phase: Initial sampling phase in input-sample periods. Must be
             in the half-open interval ``[0, 1)``. Defaults to 0.
+        drift_model: Time-varying drift model. Defaults to ``"linear"``.
+        filtered_noise_alpha: Correlation coefficient for filtered noise.
+            Defaults to 0.99.
 
     Returns:
-        Data with LO drift applied.
+        Data with sampling-clock offset or drift applied.
     """
     rng = rng or np.random.default_rng()
 
@@ -266,6 +272,8 @@ def clock_drift(
         drift_ppm=drift_ppm,
         rng=rng,
         initial_phase=initial_phase,
+        drift_model=drift_model,
+        filtered_noise_alpha=filtered_noise_alpha,
     )
 
     # discard extra samples from resampling process, or zero-pad if too short

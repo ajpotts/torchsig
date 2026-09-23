@@ -5,7 +5,7 @@ from functools import lru_cache
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import torch
@@ -62,6 +62,8 @@ __all__ = [
     "upper_freq_from_center_freq_bandwidth",
     "upsample",
 ]
+
+DriftModel = Literal["linear", "random_walk", "filtered_noise"]
 
 # floor applied to linear power spectrogram (1e-10 in power is -100 dB relative to strongest bin)
 _POWER_FLOOR_RATIO = 1e-10
@@ -812,6 +814,39 @@ def partition_polyphase(h: np.ndarray, up_rate: int, taps_per_phase: int) -> np.
     return h_pfb
 
 
+def _sampling_clock_drift_trajectory(
+    num_samples: int,
+    reference_samples: int,
+    drift_ppm: float,
+    drift_model: DriftModel,
+    filtered_noise_alpha: float,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Generate the instantaneous sampling-rate error for each output sample."""
+    trajectory = np.empty(num_samples, dtype=np.float64)
+    if num_samples == 0:
+        return trajectory
+
+    reference_intervals = max(reference_samples - 1, 1)
+    drift_scale = abs(drift_ppm)
+    if drift_model == "linear":
+        indices = np.arange(num_samples, dtype=np.float64)
+        trajectory[:] = drift_ppm * np.minimum(indices / reference_intervals, 1.0)
+    elif drift_model == "random_walk":
+        trajectory[0] = 0.0
+        if num_samples > 1:
+            step_std = drift_scale / np.sqrt(reference_intervals)
+            trajectory[1:] = np.cumsum(rng.normal(0.0, step_std, num_samples - 1))
+    else:
+        innovation_std = drift_scale * np.sqrt(1.0 - filtered_noise_alpha**2)
+        trajectory[0] = rng.normal(0.0, drift_scale)
+        innovations = rng.normal(0.0, innovation_std, max(num_samples - 1, 0))
+        for idx in range(1, num_samples):
+            trajectory[idx] = filtered_noise_alpha * trajectory[idx - 1] + innovations[idx - 1]
+
+    return trajectory
+
+
 def sampling_clock_impairments(
     h: np.ndarray,
     x: np.ndarray,
@@ -821,12 +856,15 @@ def sampling_clock_impairments(
     drift_ppm: float,
     rng: np.random.Generator | None = None,
     initial_phase: float = 0.0,
+    drift_model: DriftModel = "linear",
+    filtered_noise_alpha: float = 0.99,
 ) -> np.ndarray:
     """Apply sampling-clock offset and jitter using polyphase filtering.
 
-    ``drift_ppm`` is a signed, fixed fractional error in the nominal
-    input-position increment. Positive values advance through the input
-    faster and generally produce fewer output samples.
+    ``"linear"`` ramps from zero to ``drift_ppm`` across the input capture.
+    ``"random_walk"`` treats ``abs(drift_ppm)`` as the RMS endpoint scale,
+    while ``"filtered_noise"`` treats it as the stationary RMS scale of
+    correlated rate noise.
 
     ``jitter_ppm`` is the standard deviation of independent sampling-time
     displacement, expressed in millionths of one input-sample period.
@@ -845,6 +883,9 @@ def sampling_clock_impairments(
         rng: Random number generator. A new generator is used when omitted.
         initial_phase: Initial sampling phase in input-sample periods. Must be
             in the half-open interval ``[0, 1)``. Defaults to 0.
+        drift_model: Time-varying drift model. Defaults to ``"linear"``.
+        filtered_noise_alpha: Autoregressive coefficient for
+            ``"filtered_noise"``. Must be in the half-open interval [0, 1).
 
     Returns:
         One-dimensional complex array containing the resampled signal.
@@ -862,12 +903,12 @@ def sampling_clock_impairments(
         raise ValueError("jitter_ppm must be finite and nonnegative")
     if not np.isfinite(drift_ppm):
         raise ValueError("drift_ppm must be finite")
+    if drift_model not in {"linear", "random_walk", "filtered_noise"}:
+        raise ValueError("drift_model must be 'linear', 'random_walk', or 'filtered_noise'")
+    if not np.isfinite(filtered_noise_alpha) or not 0.0 <= filtered_noise_alpha < 1.0:
+        raise ValueError("filtered_noise_alpha must be finite and in the interval [0, 1)")
     if not np.isfinite(initial_phase) or not 0.0 <= initial_phase < 1.0:
         raise ValueError("initial_phase must be finite and in the interval [0, 1)")
-
-    nominal_position_increment = drate * (1.0 + drift_ppm * 1e-6)
-    if not np.isfinite(nominal_position_increment) or nominal_position_increment <= 0.0:
-        raise ValueError("drift_ppm produces a nonfinite or nonpositive sampling-position increment")
 
     rng = np.random.default_rng() if rng is None else rng
 
@@ -889,12 +930,23 @@ def sampling_clock_impairments(
     nominal_position = uprate / drate + uprate * initial_phase
     jitter_std = uprate * jitter_ppm * 1e-6
 
-    estimated_output_size = int(np.ceil(len(input_padded) * uprate / nominal_position_increment)) + 1
+    estimated_output_size = int(np.ceil(len(input_padded) * uprate / drate)) + 1
     output_samples = np.zeros(
         estimated_output_size,
         dtype=TorchSigComplexDataType,
     )
     max_output_samples = estimated_output_size * 16
+    drift_trajectory = _sampling_clock_drift_trajectory(
+        max_output_samples,
+        len(x),
+        drift_ppm,
+        drift_model,
+        filtered_noise_alpha,
+        rng,
+    )
+    position_increments = drate * (1.0 + drift_trajectory * 1e-6)
+    if np.any(~np.isfinite(position_increments)) or np.any(position_increments <= 0.0):
+        raise ValueError("drift model produces a nonfinite or nonpositive sampling-position increment")
     output_idx = 0
 
     while nominal_position <= max_sample_position:
@@ -948,7 +1000,7 @@ def sampling_clock_impairments(
         output_idx += 1
 
         # Jitter is deliberately excluded: it affects only the current sample.
-        nominal_position += nominal_position_increment
+        nominal_position += position_increments[output_idx - 1]
 
     return output_samples[:output_idx]
 
