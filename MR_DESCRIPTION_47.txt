@@ -1,0 +1,18 @@
+## Summary
+
+- expand generic OFDM signal classes to every subcarrier count from 4 through 8192, inclusive
+- keep `num_subcarrier_values` available as a list while deriving it and the public signal registry from one shared range
+- support odd subcarrier counts by distributing every active carrier around the DC notch
+- use a valid one-sample cyclic-prefix lower bound for four- and five-carrier OFDM signals
+- add coverage for the full registry range and odd-carrier frequency-bin placement
+
+## Testing
+
+- `pytest -q tests/signals/builders/test_ofdm.py tests/signals/test_signal_list.py tests/utils/test_signal_building.py` (8321 passed)
+- `ruff format --check torchsig/signals/signal_lists.py torchsig/utils/signal_building.py torchsig/signals/builders/ofdm.py tests/signals/test_signal_list.py tests/utils/test_signal_building.py tests/signals/builders/test_ofdm.py` (passed)
+- `git diff --check` (passed)
+
+## Notes
+
+- No dependencies were added.
+- Existing OFDM class names remain supported.

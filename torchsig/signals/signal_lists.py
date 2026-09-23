@@ -7,7 +7,9 @@ from typing import ClassVar, Final
 # TorchSig
 from torchsig.signals.signal_utils import check_signal_class
 
-__all__ = ["CLASS_FAMILY_DICT", "FAMILY_SHARED_LIST", "SIGNALS_SHARED_LIST", "TORCHSIG_NUM_FAMILIES", "TORCHSIG_NUM_SIGNALS", "TorchSigSignalLists"]
+__all__ = ["CLASS_FAMILY_DICT", "FAMILY_SHARED_LIST", "OFDM_NUM_SUBCARRIER_VALUES", "SIGNALS_SHARED_LIST", "TORCHSIG_NUM_FAMILIES", "TORCHSIG_NUM_SIGNALS", "TorchSigSignalLists"]
+
+OFDM_NUM_SUBCARRIER_VALUES: Final[range] = range(4, 8193)
 
 # Signal class to signal family mapping
 CLASS_FAMILY_DICT: Final[dict[str, str]] = {
@@ -49,18 +51,7 @@ CLASS_FAMILY_DICT: Final[dict[str, str]] = {
     "1024qam": "qam",
     "16apsk": "apsk",
     "32apsk": "apsk",
-    "ofdm-64": "ofdm",
-    "ofdm-72": "ofdm",
-    "ofdm-128": "ofdm",
-    "ofdm-180": "ofdm",
-    "ofdm-256": "ofdm",
-    "ofdm-300": "ofdm",
-    "ofdm-512": "ofdm",
-    "ofdm-600": "ofdm",
-    "ofdm-900": "ofdm",
-    "ofdm-1024": "ofdm",
-    "ofdm-1200": "ofdm",
-    "ofdm-2048": "ofdm",
+    **{f"ofdm-{num_subcarriers}": "ofdm" for num_subcarriers in OFDM_NUM_SUBCARRIER_VALUES},
     "fm": "fm",
     "am-dsb-sc": "am",
     "am-dsb": "am",

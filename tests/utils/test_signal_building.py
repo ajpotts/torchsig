@@ -38,6 +38,10 @@ def test_ofdm_generator_entries(num_subcarriers):
     )
 
 
+def test_ofdm_generator_entries_cover_inclusive_supported_range():
+    assert signal_building.num_subcarrier_values == list(range(4, 8193))
+
+
 @pytest.mark.parametrize(
     ("name", "metadata"),
     [
