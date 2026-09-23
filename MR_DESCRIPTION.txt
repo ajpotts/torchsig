@@ -1,36 +1,41 @@
-Title: Add initial sampling phase and ClockDrift controls
+Title: Add time-varying sampling-clock drift models
 
-Target branch: 165-clock-engine-hardening
+Target branch: 165-clock-initial-phase
 Ultimate target: 3.0.0-dev
 
 Summary
 
-This MR exposes initial sampling phase consistently through the clock engine,
-functional API, and ClockDrift transform. It also adds signed drift ranges and
-explicit linear or logarithmic range sampling.
+This MR replaces the former constant sampling-clock offset with selectable
+time-varying drift trajectories. It builds on the corrected resampler from MR 1
+and keeps the NumPy and Numba implementations deterministic and equivalent.
 
 Changes
 
-- Add initial_phase to NumPy and Numba sampling-clock entry points.
-- Add initial_phase to functional clock_drift and ClockDrift.
-- Validate scalar and range phase values.
-- Change the default drift range to signed values.
-- Add drift_sampling values linear and log10.
-- Add public API, validation, and parity tests.
+- Add drift_model values linear, random_walk, and filtered_noise.
+- Generate signed linear ramps between initial and final PPM error.
+- Generate seeded random-walk and correlated filtered-noise rate errors.
+- Add initial sampling phase and initial drift controls.
+- Integrate rate-error trajectories into absolute sampling positions.
+- Validate model selection, parameters, and positive position increments.
+- Add analytical trajectory, reproducibility, public-transform, and parity
+  tests.
 
 Review guidance
 
-The underlying fixed-offset and independent-jitter semantics belong to MR 1,
-and the edge-case contract belongs to MR 2. This review should focus on phase
-units, range validation, and public parameter propagation.
+The resampler mechanics belong to MR 1. This review should focus on trajectory
+definitions, integration into sampling position, parameter validation, and
+seeded behavior. The trajectory tests use small explicit sequences so the
+expected behavior can be checked without detailed polyphase-filter knowledge.
 
 Verification
 
-pytest -q tests/utils/test_sampling_clock_models.py \
-  tests/utils/test_dsp_numba.py \
+pytest -q tests/utils/test_dsp_numba.py \
+  tests/transforms/test_functional.py \
   tests/transforms/test_transforms.py
+
+273 passed, 4 skipped.
 
 Stack
 
-This is MR 3 of the replacement foundation stack. Merge the semantics and
-hardening branches first, then retarget this branch to 3.0.0-dev.
+This MR follows the three replacement foundation MRs. Merge
+165-clock-initial-phase first, then retarget this branch to 3.0.0-dev.

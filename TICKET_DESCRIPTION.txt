@@ -1,30 +1,40 @@
-Title: Add initial sampling phase and signed ClockDrift controls
+Title: Add time-varying sampling-clock drift models
 
 Problem
 
-The corrected clock engine does not expose receiver initial sampling phase
-through every API layer. ClockDrift also needs an explicit signed offset range
-and a selectable linear or logarithmic parameter distribution.
+The existing ClockDrift behavior represents a constant sampling-rate offset,
+not physical drift. A useful augmentation model needs rate error that changes
+over the capture while remaining deterministic under a supplied random seed.
+It should cover a deterministic ramp and representative stochastic clock-noise
+processes without changing the corrected resampler established by MR 1.
 
 Scope
 
-- Add initial_phase to the NumPy and Numba engine APIs.
-- Add initial_phase to functional clock_drift and ClockDrift.
-- Validate phase in the half-open interval [0, 1).
-- Use a signed default drift_ppm range.
-- Add linear and log10 drift-range sampling.
-- Reject logarithmic sampling for signed or nonpositive ranges.
-- Add public API, validation, and NumPy/Numba parity tests.
+- Replace constant-offset semantics with time-varying drift.
+- Add linear, random-walk, and filtered-noise rate-error trajectories.
+- Treat drift_ppm as the signed endpoint for linear drift and its absolute
+  value as the RMS scale for stochastic models.
+- Support an explicit initial sampling phase and initial rate error.
+- Integrate drift into absolute sampling positions.
+- Maintain equivalent NumPy and Numba execution.
+- Add analytical, reproducibility, validation, and parity tests.
 
 Acceptance criteria
 
-- Nonzero phase changes output consistently in both engines.
-- Zero phase retains the prior engine alignment.
-- Invalid phase bounds are rejected.
-- Signed drift ranges use linear sampling.
-- Positive drift ranges may use logarithmic sampling.
-- Public transforms preserve length and complex dtype.
+- Linear drift follows its specified initial-to-final PPM ramp.
+- Random-walk and filtered-noise trajectories are seed-reproducible.
+- Independent jitter does not accumulate into later nominal positions.
+- Drift does accumulate into sampling position.
+- Invalid models and nonpositive position increments are rejected.
+- NumPy and Numba results agree for all three models.
+- Public transforms preserve output length and complex dtype.
 
 Dependency
 
-Depends on 165-clock-engine-hardening.
+This ticket depends on the corrected sampling-clock engine and phase API
+delivered through 165-clock-initial-phase.
+
+Out of scope
+
+Physical PPM-per-second units, selectable boundary behavior, notebooks, and
+extended user documentation are handled by MR 3.
