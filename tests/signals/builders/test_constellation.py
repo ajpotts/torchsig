@@ -1064,3 +1064,28 @@ def test_constellation_signal_generator_rejects_invalid_pulse_configuration(para
 
     with pytest.raises(ValueError, match=message):
         generator.generate()
+
+
+def test_constellation_signal_generator_deprecates_legacy_alpha():
+    """The generic alpha spelling remains a temporary compatibility alias."""
+    generator = ConstellationSignalGenerator(
+        constellation_name="qpsk",
+        sample_rate=10_000,
+        bandwidth_min=800,
+        bandwidth_max=800,
+        signal_duration_in_samples_min=128,
+        signal_duration_in_samples_max=128,
+        pulse_shape_name="srrc",
+        alpha=0.25,
+        seed=42,
+    )
+    generator.random_generator = MagicMock(spec=np.random.Generator)
+    generator.random_generator.integers.side_effect = [128, 800]
+
+    with (
+        patch(f"{MODULE_PATH}.constellation_modulator", return_value=np.ones(128, dtype=TorchSigComplexDataType)),
+        pytest.deprecated_call(match="alpha_rolloff"),
+    ):
+        signal = generator.generate()
+
+    assert signal.alpha_rolloff == pytest.approx(0.25)

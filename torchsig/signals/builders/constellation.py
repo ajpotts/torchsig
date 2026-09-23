@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import scipy.signal as sp
 
@@ -250,6 +252,12 @@ class ConstellationSignalGenerator(BaseSignalGenerator):
             raise ValueError("alpha_rolloff and alpha must match when both are configured")
         if configured_alpha is None:
             configured_alpha = legacy_alpha
+            if legacy_alpha is not None:
+                warnings.warn(
+                    "the 'alpha' generator parameter is deprecated; use 'alpha_rolloff'",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
 
         if configured_pulse_shape is None:
             pulse_shape_name = "srrc" if configured_alpha is not None or self.random_generator.integers(0, 2) == 0 else "rectangular"

@@ -313,9 +313,8 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         """Apply validated generator parameter overrides for a signal class."""
         if not hasattr(signal_generator, "class_name"):
             return
-        alpha = self.experiment_config.parameter_value(signal_generator.class_name, "alpha")
-        if alpha is not None:
-            signal_generator["alpha"] = alpha
+        for parameter_name, parameter in self.experiment_config.parameters_for(signal_generator.class_name).items():
+            signal_generator[parameter_name] = parameter.value
 
     @staticmethod
     def _validate_positive_weight(value: float, parameter_name: str) -> float:

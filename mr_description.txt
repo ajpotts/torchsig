@@ -1,0 +1,76 @@
+Title: Standardize fixed pulse-shaping rolloff configuration
+
+Summary
+-------
+
+Makes `alpha_rolloff` the canonical fixed pulse-shaping parameter throughout
+signal generation. Experiment configuration can now fix the rolloff for every
+constellation generator and for DVB-S2, rather than supporting only QPSK under
+the generic `alpha` name.
+
+The dataset integration now applies validated generator parameters generically,
+so adding future fixed parameters will not require another parameter-specific
+branch in `TorchSigIterableDataset`.
+
+Configuration example
+---------------------
+
+```yaml
+signals:
+  qpsk:
+    parameters:
+      alpha_rolloff:
+        value: 0.35
+  dvbs2:
+    parameters:
+      alpha_rolloff:
+        value: 0.25
+```
+
+Compatibility
+-------------
+
+The former QPSK-only `alpha` spelling remains accepted as a compatibility
+alias. It emits `DeprecationWarning` and is normalized to `alpha_rolloff` when
+the configuration is loaded. Effective configurations and generated dataset
+metadata therefore contain only the canonical name.
+
+Configuring both `alpha` and `alpha_rolloff` is rejected as ambiguous. The
+legacy alias should remain available for the current release series and be
+removed in the next major release.
+
+Additional behavior
+-------------------
+
+* Fixed rolloff values must be real numbers strictly between zero and one.
+* A fixed rolloff selects SRRC pulse shaping for constellation signals.
+* Unconfigured generators retain their existing randomized behavior.
+* DVB-S2 signals now record `alpha_rolloff` and `alpha_rolloff_target` in their
+  metadata.
+* The lower-level constellation generator also warns when its legacy `alpha`
+  argument is used directly.
+
+Files changed
+-------------
+
+* `torchsig/utils/experiment_config.py`
+* `torchsig/datasets/datasets.py`
+* `torchsig/signals/builders/constellation.py`
+* `torchsig/signals/builders/dvb.py`
+* `tests/utils/test_experiment_config.py`
+* `tests/signals/builders/test_constellation.py`
+* `docs/README.md`
+
+Test plan
+---------
+
+```text
+pytest -q tests/utils/test_experiment_config.py \
+  tests/signals/builders/test_constellation.py \
+  tests/signals/builders/test_dvb.py \
+  tests/datasets/test_datasets.py
+```
+
+Result: 200 passed, 2 skipped.
+
+`git diff --check` and Ruff import-order checks also pass.
