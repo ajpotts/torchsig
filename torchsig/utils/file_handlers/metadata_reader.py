@@ -97,7 +97,7 @@ class MetadataReader(FileReader):
         super().__init__(root)
         try:
             self.dataset_metadata = self.load_json()
-        except ValueError:
+        except (TypeError, ValueError):
             self.dataset_metadata = {}
 
         self.metadata_path = self.root / "metadata.csv"
@@ -288,10 +288,12 @@ class MetadataReader(FileReader):
 
         Raises
         ------
+        TypeError
+            If the decoded JSON's top-level value is not an object.
         ValueError
-            If ``info.json`` is missing, cannot be decoded as JSON, or its
-            top-level value is not an object. Construction treats these cases
-            as absent optional metadata; direct callers can inspect the error.
+            If ``info.json`` is missing or cannot be decoded as JSON.
+            Construction treats these cases as absent optional metadata;
+            direct callers can inspect the error.
         """
         meta_path = self.root / "info.json"
         try:
@@ -300,5 +302,5 @@ class MetadataReader(FileReader):
         except (FileNotFoundError, json.JSONDecodeError) as exc:
             raise ValueError(f"Cannot read {meta_path}: {exc}") from exc
         if not isinstance(payload, dict):
-            raise ValueError(f"Cannot read {meta_path}: expected a JSON object")
+            raise TypeError(f"Cannot read {meta_path}: expected a JSON object")
         return payload

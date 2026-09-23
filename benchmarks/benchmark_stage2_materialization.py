@@ -6,7 +6,6 @@ hooks for the production transform and model factories. Run ``--help`` for the
 adapter contract and full benchmark matrix options.
 """
 
-# ruff: noqa: INP001
 
 from __future__ import annotations
 
@@ -436,7 +435,7 @@ def _shutdown_loader(loader: DataLoader, iterator: Any) -> None:
     if shutdown is not None:
         shutdown()
     if getattr(loader, "_iterator", None) is iterator:
-        loader._iterator = None  # noqa: SLF001
+        loader._iterator = None
 
 
 def _sync(device: torch.device) -> None:
@@ -964,7 +963,7 @@ def main() -> None:
         print(f"[{number}/{len(cases)}] {case.pipeline} {case.access} workers={case.workers} compression={case.compression} chunk={case.chunk_samples} layout={case.layout} rep={case.repetition}")
         try:
             result = _run_fresh(case, args.output_dir)
-        except Exception as error:  # noqa: BLE001 - preserve the rest of a long matrix
+        except Exception as error:
             failure = {**asdict(case), "error": f"{type(error).__name__}: {error}"}
             failures.append(failure)
             print(f"Case failed: {failure['error']}", file=sys.stderr)

@@ -113,7 +113,7 @@ def _validate_physical_schema(file: h5py.File, schema: PackedHDF5Schema) -> None
 
     data_group = file[schema.datasets["data"].path]
     if not isinstance(data_group, h5py.Group):
-        raise ValueError(
+        raise TypeError(
             "Invalid packed HDF5 file: data path must be a group"
         )
 

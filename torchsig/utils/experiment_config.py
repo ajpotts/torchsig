@@ -33,13 +33,13 @@ class SignalConfig:
     def __post_init__(self) -> None:
         """Validate parameters and store them in a read-only mapping."""
         if not isinstance(self.parameters, Mapping):
-            raise ValueError("SignalConfig.parameters must be a mapping")
+            raise TypeError("SignalConfig.parameters must be a mapping")
         parameters = dict(self.parameters)
         for name, value in parameters.items():
             if not isinstance(name, str):
-                raise ValueError("SignalConfig parameter names must be strings")
+                raise TypeError("SignalConfig parameter names must be strings")
             if not isinstance(value, FixedValue):
-                raise ValueError(f"SignalConfig parameter {name!r} must be a FixedValue")
+                raise TypeError(f"SignalConfig parameter {name!r} must be a FixedValue")
         object.__setattr__(self, "parameters", MappingProxyType(parameters))
 
 
@@ -68,14 +68,14 @@ class ExperimentConfig:
         if signals is None:
             signals = {}
         if not isinstance(signals, Mapping):
-            raise ValueError("ExperimentConfig.signals must be a mapping")
+            raise TypeError("ExperimentConfig.signals must be a mapping")
 
         validated: dict[str, SignalConfig] = {}
         for class_name, signal_config in signals.items():
             if not isinstance(class_name, str) or class_name not in public_generator_names:
                 raise ValueError(f"unknown signal class {class_name!r}")
             if not isinstance(signal_config, SignalConfig):
-                raise ValueError(f"configuration for signal class {class_name!r} must be a SignalConfig")
+                raise TypeError(f"configuration for signal class {class_name!r} must be a SignalConfig")
 
             supported = _FIXED_PARAMETERS.get(class_name, set())
             unknown_parameters = set(signal_config.parameters).difference(supported)
@@ -109,14 +109,14 @@ class ExperimentConfig:
 
 def _mapping(value: Any, location: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
-        raise ValueError(f"{location} must be a mapping")
+        raise TypeError(f"{location} must be a mapping")
     return value
 
 
 def _validate_fixed_value(class_name: str, parameter_name: str, value: Any) -> None:
     location = f"signals.{class_name}.parameters.{parameter_name}.value"
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{location} must be a real number")
+        raise TypeError(f"{location} must be a real number")
     if parameter_name == "alpha" and not 0.0 < float(value) < 1.0:
         raise ValueError(f"{location} must be between 0 and 1 (exclusive)")
 
@@ -164,7 +164,8 @@ def load_experiment_config(
         A validated configuration. ``None`` resolves to an empty configuration.
 
     Raises:
-        ValueError: If the schema, class, parameter, type, or value is invalid.
+        TypeError: If a configuration object has an invalid type.
+        ValueError: If the schema, class, parameter, or value is invalid.
     """
     if config is None:
         return ExperimentConfig()

@@ -197,7 +197,7 @@ def _validate_materialized_samples(
         except (TypeError, ValueError) as error:
             raise ValueError(f"Structured validation failed at sample {index}: {error}") from error
         for field, expected_value, actual_value in zip(reader.schema.fields, expected_leaves, actual_leaves, strict=True):
-            if rtol == 0.0 and atol == 0.0:  # noqa: SIM108
+            if rtol == 0.0 and atol == 0.0:
                 equal = np.array_equal(expected_value, actual_value, equal_nan=True)
             else:
                 equal = np.allclose(expected_value, actual_value, rtol=rtol, atol=atol, equal_nan=True)

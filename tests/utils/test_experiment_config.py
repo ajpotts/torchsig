@@ -44,42 +44,46 @@ def test_programmatic_experiment_config_matches_yaml_schema():
 
 
 @pytest.mark.parametrize(
-    ("signals", "message"),
+    ("signals", "exception", "message"),
     [
-        ({"not-a-signal": SignalConfig(parameters={})}, "unknown signal class"),
-        ({"qpsk": SignalConfig(parameters={"bogus": FixedValue(1)})}, "unknown parameters"),
-        ({"qpsk": SignalConfig(parameters={"alpha": FixedValue("0.35")})}, "must be a real number"),
+        ({"not-a-signal": SignalConfig(parameters={})}, ValueError, "unknown signal class"),
+        ({"qpsk": SignalConfig(parameters={"bogus": FixedValue(1)})}, ValueError, "unknown parameters"),
+        ({"qpsk": SignalConfig(parameters={"alpha": FixedValue("0.35")})}, TypeError, "must be a real number"),
     ],
 )
-def test_programmatic_experiment_config_uses_same_validation(signals, message):
-    with pytest.raises(ValueError, match=message):
+def test_programmatic_experiment_config_uses_same_validation(signals, exception, message):
+    with pytest.raises(exception, match=message):
         ExperimentConfig(signals=signals)
 
 
 @pytest.mark.parametrize(
-    ("config", "message"),
+    ("config", "exception", "message"),
     [
-        ({"signals": {"not-a-signal": {"parameters": {}}}}, "unknown signal class"),
+        ({"signals": {"not-a-signal": {"parameters": {}}}}, ValueError, "unknown signal class"),
         (
             {"signals": {"qpsk": {"parameters": {"bogus": {"value": 1}}}}},
+            ValueError,
             "unknown parameters",
         ),
         (
             {"signals": {"qpsk": {"parameters": {"alpha": {"value": "0.35"}}}}},
+            TypeError,
             "must be a real number",
         ),
         (
             {"signals": {"qpsk": {"parameters": {"alpha": {"value": 1.0}}}}},
+            ValueError,
             "between 0 and 1",
         ),
         (
             {"signals": {"qpsk": {"parameters": {"alpha": {"min": 0.2}}}}},
+            ValueError,
             "unknown settings",
         ),
     ],
 )
-def test_invalid_experiment_configuration_is_actionable(config, message):
-    with pytest.raises(ValueError, match=message):
+def test_invalid_experiment_configuration_is_actionable(config, exception, message):
+    with pytest.raises(exception, match=message):
         load_experiment_config(config)
 
 

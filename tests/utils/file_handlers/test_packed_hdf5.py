@@ -660,7 +660,7 @@ def test_packed_hdf5_reader_rejects_data_dataset_instead_of_group(
         del handle["data"]
         handle.create_dataset("data", data=np.ones(4, dtype=np.complex64))
 
-    with pytest.raises(ValueError, match="data path must be a group"):
+    with pytest.raises(TypeError, match="data path must be a group"):
         PackedHDF5Reader(tmp_path).read(0)
 
 
