@@ -576,7 +576,7 @@ class GroupingLabel(MetadataTransform):
 
         for node in ast.walk(expression):
             if not isinstance(node, self._SAFE_AST_NODES):
-                raise ValueError(
+                raise ValueError(  # noqa: TRY004 - invalid formula syntax, not an argument type
                     f"grouping formula uses unsupported syntax: {type(node).__name__}"
                 )
             if isinstance(node, ast.Name) and node.id != "value":
@@ -585,7 +585,7 @@ class GroupingLabel(MetadataTransform):
                 raise ValueError(f"grouping formula method {node.attr!r} is not allowed")
             if isinstance(node, ast.Call):
                 if not isinstance(node.func, ast.Attribute):
-                    raise ValueError(
+                    raise ValueError(  # noqa: TRY004 - invalid formula syntax, not an argument type
                         "grouping formula may only call safe string methods"
                     )
                 if node.keywords:
