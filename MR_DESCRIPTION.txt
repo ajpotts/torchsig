@@ -1,27 +1,37 @@
-Title: Correct sampling-clock offset and jitter semantics
+Title: Add sampling-clock engine regression coverage
 
-Target branch: 3.0.0-dev
+Target branch: 165-clock-engine-semantics
+Ultimate target: 3.0.0-dev
 
 Summary
 
-This MR gives the existing NumPy and Numba sampling-clock engines one explicit
-contract: drift_ppm is a fixed rate offset, while jitter_ppm independently
-perturbs each sampling instant and does not accumulate.
+This MR adds comprehensive safety and edge-case coverage for the corrected
+sampling-clock engine introduced by the preceding MR. It intentionally makes
+no production-code changes.
 
-Changes
+Coverage
 
-- Replace accumulated random drift with a signed constant position increment.
-- Scale jitter by the polyphase up-rate so PPM is measured in input periods.
-- Track nominal sampling position independently from current-sample jitter.
-- Clamp jittered reads to valid padded-signal boundaries.
-- Use equivalent seeded random streams in the NumPy and Numba paths.
-- Add small behavioral, reproducibility, and parity tests.
+- Parameter validation in both implementations.
+- RNG consumption and deterministic behavior.
+- Jitter-unit conversion.
+- Output capacity and overflow protection.
+- Empty and short input.
+- Dtype and finite-output guarantees.
+- Negative-position clipping.
+- Raw output-length behavior.
+- Direct compiled-kernel coverage.
+
+Review guidance
+
+Review these tests as the executable contract for engine hardening. Core DSP
+semantics are covered by the preceding branch's smaller behavioral tests.
 
 Verification
 
-pytest -q tests/utils/test_sampling_clock_models.py
+pytest -q tests/utils/test_sampling_clock_models.py \
+  tests/utils/test_dsp_numba.py
 
 Stack
 
-This is the first replacement MR for 165-clock-resampler-foundation and should
-merge directly into 3.0.0-dev.
+This is MR 2 of the replacement foundation stack. Merge
+165-clock-engine-semantics first, then retarget this branch to 3.0.0-dev.

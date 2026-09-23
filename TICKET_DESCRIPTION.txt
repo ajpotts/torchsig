@@ -1,30 +1,22 @@
-Title: Correct sampling-clock offset and jitter semantics
+Title: Add comprehensive sampling-clock engine regressions
 
 Problem
 
-The existing clock engine accumulates random drift and jitter into one phase
-state, so ClockDrift does not represent a fixed rate offset and ClockJitter does
-not represent independent aperture jitter. The NumPy and Numba paths also use
-different random-number and position-update mechanics.
+The corrected engine contract needs explicit regression coverage for invalid
+parameters, buffer capacity, RNG usage, dtype preservation, boundary clipping,
+and empty or short inputs in both NumPy and Numba implementations.
 
-Scope
+Scope and acceptance criteria
 
-- Define drift_ppm as a signed fixed sampling-rate offset.
-- Apply jitter independently to each sampling instant without accumulation.
-- Scale jitter in millionths of one input-sample period.
-- Use absolute nominal positions and clamp jittered reads to valid boundaries.
-- Keep NumPy and Numba behavior deterministic and numerically equivalent.
-- Preserve output length behavior and complex64 dtype.
+- Validate uprate, drate, jitter, drift, and positive position increments.
+- Verify jitter is scaled in input-sample-period units.
+- Verify no RNG samples are consumed when no random impairment is requested.
+- Cover real-valued complex input, empty input, and one-sample input.
+- Cover negative jitter clipping and raw output-length behavior.
+- Verify defensive output-capacity failures and normal capacity estimates.
+- Preserve complex64 output and finite values.
+- Confirm NumPy/Numba parity for all covered cases.
 
-Acceptance criteria
+Dependency
 
-- Positive offset advances through input faster than zero offset.
-- Negative offset advances more slowly.
-- Independent jitter does not alter nominal output length.
-- Identical seeds produce identical results.
-- NumPy and Numba outputs agree for combined offset and jitter.
-
-Out of scope
-
-Comprehensive edge-case regression coverage and the initial-phase/public
-ClockDrift API are delivered by the following stacked MRs.
+Depends on 165-clock-engine-semantics.
