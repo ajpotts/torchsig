@@ -1,11 +1,17 @@
 # Sampling-clock drift and jitter corrections
 
+**Target branch:** `3.0.0-dev`
+
 ## Summary
 
 This MR corrects the sampling-clock impairment engine and replaces the former
 constant clock offset with selectable time-varying drift models. It also makes
 low-PPM aperture jitter behave as requested, aligns zero-magnitude impairments
 with the input, and adds explicit boundary and physical-rate controls.
+
+The relevant review comparison is this branch against `3.0.0-dev`. Earlier
+clock-impairment commits and reports on the feature branch provide background,
+but are not the implementation baseline for this MR.
 
 ## Changes
 
