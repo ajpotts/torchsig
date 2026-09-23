@@ -1,40 +1,39 @@
-Title: Add time-varying sampling-clock drift models
+Title: Finalize the sampling-clock API, physical units, and documentation
 
 Problem
 
-The existing ClockDrift behavior represents a constant sampling-rate offset,
-not physical drift. A useful augmentation model needs rate error that changes
-over the capture while remaining deterministic under a supplied random seed.
-It should cover a deterministic ramp and representative stochastic clock-noise
-processes without changing the corrected resampler established by MR 1.
+The corrected resampler and drift models need a clear public contract. Linear
+drift should support physical PPM-per-second units without long-record position
+accumulation error. Zero-magnitude transforms should be identity-preserving by
+default, and callers need an explicit policy when drift exhausts available
+input samples. Users and reviewers also need concise documentation of model
+semantics and bandwidth limitations.
 
 Scope
 
-- Replace constant-offset semantics with time-varying drift.
-- Add linear, random-walk, and filtered-noise rate-error trajectories.
-- Treat drift_ppm as the signed endpoint for linear drift and its absolute
-  value as the RMS scale for stochastic models.
-- Support an explicit initial sampling phase and initial rate error.
-- Integrate drift into absolute sampling positions.
-- Maintain equivalent NumPy and Numba execution.
-- Add analytical, reproducibility, validation, and parity tests.
+- Default ClockDrift and ClockJitter to zero initial sampling phase.
+- Add initial_phase to the public jitter APIs.
+- Add initial_drift_ppm, drift_rate_ppm_per_second, and sample_rate.
+- Evaluate linear-drift positions with closed-form integration.
+- Add edge, zeros, wrap, and raise boundary policies.
+- Default boundary handling to edge extension.
+- Document the models, units, alignment, boundary behavior, merge stack, and
+  near-Nyquist prototype-filter limitation.
+- Update the clock drift and jitter examples.
+- Retain the supporting analysis and reference material.
 
 Acceptance criteria
 
-- Linear drift follows its specified initial-to-final PPM ramp.
-- Random-walk and filtered-noise trajectories are seed-reproducible.
-- Independent jitter does not accumulate into later nominal positions.
-- Drift does accumulate into sampling position.
-- Invalid models and nonpositive position increments are rejected.
-- NumPy and Numba results agree for all three models.
-- Public transforms preserve output length and complex dtype.
+- Zero magnitude and zero phase preserve aligned passband input by default.
+- Physical linear drift follows d[k] = d0 + r*k/fs.
+- Linear positions match analytical closed-form results.
+- Missing or invalid sample-rate units are rejected.
+- Every boundary policy has deterministic tested behavior.
+- Public class and functional APIs expose consistent parameters.
+- Documentation identifies the stack targets and filter validity limitation.
+- Focused sampling-clock and transform tests pass.
 
 Dependency
 
-This ticket depends on the corrected sampling-clock engine and phase API
-delivered through 165-clock-initial-phase.
-
-Out of scope
-
-Physical PPM-per-second units, selectable boundary behavior, notebooks, and
-extended user documentation are handled by MR 3.
+This ticket depends on 165-clock-drift-models, which follows the three-branch
+engine foundation ending at 165-clock-initial-phase.

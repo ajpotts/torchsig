@@ -1,31 +1,42 @@
-Title: Add time-varying sampling-clock drift models
+Title: Finalize the sampling-clock API and documentation
 
-Target branch: 165-clock-initial-phase
+Target branch: 165-clock-drift-models
 Ultimate target: 3.0.0-dev
 
 Summary
 
-This MR replaces the former constant sampling-clock offset with selectable
-time-varying drift trajectories. It builds on the corrected resampler from MR 1
-and keeps the NumPy and Numba implementations deterministic and equivalent.
+This MR completes the sampling-clock work with physical linear-drift units,
+closed-form position evaluation, identity-preserving defaults, selectable
+boundary behavior, examples, and user documentation. It is the final MR in the
+three-branch stack.
 
 Changes
 
-- Add drift_model values linear, random_walk, and filtered_noise.
-- Generate signed linear ramps between initial and final PPM error.
-- Generate seeded random-walk and correlated filtered-noise rate errors.
-- Add initial sampling phase and initial drift controls.
-- Integrate rate-error trajectories into absolute sampling positions.
-- Validate model selection, parameters, and positive position increments.
-- Add analytical trajectory, reproducibility, public-transform, and parity
-  tests.
+- Add initial_drift_ppm, drift_rate_ppm_per_second, and sample_rate.
+- Use exact closed-form integration for capture-normalized and physical linear
+  drift instead of cumulative floating-point position updates.
+- Default initial phase to zero for ClockDrift and ClockJitter.
+- Expose initial_phase through the jitter functional and class APIs.
+- Add boundary_mode values edge, zeros, wrap, and raise; default to edge.
+- Add analytical position, boundary-policy, validation, response, and public
+  API tests.
+- Document model semantics, equations, boundaries, alignment, and the
+  near-Nyquist prototype-filter limitation.
+- Update clock drift and jitter notebooks.
+- Include supporting methodology, analysis, proposal, and reference material.
+
+Compatibility notes
+
+- ClockDrift now models time-varying drift rather than a constant offset.
+- Initial phase defaults to zero instead of being randomized.
+- Exhausted output defaults to edge extension instead of zero padding.
+- Set boundary_mode="zeros" to request the previous padding behavior.
 
 Review guidance
 
-The resampler mechanics belong to MR 1. This review should focus on trajectory
-definitions, integration into sampling position, parameter validation, and
-seeded behavior. The trajectory tests use small explicit sequences so the
-expected behavior can be checked without detailed polyphase-filter knowledge.
+Review this branch against 165-clock-drift-models. Comparing it directly with
+3.0.0-dev will include the two preceding MRs. The analytical tests provide
+small exact examples for closed-form positions and boundary behavior.
 
 Verification
 
@@ -33,9 +44,14 @@ pytest -q tests/utils/test_dsp_numba.py \
   tests/transforms/test_functional.py \
   tests/transforms/test_transforms.py
 
-273 passed, 4 skipped.
+291 passed, 4 skipped.
 
-Stack
+Stack and merge order
 
-This MR follows the three replacement foundation MRs. Merge
-165-clock-initial-phase first, then retarget this branch to 3.0.0-dev.
+1. 165-clock-engine-semantics into 3.0.0-dev
+2. 165-clock-engine-hardening into 165-clock-engine-semantics
+3. 165-clock-initial-phase into 165-clock-engine-hardening
+4. 165-clock-drift-models into 165-clock-initial-phase
+5. 165-clock-api-docs into 165-clock-drift-models
+
+After each preceding MR merges, retarget the next branch to 3.0.0-dev.
