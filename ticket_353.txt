@@ -1,0 +1,110 @@
+Summary
+The existing occupied-bandwidth diagnostic uses the span between the first and last max-hold FFT bins exceeding a noise-floor-relative threshold. This measurement is sensitive to sidelobes, spectral leakage, and isolated bins and can substantially overestimate a component’s meaningful spectral width.
+Add a true integrated-power diagnostic to evaluate whether generator-selected canonical bandwidths contain an appropriate fraction of component power.
+Requested change
+
+
+        
+      Compute integrated spectral power from each isolated component after SNR adjustment and before insertion into the wideband scene.
+
+        
+      Sum linear spectral power across time; do not integrate decibel values or use a max hold.
+
+        
+      Calculate:
+
+
+        
+      Fraction of component power inside its canonical centered bandwidth
+
+        
+      Smallest centered bandwidth containing 99% of component power
+
+        
+      Optionally, the shortest contiguous interval containing 99% of component power
+
+
+
+        
+      Store these values as diagnostic metadata without modifying canonical bandwidth, placement, or labels.
+
+        
+      Document FFT resolution, windowing, noise treatment, and edge-clipping behavior.
+
+        
+      Add investigation tooling that reports results by class, SNR, and relevant generator parameters such as symbol rate and pulse-shaping rolloff.
+
+Motivation
+MR2 preserves generator-selected bandwidth instead of replacing it with the threshold-span estimate. This produces substantially more stable metadata and YOLO boxes, but some canonical boxes appear potentially narrower than the waveform’s effective main lobe.
+A true integrated-power measurement would distinguish between:
+
+
+        
+      Expected low-power sidelobes or rolloff outside the canonical box
+
+        
+      Visualization artifacts caused by spectrogram scaling
+
+        
+      Generators that systematically under-report their effective bandwidth
+
+The measurement should validate generator bandwidth semantics rather than become another per-instance source of canonical label variability.
+Acceptance criteria
+
+
+        
+      Integrated power is computed from isolated component data, not the final wideband mixture.
+
+        
+      Power is integrated in linear units across time.
+
+        
+      The implementation reports the fraction of power inside the canonical bandwidth.
+
+        
+      The implementation reports a centered 99%-power bandwidth.
+
+        
+      Results are finite and deterministic for deterministic inputs.
+
+        
+      Zero-power signals and FFT-resolution limits are handled explicitly.
+
+        
+      Tone behavior is documented and handled appropriately.
+
+        
+      Diagnostic calculations do not modify canonical bandwidth.
+
+        
+      Placement and YOLO labels continue to use canonical bandwidth.
+
+        
+      Unit tests cover:
+
+
+        
+      Fully contained spectral power
+
+        
+      Symmetric power requiring bandwidth expansion
+
+        
+      A distant low-power bin that should not dominate the measurement
+
+        
+      Asymmetric spectral power
+
+        
+      Zero-power input
+
+        
+      Correct conversion between decibel and linear power
+
+
+
+        
+      An example or analysis script can export component-level results to CSV and summarize containment by class and SNR.
+
+Follow-up use
+Use aggregate results to identify generators whose canonical bandwidth formulas may need correction. If a generator consistently fails to contain the desired fraction of power, update that generator’s bandwidth semantics separately rather than substituting a noisy per-instance measurement into canonical metadata.
