@@ -37,7 +37,7 @@ class _StructuredReaderDataset(Dataset):
         return {
             "index": int(sample["index"]),
             "worker_pid": os.getpid(),
-            "reader_pid": self.dataset.reader._pid,  # noqa: SLF001
+            "reader_pid": self.dataset.reader._pid,
             "data": sample["data"],
         }
 
@@ -94,7 +94,7 @@ def test_structured_reader_dataloader_order_content_and_process_handles(tmp_path
 def test_structured_reader_reopens_parent_handle_after_fork_with_four_workers(tmp_path) -> None:
     expected = _write(tmp_path)
     dataset = _StructuredReaderDataset(tmp_path, len(expected), open_in_parent=True)
-    parent_pid = dataset.dataset.reader._pid  # noqa: SLF001
+    parent_pid = dataset.dataset.reader._pid
     loader = DataLoader(
         dataset,
         batch_size=3,

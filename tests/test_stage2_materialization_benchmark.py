@@ -1,12 +1,10 @@
 """Tests for the standalone Stage-2 materialization benchmark."""
 
-# ruff: noqa: SLF001
 
 from __future__ import annotations
 
 import importlib.util
 import json
-import subprocess
 import sys
 from pathlib import Path
 

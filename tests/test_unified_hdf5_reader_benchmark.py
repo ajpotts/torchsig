@@ -1,6 +1,5 @@
 """Tests for the unified raw HDF5 reader benchmark."""
 
-# ruff: noqa: SLF001
 
 from __future__ import annotations
 
@@ -56,7 +55,7 @@ def test_invalid_matrix_values_fail_clearly() -> None:
 
 def test_cli_writes_json_csv_and_capabilities(tmp_path: Path) -> None:
     results = tmp_path / "results.json"
-    completed = subprocess.run(  # noqa: S603
+    completed = subprocess.run(
         [
             sys.executable,
             str(_SCRIPT),

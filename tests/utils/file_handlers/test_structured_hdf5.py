@@ -86,7 +86,7 @@ def test_index_batch_coalesces_contiguous_runs_per_leaf(tmp_path) -> None:
     _write_samples(tmp_path)
     reader = StructuredHDF5Reader(tmp_path)
     assert len(reader) == 5
-    keys: list[list[object]] = [[] for _ in reader._datasets]  # noqa: SLF001
+    keys: list[list[object]] = [[] for _ in reader._datasets]
 
     class TrackingDataset:
         def __init__(self, dataset, field_keys) -> None:
@@ -97,7 +97,7 @@ def test_index_batch_coalesces_contiguous_runs_per_leaf(tmp_path) -> None:
             self.field_keys.append(key)
             return self.dataset[key]
 
-    reader._datasets = [TrackingDataset(dataset, field_keys) for dataset, field_keys in zip(reader._datasets, keys, strict=True)]  # noqa: SLF001
+    reader._datasets = [TrackingDataset(dataset, field_keys) for dataset, field_keys in zip(reader._datasets, keys, strict=True)]
     try:
         reader.read_indices([4, 0, 2, 1])
     finally:
@@ -111,7 +111,7 @@ def test_index_batch_avoids_slice_overhead_for_sparse_indices(tmp_path) -> None:
     _write_samples(tmp_path)
     reader = StructuredHDF5Reader(tmp_path)
     assert len(reader) == 5
-    keys: list[list[object]] = [[] for _ in reader._datasets]  # noqa: SLF001
+    keys: list[list[object]] = [[] for _ in reader._datasets]
 
     class TrackingDataset:
         def __init__(self, dataset, field_keys) -> None:
@@ -122,7 +122,7 @@ def test_index_batch_avoids_slice_overhead_for_sparse_indices(tmp_path) -> None:
             self.field_keys.append(key)
             return self.dataset[key]
 
-    reader._datasets = [TrackingDataset(dataset, field_keys) for dataset, field_keys in zip(reader._datasets, keys, strict=True)]  # noqa: SLF001
+    reader._datasets = [TrackingDataset(dataset, field_keys) for dataset, field_keys in zip(reader._datasets, keys, strict=True)]
     try:
         reader.read_indices([4, 2, 0])
     finally:
@@ -228,12 +228,12 @@ def test_reader_is_lazy_and_reopens_after_explicit_close(tmp_path) -> None:
     _write_samples(tmp_path)
     reader = StructuredHDF5Reader(tmp_path)
 
-    assert reader._file is None  # noqa: SLF001
+    assert reader._file is None
     _assert_sample_equal(reader.read(0), _samples()[0])
-    assert reader._file is not None  # noqa: SLF001
+    assert reader._file is not None
     reader.close()
-    assert reader._file is None  # noqa: SLF001
-    assert reader._datasets == []  # noqa: SLF001
+    assert reader._file is None
+    assert reader._datasets == []
     _assert_sample_equal(reader.read(1), _samples()[1])
     reader.close()
 
@@ -243,11 +243,11 @@ def test_reader_pickle_state_excludes_hdf5_handles(tmp_path) -> None:
     reader = StructuredHDF5Reader(tmp_path)
     assert len(reader) == 5
 
-    restored = pickle.loads(pickle.dumps(reader))  # noqa: S301
+    restored = pickle.loads(pickle.dumps(reader))
     try:
-        assert restored._file is None  # noqa: SLF001
-        assert restored._pid is None  # noqa: SLF001
-        assert restored._datasets == []  # noqa: SLF001
+        assert restored._file is None
+        assert restored._pid is None
+        assert restored._datasets == []
         _assert_sample_equal(restored.read(4), _samples()[4])
     finally:
         reader.close()

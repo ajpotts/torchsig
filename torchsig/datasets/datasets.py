@@ -56,6 +56,8 @@ class TorchSigDatasetConfig:
         output_spectrogram_fft: The FFT size to use when generating spectrograms (if output_representation is "spectrogram").
         signal_sampling_mode: The mode for sampling signals, either "per_signal" or "per_family".
         dataset_metadata: A dictionary containing additional metadata about the dataset.
+        file_writer_name: Named dataset storage backend.
+        file_writer_kwargs: Options passed to the selected file writer.
         target_labels: A list of target_labels. Defaults to ["class_index"].
     """
 
@@ -67,6 +69,8 @@ class TorchSigDatasetConfig:
     output_spectrogram_fft: int | None
     signal_sampling_mode: Literal["per_signal", "per_family"]
     dataset_metadata: dict[str, Any]
+    file_writer_name: Literal["legacy", "packed", "homogeneous"] = "legacy"
+    file_writer_kwargs: dict[str, Any] = field(default_factory=dict)
     target_labels: list[str] = field(default_factory=lambda: ["class_index"])  # default classification use case
     experiment_config: ExperimentConfig = field(default_factory=ExperimentConfig)
 
