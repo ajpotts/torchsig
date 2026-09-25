@@ -12,4 +12,4 @@ def test_demo_signal_generation_config(tmp_path, capsys):
 
     assert "Generated alpha values: [0.35, 0.35, 0.35, 0.35, 0.35]" in capsys.readouterr().out
     artifact = yaml.safe_load((output_dir / "generated_dataset" / "dataset_info.yaml").read_text())
-    assert artifact["experiment_config"]["signals"]["qpsk"]["parameters"]["alpha"]["value"] == 0.35
+    assert artifact["experiment_config"]["signals"]["qpsk"]["parameters"]["alpha_rolloff"]["value"] == 0.35

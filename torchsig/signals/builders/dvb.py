@@ -393,4 +393,10 @@ class DVBS2SignalGenerator(BaseSignalGenerator):
             self.random_generator,
         )
 
-        return Signal(data=signal_data, center_freq=0, bandwidth=bandwidth)
+        return Signal(
+            data=signal_data,
+            center_freq=0,
+            bandwidth=bandwidth,
+            alpha_rolloff=float(alpha_rolloff),
+            alpha_rolloff_target=float(alpha_rolloff),
+        )

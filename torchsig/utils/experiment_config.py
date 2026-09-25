@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,11 +11,14 @@ from typing import Any
 
 import yaml
 
+from torchsig.signals.builders.constellation_maps import all_symbol_maps
 from torchsig.utils.signal_building import public_generator_names
 
 __all__ = ["ExperimentConfig", "FixedValue", "SignalConfig", "load_experiment_config"]
 
-_FIXED_PARAMETERS = {"qpsk": {"alpha"}}
+_ROLLOFF_SIGNAL_CLASSES = set(all_symbol_maps).union({"dvbs2"})
+_FIXED_PARAMETERS = {class_name: {"alpha_rolloff"} for class_name in _ROLLOFF_SIGNAL_CLASSES}
+_LEGACY_PARAMETER_ALIASES = {"qpsk": {"alpha": "alpha_rolloff"}}
 
 
 @dataclass(frozen=True)
@@ -55,7 +59,7 @@ class ExperimentConfig:
             config = ExperimentConfig(
                 signals={
                     "qpsk": SignalConfig(
-                        parameters={"alpha": FixedValue(0.35)},
+                        parameters={"alpha_rolloff": FixedValue(0.35)},
                     ),
                 },
             )
@@ -77,13 +81,27 @@ class ExperimentConfig:
             if not isinstance(signal_config, SignalConfig):
                 raise TypeError(f"configuration for signal class {class_name!r} must be a SignalConfig")
 
+            parameters = dict(signal_config.parameters)
+            aliases = _LEGACY_PARAMETER_ALIASES.get(class_name, {})
+            for alias, canonical_name in aliases.items():
+                if alias not in parameters:
+                    continue
+                if canonical_name in parameters:
+                    raise ValueError(f"parameters {alias!r} and {canonical_name!r} cannot both be configured for signal class {class_name!r}")
+                warnings.warn(
+                    f"signals.{class_name}.parameters.{alias} is deprecated; use {canonical_name!r}",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                parameters[canonical_name] = parameters.pop(alias)
+
             supported = _FIXED_PARAMETERS.get(class_name, set())
-            unknown_parameters = set(signal_config.parameters).difference(supported)
+            unknown_parameters = set(parameters).difference(supported)
             if unknown_parameters:
                 raise ValueError(f"unknown parameters for signal class {class_name!r}: {sorted(unknown_parameters)}; supported parameters: {sorted(supported)}")
-            for parameter_name, parameter in signal_config.parameters.items():
+            for parameter_name, parameter in parameters.items():
                 _validate_fixed_value(class_name, parameter_name, parameter.value)
-            validated[class_name] = signal_config
+            validated[class_name] = SignalConfig(parameters=parameters)
 
         self._signals = MappingProxyType(validated)
 
@@ -94,11 +112,24 @@ class ExperimentConfig:
 
     def parameter_value(self, class_name: str, parameter_name: str) -> float | None:
         """Return a fixed override, or ``None`` when it is not configured."""
+        canonical_name = _LEGACY_PARAMETER_ALIASES.get(class_name, {}).get(parameter_name)
+        if canonical_name is not None:
+            warnings.warn(
+                f"parameter name {parameter_name!r} is deprecated for {class_name!r}; use {canonical_name!r}",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            parameter_name = canonical_name
         signal_config = self._signals.get(class_name)
         if signal_config is None:
             return None
         parameter = signal_config.parameters.get(parameter_name)
         return None if parameter is None else float(parameter.value)
+
+    def parameters_for(self, class_name: str) -> Mapping[str, FixedValue]:
+        """Return canonical fixed parameter overrides for a signal class."""
+        signal_config = self._signals.get(class_name)
+        return MappingProxyType({}) if signal_config is None else signal_config.parameters
 
     def to_dict(self) -> dict[str, Any]:
         """Return the canonical configuration suitable for YAML serialization."""
@@ -117,7 +148,7 @@ def _validate_fixed_value(class_name: str, parameter_name: str, value: Any) -> N
     location = f"signals.{class_name}.parameters.{parameter_name}.value"
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise TypeError(f"{location} must be a real number")
-    if parameter_name == "alpha" and not 0.0 < float(value) < 1.0:
+    if parameter_name == "alpha_rolloff" and not 0.0 < float(value) < 1.0:
         raise ValueError(f"{location} must be between 0 and 1 (exclusive)")
 
 

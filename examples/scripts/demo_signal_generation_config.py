@@ -108,7 +108,7 @@ def run_demo(output_dir: Path, *, overwrite: bool = False) -> None:
 
     artifact_path = generated_root / "dataset_info.yaml"
     artifact = yaml.safe_load(artifact_path.read_text(encoding="utf-8"))
-    recorded_alpha = artifact["experiment_config"]["signals"]["qpsk"]["parameters"]["alpha"]["value"]
+    recorded_alpha = artifact["experiment_config"]["signals"]["qpsk"]["parameters"]["alpha_rolloff"]["value"]
     if recorded_alpha != FIXED_ALPHA:
         raise RuntimeError(f"artifact recorded unexpected alpha: {recorded_alpha}")
 
