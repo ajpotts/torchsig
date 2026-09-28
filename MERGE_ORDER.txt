@@ -1,0 +1,45 @@
+TorchSIG #165 merge order
+=========================
+
+Ultimate target: 3.0.0-dev
+
+Initial stacked targets
+-----------------------
+
+1. Merge 165-clock-engine-semantics into 3.0.0-dev.
+
+2. Merge 165-clock-engine-hardening into 165-clock-engine-semantics.
+
+3. Merge 165-clock-initial-phase into 165-clock-engine-hardening.
+
+4. Merge 165-clock-drift-models into 165-clock-initial-phase.
+
+5. Merge 165-clock-api-docs into 165-clock-drift-models.
+
+Retargeting procedure
+---------------------
+
+After 165-clock-engine-semantics merges, retarget
+165-clock-engine-hardening to 3.0.0-dev.
+
+After 165-clock-engine-hardening merges, retarget
+165-clock-initial-phase to 3.0.0-dev.
+
+After 165-clock-initial-phase merges, retarget
+165-clock-drift-models to 3.0.0-dev.
+
+After 165-clock-drift-models merges, retarget
+165-clock-api-docs to 3.0.0-dev.
+
+Do not merge a downstream branch before its direct parent. Each downstream MR
+is reviewed against its immediate parent so it displays only its own changes.
+
+Branch stack
+------------
+
+3.0.0-dev
+└── 165-clock-engine-semantics
+    └── 165-clock-engine-hardening
+        └── 165-clock-initial-phase
+            └── 165-clock-drift-models
+                └── 165-clock-api-docs
