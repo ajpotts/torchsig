@@ -852,11 +852,12 @@ def sampling_clock_impairments(
     end = start + len(x)
     input_padded[start:end] = x
 
-    # Initialize variables
-    q_step = uprate / drate
+    # Track the ideal sampling path in absolute polyphase units. Timing
+    # impairments are accumulated separately and applied only to each read.
+    nominal_position = uprate / drate
+    position_offset = 0.0
     num_output_samples = int(np.ceil(len(input_padded) * uprate / drate)) + 1
     output_samples = np.zeros(num_output_samples, dtype=TorchSigComplexDataType)
-    input_idx = 0
     output_idx = 0
     clock_drift = 0.0
 
@@ -866,18 +867,20 @@ def sampling_clock_impairments(
 
     # Run the resampler
     max_start = len(input_padded) - taps_per_phase
+    max_sample_position = max_start * uprate + (uprate - 1)
 
-    while input_idx <= max_start:
-        while q_step >= uprate:
-            q_step -= uprate
-            input_idx += 1
-
-        if input_idx > max_start:
-            break
+    while nominal_position <= max_sample_position:
+        sample_position = np.clip(
+            nominal_position + position_offset,
+            0.0,
+            max_sample_position,
+        )
+        input_idx, phase_position = divmod(sample_position, uprate)
+        input_idx = int(input_idx)
 
         delay_slice = input_padded[input_idx : input_idx + taps_per_phase]
 
-        phase = int(q_step)
+        phase = int(phase_position)
         h_phase = h_pfb[phase][:taps_per_phase]
 
         acc_re = np.sum(h_phase * delay_slice[::-1].real)
@@ -890,9 +893,9 @@ def sampling_clock_impairments(
         if jitter_ppm != 0.0 or drift_ppm != 0.0:
             clock_jitter = rng.normal(0.0, jitter_std)
             clock_drift += rng.normal(0.0, drift_std)
-            q_step += drate + clock_jitter + clock_drift
-        else:
-            q_step += drate
+            position_offset += clock_jitter + clock_drift
+
+        nominal_position += drate
 
     # Return properly sized output
     return output_samples[:output_idx] if output_idx > 0 else np.array([], dtype=TorchSigComplexDataType)
