@@ -17,7 +17,6 @@ from torchsig.utils.dsp import (
     TorchSigComplexDataType,
     TorchSigRealDataType,
     compute_spectrogram,
-    is_even,
     low_pass,
     multistage_polyphase_resampler,
     multistage_polyphase_resampler_actual_rate,
@@ -76,6 +75,23 @@ __all__ = [
     "time_reversal",
     "time_varying_noise",
 ]
+
+
+def _preserve_sampling_clock_output(data: np.ndarray, length: int) -> np.ndarray:
+    """Center-crop or zero-pad sampling-clock output to complex64 ``length``."""
+    output = np.asarray(data, dtype=TorchSigComplexDataType)
+    length_delta = len(output) - length
+
+    if length_delta > 0:
+        crop_front = (length_delta + 1) // 2
+        output = output[crop_front : crop_front + length]
+    elif length_delta < 0:
+        pad_count = -length_delta
+        pad_front = (pad_count + 1) // 2
+        pad_back = pad_count // 2
+        output = np.pad(output, (pad_front, pad_back))
+
+    return output.astype(TorchSigComplexDataType, copy=False)
 
 
 log = logging.getLogger(__name__)
@@ -258,30 +274,7 @@ def clock_drift(
     # call the impairment
     data_with_drift = _sampling_clock_impairments(h=pfb_prototype_filter, x=data, uprate=uprate, drate=downrate, jitter_ppm=0, drift_ppm=drift_ppm, rng=rng)
 
-    # discard extra samples from resampling process, or zero-pad if too short
-    num_samples_to_discard = len(data_with_drift) - len(data)
-
-    if num_samples_to_discard > 0:
-        if is_even(num_samples_to_discard):
-            slice_front = num_samples_to_discard // 2
-            slice_back = num_samples_to_discard // 2
-        else:
-            slice_front = (num_samples_to_discard + 1) // 2
-            slice_back = num_samples_to_discard // 2
-        data_with_drift = data_with_drift[slice_front:-slice_back]
-    else:
-        # calculate number of zeros to pad
-        num_samples_to_pad = len(data) - len(data_with_drift)
-        if is_even(num_samples_to_pad):
-            pad_front = num_samples_to_pad // 2
-            pad_back = num_samples_to_pad // 2
-        else:
-            pad_front = (num_samples_to_pad + 1) // 2
-            pad_back = num_samples_to_pad // 2
-        data_with_drift = np.concatenate((np.zeros(pad_front), data_with_drift, np.zeros(pad_back)))
-
-    # ensure data type
-    return data_with_drift.astype(TorchSigComplexDataType)
+    return _preserve_sampling_clock_output(data_with_drift, len(data))
 
 
 def clock_jitter(
@@ -330,30 +323,7 @@ def clock_jitter(
         rng=rng,
     )
 
-    # discard extra samples from resampling process, or zero-pad if too short
-    num_samples_to_discard = len(data_with_jitter) - len(data)
-
-    if num_samples_to_discard > 0:
-        if is_even(num_samples_to_discard):
-            slice_front = num_samples_to_discard // 2
-            slice_back = num_samples_to_discard // 2
-        else:
-            slice_front = (num_samples_to_discard + 1) // 2
-            slice_back = num_samples_to_discard // 2
-        data_with_jitter = data_with_jitter[slice_front:-slice_back]
-    else:
-        # calculate number of zeros to pad
-        num_samples_to_pad = len(data) - len(data_with_jitter)
-        if is_even(num_samples_to_pad):
-            pad_front = num_samples_to_pad // 2
-            pad_back = num_samples_to_pad // 2
-        else:
-            pad_front = (num_samples_to_pad + 1) // 2
-            pad_back = num_samples_to_pad // 2
-        data_with_jitter = np.concatenate((np.zeros(pad_front), data_with_jitter, np.zeros(pad_back)))
-
-    # ensure data type
-    return data_with_jitter.astype(TorchSigComplexDataType)
+    return _preserve_sampling_clock_output(data_with_jitter, len(data))
 
 
 def cochannel_interference(

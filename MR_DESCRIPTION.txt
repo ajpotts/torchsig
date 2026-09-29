@@ -1,0 +1,22 @@
+Title: Preserve sampling-clock output length and complex64 dtype
+
+Target branch: 3.0.0-dev
+
+Summary
+
+This MR makes clock drift and jitter reliably preserve their input sample count
+and complex64 output contract.
+
+Changes
+
+- Replace duplicated crop/pad blocks with one private normalization helper.
+- Fix the one-extra-sample case that previously evaluated an empty `array[1:-0]`
+  slice.
+- Preserve complex64 through cropping and zero-padding.
+- Cover shorter, equal, and odd/even longer resampler outputs.
+- Add the corresponding focused sub-ticket.
+
+Verification
+
+pytest -q tests/transforms/test_functional.py \
+  -k preserve_sampling_clock_output

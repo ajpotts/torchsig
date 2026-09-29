@@ -1,0 +1,25 @@
+Title: Preserve sampling-clock output length and complex64 dtype
+
+Problem
+
+Clock drift and jitter normalize resampler output back to the input length, but
+the duplicated center-crop logic returns an empty array when the resampler
+produces exactly one extra sample. Padding also starts with NumPy's default
+floating-point dtype rather than the transform's complex sample dtype.
+
+Scope
+
+- Use one length-normalization path for clock drift and clock jitter.
+- Center-crop excess samples and symmetrically zero-pad missing samples.
+- Return complex64 for shorter, equal-length, and longer resampler output.
+
+Acceptance criteria
+
+- Both transforms always return exactly the input sample count.
+- A one-sample excess removes one leading sample instead of returning empty.
+- Odd and even crop and padding counts are handled deterministically.
+- Normalized output always has complex64 dtype.
+
+Out of scope
+
+Sampling-clock position, drift, jitter, or random-number semantics.

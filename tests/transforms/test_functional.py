@@ -12,6 +12,7 @@ from test_transforms_utils import generate_test_signal, generate_tone_signal
 from torchsig.transforms.functional import (
     _build_full_profile,
     _fft_filter,
+    _preserve_sampling_clock_output,
     add_slope,
     additive_noise,
     adjacent_channel_interference,
@@ -54,6 +55,26 @@ from torchsig.utils.dsp import (
 
 RTOL = 1e-6
 TEST_DATA = generate_test_signal(num_iq_samples=8192, scale=1.0).data
+
+
+@pytest.mark.parametrize("source_length", [2, 3, 4, 5, 6])
+def test_preserve_sampling_clock_output_length_and_dtype(source_length: int) -> None:
+    """Sampling-clock normalization handles shorter and odd/even excess output."""
+    data = np.arange(source_length, dtype=np.float64).astype(np.complex128)
+
+    output = _preserve_sampling_clock_output(data, length=4)
+
+    assert output.shape == (4,)
+    assert output.dtype == np.dtype(TorchSigComplexDataType)
+
+
+def test_preserve_sampling_clock_output_crops_one_extra_sample() -> None:
+    """A one-sample excess must not trigger the empty ``array[1:-0]`` slice."""
+    data = np.arange(5, dtype=np.float32).astype(np.complex64)
+
+    output = _preserve_sampling_clock_output(data, length=4)
+
+    np.testing.assert_array_equal(output, data[1:])
 
 
 @pytest.mark.parametrize("data, expected, is_error", [(0, ValueError, True), (TEST_DATA.copy(), True, False)])
