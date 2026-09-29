@@ -36,7 +36,7 @@ def _filter_and_data(seed=123, n=4096):
 @pytest.mark.slow
 @pytest.mark.parametrize(
     "jitter_ppm,drift_ppm",
-    [(0.0, 10.0), (10.0, 0.0), (0.0, 0.0)],
+    [(0.0, 10.0), (10.0, 0.0), (10.0, 10.0), (0.0, 0.0)],
 )
 def test_numba_matches_reference(jitter_ppm, drift_ppm):
     """Numba output matches the NumPy reference to float32 precision."""
@@ -48,15 +48,19 @@ def test_numba_matches_reference(jitter_ppm, drift_ppm):
 
     assert len(out) == len(ref)
     assert out.dtype == np.complex64
-    np.testing.assert_allclose(out, ref, atol=1e-4)
+    np.testing.assert_allclose(out, ref, rtol=0.0, atol=1e-4)
 
 
-def test_numba_reproducible():
-    """Same seed yields identical numba output."""
+@pytest.mark.parametrize(
+    "implementation",
+    [sampling_clock_impairments, sampling_clock_impairments_numba_wrapper],
+)
+def test_sampling_clock_implementation_is_reproducible(implementation):
+    """Each implementation reproduces output when given the same seed."""
     h, x = _filter_and_data()
-    kw = dict(h=h, x=x, uprate=UPRATE, drate=UPRATE, jitter_ppm=0.0, drift_ppm=10.0)
-    a = sampling_clock_impairments_numba_wrapper(rng=np.random.default_rng(7), **kw)
-    b = sampling_clock_impairments_numba_wrapper(rng=np.random.default_rng(7), **kw)
+    kw = dict(h=h, x=x, uprate=UPRATE, drate=UPRATE, jitter_ppm=10.0, drift_ppm=10.0)
+    a = implementation(rng=np.random.default_rng(7), **kw)
+    b = implementation(rng=np.random.default_rng(7), **kw)
     np.testing.assert_array_equal(a, b)
 
 
