@@ -44,7 +44,7 @@ def sampling_clock_impairments_numba(
     h_pfb_reversed,
     taps_per_phase,
     padded_len,
-    max_start,
+    max_input_idx,
     num_output_samples,
 ):
     """Numba-optimized sampling clock impairments.
@@ -53,17 +53,17 @@ def sampling_clock_impairments_numba(
     input_padded_real = np.zeros(padded_len, dtype=np.float32)
     input_padded_imag = np.zeros(padded_len, dtype=np.float32)
 
-    start = taps_per_phase - 1
-    end = start + len(x_real)
+    input_start = taps_per_phase - 1
+    input_end = input_start + len(x_real)
 
-    input_padded_real[start:end] = x_real
-    input_padded_imag[start:end] = x_imag
+    input_padded_real[input_start:input_end] = x_real
+    input_padded_imag[input_start:input_end] = x_imag
 
     # Track the ideal sampling path in absolute polyphase units. Timing
     # impairments are accumulated separately and applied only to each read.
     nominal_position = uprate / drate
     position_offset = 0.0
-    max_sample_position = max_start * uprate + (uprate - 1)
+    max_sample_position = max_input_idx * uprate + (uprate - 1)
 
     output_real = np.zeros(num_output_samples, dtype=np.float32)
     output_imag = np.zeros(num_output_samples, dtype=np.float32)
@@ -116,13 +116,29 @@ def sampling_clock_impairments_numba_wrapper(h, x, uprate, drate, jitter_ppm, dr
     Matches the signature of the original function and aims for bit-identical results.
     Generates interleaved jitter/drift pairs to match NumPy RNG consumption order.
     """
+    if not isinstance(uprate, (int, np.integer)) or uprate <= 0:
+        raise ValueError("uprate must be a positive integer")
+    if not np.isfinite(drate) or drate <= 0.0:
+        raise ValueError("drate must be finite and positive")
+    if not np.isfinite(jitter_ppm) or jitter_ppm < 0.0:
+        raise ValueError("jitter_ppm must be finite and nonnegative")
+    if not np.isfinite(drift_ppm):
+        raise ValueError("drift_ppm must be finite")
+
+    nominal_position_increment = drate * (1.0 + drift_ppm * 1e-6)
+    if not np.isfinite(nominal_position_increment) or nominal_position_increment <= 0.0:
+        raise ValueError("drift_ppm produces a nonfinite or nonpositive sampling-position increment")
+
+    rng = np.random.default_rng() if rng is None else rng
+
+    # Construct the polyphase filter bank.
     taps_per_phase = int(np.ceil(len(h) / uprate))
 
     h_pfb = partition_polyphase_numba(h, uprate, taps_per_phase)
     h_pfb_reversed = np.ascontiguousarray(np.flip(h_pfb, axis=1))
 
     padded_len = len(x) + 2 * taps_per_phase - 1
-    max_start = padded_len - taps_per_phase
+    max_input_idx = padded_len - taps_per_phase
 
     num_output_samples = int(np.ceil(padded_len * uprate / drate)) + 1
 
@@ -153,7 +169,7 @@ def sampling_clock_impairments_numba_wrapper(h, x, uprate, drate, jitter_ppm, dr
         h_pfb_reversed,
         taps_per_phase,
         padded_len,
-        max_start,
+        max_input_idx,
         num_output_samples,
     )
 
