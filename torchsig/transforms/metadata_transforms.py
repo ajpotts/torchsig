@@ -270,10 +270,7 @@ class YOLOLabel(MetadataTransform):
         """
         valid_bandwidth_keys = {"bandwidth", "estimated_occupied_bandwidth"}
         if bandwidth_key not in valid_bandwidth_keys:
-            raise ValueError(
-                "bandwidth_key must be 'estimated_occupied_bandwidth' or "
-                "'bandwidth'"
-            )
+            raise ValueError("bandwidth_key must be 'estimated_occupied_bandwidth' or 'bandwidth'")
 
         super().__init__(
             required_metadata=[
@@ -298,10 +295,7 @@ class YOLOLabel(MetadataTransform):
             The transformed signal with YOLO_label added.
         """
         if not hasattr(signal, self.bandwidth_key):
-            raise ValueError(
-                f"key: {self.bandwidth_key} is missing from signal metadata, "
-                f"but is required by {self.__class__.__name__}."
-            )
+            raise ValueError(f"key: {self.bandwidth_key} is missing from signal metadata, but is required by {self.__class__.__name__}.")
         class_index = signal.class_index
         # normalized to width of sample
         width = signal.duration

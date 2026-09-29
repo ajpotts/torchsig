@@ -4,6 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 import yaml
+import pickle
+from types import MappingProxyType
 
 from torchsig.datasets.datasets import TorchSigIterableDataset
 from torchsig.utils.defaults import TorchSigDefaults
@@ -196,3 +198,45 @@ def test_dataset_applies_fixed_alpha_rolloff_to_supported_generator(class_name):
     )
 
     assert dataset.signal_generators[0]["alpha_rolloff"] == pytest.approx(0.25)
+
+
+def test_signal_config_pickle_round_trip():
+    config = SignalConfig(
+        parameters={
+            "alpha_rolloff": FixedValue(0.35),
+        },
+    )
+
+    restored = pickle.loads(pickle.dumps(config))
+
+    assert restored == config
+    assert isinstance(restored.parameters, MappingProxyType)
+
+
+def test_experiment_config_pickle_round_trip():
+    config = ExperimentConfig(
+        signals={
+            "qpsk": SignalConfig(
+                parameters={
+                    "alpha_rolloff": FixedValue(0.35),
+                },
+            ),
+        },
+    )
+
+    restored = pickle.loads(pickle.dumps(config))
+
+    assert restored.to_dict() == config.to_dict()
+    assert isinstance(restored.signals, MappingProxyType)
+    assert isinstance(
+        restored.signals["qpsk"].parameters,
+        MappingProxyType,
+    )
+
+
+def test_empty_experiment_config_is_pickleable():
+    config = ExperimentConfig()
+
+    restored = pickle.loads(pickle.dumps(config))
+
+    assert restored.to_dict() == {"signals": {}}

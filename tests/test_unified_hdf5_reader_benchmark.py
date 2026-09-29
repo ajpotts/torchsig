@@ -1,6 +1,5 @@
 """Tests for the unified raw HDF5 reader benchmark."""
 
-
 from __future__ import annotations
 
 import importlib.util

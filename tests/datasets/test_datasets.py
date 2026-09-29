@@ -2095,11 +2095,11 @@ def test_string_lookup_expands_concat_signal_generator():
         dataset.signal_probabilities,
         [0.5, 0.5],
     )
+
+
 def test_named_concat_propagates_configured_class_name(monkeypatch):
     """A named concat labels all expanded children with its logical class."""
-    named_concat = ConcatSignalGenerator(
-        [NonValidatingGenerator(), NonValidatingGenerator()]
-    )
+    named_concat = ConcatSignalGenerator([NonValidatingGenerator(), NonValidatingGenerator()])
 
     def lookup_named_concat(name):
         assert name == "example-family"
@@ -2165,14 +2165,21 @@ def test_family_sampling_with_fm():
 
     assert dataset.signal_generators
 
+
 def test_sampling_grouping_all_wideband_classes():
     groups = [
         {"name": "am", "values": ["am-dsb", "am-dsb-sc", "am-lsb", "am-usb"]},
         {
             "name": "ask",
             "values": [
-                "4ask", "8ask", "16ask", "32ask", "64ask",
-                "adsb-long", "adsb-short", "ook",
+                "4ask",
+                "8ask",
+                "16ask",
+                "32ask",
+                "64ask",
+                "adsb-long",
+                "adsb-short",
+                "ook",
             ],
         },
         {
@@ -2183,44 +2190,80 @@ def test_sampling_grouping_all_wideband_classes():
         {
             "name": "fsk",
             "values": [
-                "2fsk", "2gfsk", "2gmsk", "2msk",
-                "4fsk", "4gfsk", "4gmsk", "4msk",
-                "8fsk", "8gfsk", "8gmsk", "8msk",
-                "16fsk", "16gfsk", "16gmsk", "16msk",
-                "btle", "dmr", "gsm", "p25",
+                "2fsk",
+                "2gfsk",
+                "2gmsk",
+                "2msk",
+                "4fsk",
+                "4gfsk",
+                "4gmsk",
+                "4msk",
+                "8fsk",
+                "8gfsk",
+                "8gmsk",
+                "8msk",
+                "16fsk",
+                "16gfsk",
+                "16gmsk",
+                "16msk",
+                "btle",
+                "dmr",
+                "gsm",
+                "p25",
             ],
         },
         {
             "name": "ofdm",
             "values": [
-                "80211a", "80211a_ack", "80211a_cts", "80211a_rts",
-                "ofdm-64", "ofdm-72", "ofdm-128", "ofdm-180",
-                "ofdm-256", "ofdm-300", "ofdm-512", "ofdm-600",
-                "ofdm-900", "ofdm-1024", "ofdm-1200", "ofdm-2048",
+                "80211a",
+                "80211a_ack",
+                "80211a_cts",
+                "80211a_rts",
+                "ofdm-64",
+                "ofdm-72",
+                "ofdm-128",
+                "ofdm-180",
+                "ofdm-256",
+                "ofdm-300",
+                "ofdm-512",
+                "ofdm-600",
+                "ofdm-900",
+                "ofdm-1024",
+                "ofdm-1200",
+                "ofdm-2048",
             ],
         },
         {
             "name": "psk",
             "values": [
-                "bpsk", "qpsk", "8psk", "16psk", "32psk",
-                "64psk", "16apsk", "32apsk", "dvbs2",
+                "bpsk",
+                "qpsk",
+                "8psk",
+                "16psk",
+                "32psk",
+                "64psk",
+                "16apsk",
+                "32apsk",
+                "dvbs2",
             ],
         },
         {
             "name": "qam",
             "values": [
-                "16qam", "32qam", "32qam_cross", "64qam",
-                "128qam_cross", "256qam", "512qam_cross", "1024qam",
+                "16qam",
+                "32qam",
+                "32qam_cross",
+                "64qam",
+                "128qam_cross",
+                "256qam",
+                "512qam_cross",
+                "1024qam",
             ],
         },
         {"name": "tone", "values": ["tone"]},
     ]
 
-    enabled_classes = [
-        class_name
-        for group in groups
-        for class_name in group["values"]
-    ]
+    enabled_classes = [class_name for group in groups for class_name in group["values"]]
 
     grouping = GroupingLabel(
         {

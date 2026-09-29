@@ -1,6 +1,6 @@
 """Tests for the DSP utilities."""
 
-from unittest.mock import Mock
+from unittest.mock import Mock, MagicMock
 
 import numpy as np
 import pytest
@@ -8,10 +8,7 @@ import torch
 
 from torchsig.signals.signal_types import Signal
 from torchsig.utils import dsp
-from torchsig.utils.dsp import (
-    TorchSigComplexDataType,
-    compute_spectrogram,
-)
+from torchsig.utils.dsp import TorchSigComplexDataType, compute_spectrogram, update_signal_snr_bandwidth
 
 FFT_SIZE = 64
 ZEROS = np.zeros(512, dtype=TorchSigComplexDataType)
@@ -327,3 +324,26 @@ def test_float32_polyphase_filter_preserves_spectral_performance() -> None:
     for edge in (passband_edge, stopband_edge):
         edge_index = int(np.argmin(np.abs(frequencies - edge)))
         assert response32_db[edge_index] == pytest.approx(responses_db[np.float64][edge_index], abs=0.1)
+
+
+def test_update_signal_snr_bandwidth_falls_back_to_canonical_bandwidth(
+    monkeypatch,
+):
+    signal = Signal(
+        data=np.ones(1024, dtype=np.complex64),
+        bandwidth=100_000,
+    )
+
+    monkeypatch.setattr(
+        "torchsig.utils.dsp.update_signal_snr",
+        lambda dataset, signal: np.zeros((16, 16)),
+    )
+    monkeypatch.setattr(
+        "torchsig.utils.dsp.estimate_occupied_bandwidth",
+        lambda dataset, spectrogram: None,
+    )
+
+    update_signal_snr_bandwidth(MagicMock(), signal)
+
+    assert signal.bandwidth == 100_000
+    assert signal.estimated_occupied_bandwidth == 100_000

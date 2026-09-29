@@ -19,22 +19,14 @@ def run_python(source: str) -> subprocess.CompletedProcess[str]:
 
 
 def test_top_level_import_does_not_import_subpackages():
-    result = run_python(
-        "import sys, torchsig; "
-        "unexpected = sorted(name for name in sys.modules if name.startswith('torchsig.') and name != 'torchsig._lazy'); "
-        "assert not unexpected, unexpected"
-    )
+    result = run_python("import sys, torchsig; unexpected = sorted(name for name in sys.modules if name.startswith('torchsig.') and name != 'torchsig._lazy'); assert not unexpected, unexpected")
 
     assert result.returncode == 0, result.stderr
 
 
 def test_lazy_module_is_loaded_on_access_and_cached():
     result = run_python(
-        "import sys, torchsig; "
-        "assert 'torchsig.signals' not in sys.modules; "
-        "first = torchsig.signals; "
-        "assert first is sys.modules['torchsig.signals']; "
-        "assert first is torchsig.signals"
+        "import sys, torchsig; assert 'torchsig.signals' not in sys.modules; first = torchsig.signals; assert first is sys.modules['torchsig.signals']; assert first is torchsig.signals"
     )
 
     assert result.returncode == 0, result.stderr

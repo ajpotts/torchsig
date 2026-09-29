@@ -1,6 +1,5 @@
 """Tests for the standalone Stage-2 materialization benchmark."""
 
-
 from __future__ import annotations
 
 import importlib.util

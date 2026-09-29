@@ -38,13 +38,23 @@ class SignalConfig:
         """Validate parameters and store them in a read-only mapping."""
         if not isinstance(self.parameters, Mapping):
             raise TypeError("SignalConfig.parameters must be a mapping")
+
         parameters = dict(self.parameters)
         for name, value in parameters.items():
             if not isinstance(name, str):
                 raise TypeError("SignalConfig parameter names must be strings")
             if not isinstance(value, FixedValue):
                 raise TypeError(f"SignalConfig parameter {name!r} must be a FixedValue")
-        object.__setattr__(self, "parameters", MappingProxyType(parameters))
+
+        object.__setattr__(
+            self,
+            "parameters",
+            MappingProxyType(parameters),
+        )
+
+    def __reduce__(self):
+        """Support pickling while preserving read-only parameters."""
+        return type(self), (dict(self.parameters),)
 
 
 class ExperimentConfig:
@@ -104,6 +114,10 @@ class ExperimentConfig:
             validated[class_name] = SignalConfig(parameters=parameters)
 
         self._signals = MappingProxyType(validated)
+
+    def __reduce__(self):
+        """Support pickling while preserving read-only signal configuration."""
+        return type(self), (dict(self._signals),)
 
     @property
     def signals(self) -> Mapping[str, SignalConfig]:

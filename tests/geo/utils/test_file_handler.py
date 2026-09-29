@@ -1077,10 +1077,13 @@ class TestGeoDatasetWriterValidation:
 
         replacement = GeoDatasetWriter(root=str(tmp_path))
 
-        with pytest.raises(
-            FileExistsError,
-            match="output directory.*not empty",
-        ), replacement:
+        with (
+            pytest.raises(
+                FileExistsError,
+                match="output directory.*not empty",
+            ),
+            replacement,
+        ):
             pass
 
         # The first dataset must remain intact.

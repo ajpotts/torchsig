@@ -1517,7 +1517,10 @@ def estimate_occupied_bandwidth(
     return float(upper_freq - lower_freq)
 
 
-def update_signal_snr_bandwidth(dataset: "TorchSigIterableDataset", new_signal: "Signal") -> None:
+def update_signal_snr_bandwidth(
+    dataset: "TorchSigIterableDataset",
+    new_signal: "Signal",
+) -> None:
     """Adjust signal SNR and store a noncanonical bandwidth diagnostic.
 
     This compatibility wrapper retains its existing public name while
@@ -1525,11 +1528,21 @@ def update_signal_snr_bandwidth(dataset: "TorchSigIterableDataset", new_signal: 
     is stored as ``estimated_occupied_bandwidth`` and never replaces the
     generator-selected canonical ``bandwidth``.
 
+    If occupied bandwidth cannot be estimated because no FFT bins exceed the
+    threshold, the generator-selected canonical bandwidth is used as a
+    fallback.
+
     Args:
         dataset: Dataset metadata and random source used for adjustment.
         new_signal: Signal to update in place.
     """
     signal_spectrogram_db = update_signal_snr(dataset, new_signal)
-    estimated_bandwidth = estimate_occupied_bandwidth(dataset, signal_spectrogram_db)
-    if estimated_bandwidth is not None:
-        new_signal["estimated_occupied_bandwidth"] = estimated_bandwidth
+    estimated_bandwidth = estimate_occupied_bandwidth(
+        dataset,
+        signal_spectrogram_db,
+    )
+
+    if estimated_bandwidth is None:
+        estimated_bandwidth = new_signal.bandwidth
+
+    new_signal["estimated_occupied_bandwidth"] = estimated_bandwidth

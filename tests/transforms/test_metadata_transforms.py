@@ -230,9 +230,7 @@ def test_yolo_label_can_use_canonical_bandwidth(component_signal):
     transformed_component = transform(component_signal)
 
     assert transform.required_metadata[2] == "bandwidth"
-    assert transformed_component.yolo_label == pytest.approx(
-        (3, 0.5, 0.4, 0.5, 0.2)
-    )
+    assert transformed_component.yolo_label == pytest.approx((3, 0.5, 0.4, 0.5, 0.2))
 
 
 def test_yolo_label_rejects_invalid_bandwidth_key():
