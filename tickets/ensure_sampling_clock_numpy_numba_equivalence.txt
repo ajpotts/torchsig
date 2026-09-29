@@ -1,0 +1,23 @@
+Title: Keep sampling-clock NumPy and Numba behavior deterministic and equivalent
+
+Summary
+
+The NumPy and Numba sampling-clock implementations must produce deterministic,
+numerically equivalent results for the same inputs, parameters, and random
+seed.
+
+Scope
+
+- Add deterministic parity tests covering sampling-clock drift and jitter.
+- Document and enforce the numerical tolerance used to compare both paths.
+
+Acceptance criteria
+
+- Repeated calls with identical inputs, parameters, and seeds produce identical
+  results within each implementation.
+- NumPy and Numba outputs agree within an absolute tolerance of 1e-4.
+- Tests cover drift-only, jitter-only, and combined drift-and-jitter cases.
+
+Out of scope
+
+Sampling-clock API changes, new impairment semantics, and performance work.

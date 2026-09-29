@@ -1,0 +1,21 @@
+Title: Add deterministic NumPy and Numba sampling-clock parity coverage
+
+Target branch: 3.0.0-dev
+
+Summary
+
+This MR makes deterministic and numerical equivalence between the NumPy and
+Numba sampling-clock implementations an explicit regression-tested contract.
+
+Changes
+
+- Cover drift-only, jitter-only, and combined drift-and-jitter parity.
+- Verify that both implementations reproduce identical output for identical
+  inputs and random seeds.
+- Enforce the existing float32 comparison tolerance of 1e-4.
+- Add the focused sub-ticket describing this requirement.
+
+Verification
+
+pytest -q tests/utils/test_dsp_numba.py::test_numba_matches_reference \
+  tests/utils/test_dsp_numba.py::test_sampling_clock_implementation_is_reproducible
