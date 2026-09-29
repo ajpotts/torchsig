@@ -59,24 +59,28 @@ def sampling_clock_impairments_numba(
     input_padded_real[start:end] = x_real
     input_padded_imag[start:end] = x_imag
 
-    q_step = uprate / drate
+    # Track the ideal sampling path in absolute polyphase units. Timing
+    # impairments are accumulated separately and applied only to each read.
+    nominal_position = uprate / drate
+    position_offset = 0.0
+    max_sample_position = max_start * uprate + (uprate - 1)
 
     output_real = np.zeros(num_output_samples, dtype=np.float32)
     output_imag = np.zeros(num_output_samples, dtype=np.float32)
 
     output_idx = 0
-    input_idx = 0
     clock_drift = 0.0
 
-    while input_idx <= max_start:
-        while q_step >= uprate:
-            q_step -= uprate
-            input_idx += 1
+    while nominal_position <= max_sample_position:
+        sample_position = nominal_position + position_offset
+        if sample_position < 0.0:
+            sample_position = 0.0
+        elif sample_position > max_sample_position:
+            sample_position = max_sample_position
 
-        if input_idx > max_start:
-            break
-
-        phase = int(q_step)
+        input_idx = int(sample_position // uprate)
+        phase_position = sample_position - input_idx * uprate
+        phase = int(phase_position)
 
         acc_re = 0.0
         acc_im = 0.0
@@ -93,9 +97,9 @@ def sampling_clock_impairments_numba(
             pool_index = (output_idx - 1) * 2
             clock_jitter = jitter_drift_pool[pool_index]
             clock_drift += jitter_drift_pool[pool_index + 1]
-            q_step += drate + clock_jitter + clock_drift
-        else:
-            q_step += drate
+            position_offset += clock_jitter + clock_drift
+
+        nominal_position += drate
 
     if output_idx > 0:
         result = np.zeros(output_idx, dtype=np.complex64)

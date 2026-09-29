@@ -60,6 +60,35 @@ def test_numba_reproducible():
     np.testing.assert_array_equal(a, b)
 
 
+@pytest.mark.parametrize("seed", [3, 11])
+def test_sampling_clock_clamps_large_jitter_to_valid_boundaries(seed):
+    """Large timing offsets cannot produce invalid input or phase reads."""
+    h = np.array([1.0, 0.5, -0.25, 0.125], dtype=np.float32)
+    x = np.arange(32, dtype=np.float32).astype(np.complex64)
+    kwargs = dict(
+        h=h,
+        x=x,
+        uprate=4,
+        drate=4.0,
+        jitter_ppm=100_000_000.0,
+        drift_ppm=0.0,
+    )
+
+    reference = sampling_clock_impairments(
+        rng=np.random.default_rng(seed),
+        **kwargs,
+    )
+    accelerated = sampling_clock_impairments_numba_wrapper(
+        rng=np.random.default_rng(seed),
+        **kwargs,
+    )
+
+    assert reference.dtype == np.complex64
+    assert accelerated.dtype == np.complex64
+    assert np.all(np.isfinite(reference))
+    np.testing.assert_allclose(accelerated, reference, rtol=0.0, atol=1e-4)
+
+
 def test_functional_uses_numba():
     """functional.py wired the accelerated implementation in."""
     assert F._sampling_clock_impairments is sampling_clock_impairments_numba_wrapper

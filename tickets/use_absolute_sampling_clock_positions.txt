@@ -1,0 +1,26 @@
+Title: Use absolute sampling-clock positions and clamp jittered reads
+
+Problem
+
+The sampling-clock engine currently tracks a relative polyphase step and input
+index. Large timing perturbations can move that state outside the valid filter
+and padded-input boundaries.
+
+Scope
+
+- Track the nominal sampling path as an absolute polyphase position.
+- Apply the accumulated timing offset when selecting each input read.
+- Clamp impaired read positions to the valid padded-signal boundaries.
+- Keep the existing jitter and drift generation model unchanged.
+
+Acceptance criteria
+
+- NumPy and Numba implementations use equivalent absolute-position logic.
+- Jittered reads cannot select a negative phase or read beyond the padded input.
+- Boundary clamping produces finite complex64 output.
+- Existing in-range sampling-clock behavior remains numerically equivalent.
+
+Out of scope
+
+Changing drift or jitter semantics, adding initial-phase controls, and changing
+the public transform API.

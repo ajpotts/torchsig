@@ -1,0 +1,20 @@
+Title: Use absolute sampling-clock positions and clamp boundary reads
+
+Target branch: 3.0.0-dev
+
+Summary
+
+This MR replaces relative sampling-clock position bookkeeping with an absolute
+nominal position and clamps impaired reads to the valid padded-signal range.
+
+Changes
+
+- Track nominal positions in absolute polyphase units in both implementations.
+- Keep accumulated timing offsets separate from the nominal position.
+- Clamp each impaired read before deriving its input index and filter phase.
+- Add focused regression coverage for large positive and negative offsets.
+- Add the corresponding focused sub-ticket.
+
+Verification
+
+pytest -q --test-mode=full tests/utils/test_dsp_numba.py
