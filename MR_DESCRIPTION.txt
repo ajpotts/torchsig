@@ -1,0 +1,20 @@
+Title: Validate and clarify sampling-clock engine inputs
+
+Target branch: 3.0.0-dev
+
+Summary
+
+This MR adds explicit sampling-clock parameter validation, supports an omitted
+random-number generator, and clarifies internal boundary variable names.
+
+Changes
+
+- Validate `uprate`, `drate`, `jitter_ppm`, and `drift_ppm` before processing.
+- Validate that drift implies a finite, positive nominal position increment.
+- Default `rng=None` to `np.random.default_rng()`.
+- Rename internal start, end, and maximum-index variables.
+- Apply identical validation to the NumPy and Numba entry paths.
+
+Verification
+
+pytest -q tests/utils/test_sampling_clock_validation.py

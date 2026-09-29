@@ -839,18 +839,31 @@ def sampling_clock_impairments(
     Returns:
         Output signal with clock impairments (1D array of complex numbers)
     """
-    # Compute taps per phase for polyphase filter bank
-    taps_per_phase = int(np.ceil(len(h) / uprate))
+    if not isinstance(uprate, (int, np.integer)) or uprate <= 0:
+        raise ValueError("uprate must be a positive integer")
+    if not np.isfinite(drate) or drate <= 0.0:
+        raise ValueError("drate must be finite and positive")
+    if not np.isfinite(jitter_ppm) or jitter_ppm < 0.0:
+        raise ValueError("jitter_ppm must be finite and nonnegative")
+    if not np.isfinite(drift_ppm):
+        raise ValueError("drift_ppm must be finite")
 
-    # Design and partition the polyphase filter bank
+    nominal_position_increment = drate * (1.0 + drift_ppm * 1e-6)
+    if not np.isfinite(nominal_position_increment) or nominal_position_increment <= 0.0:
+        raise ValueError("drift_ppm produces a nonfinite or nonpositive sampling-position increment")
+
+    rng = np.random.default_rng() if rng is None else rng
+
+    # Construct the polyphase filter bank.
+    taps_per_phase = int(np.ceil(len(h) / uprate))
     h_pfb = partition_polyphase(h, uprate, taps_per_phase)
 
     # Zero-pad the input samples
     padded_len = len(x) + 2 * taps_per_phase - 1
     input_padded = np.zeros(padded_len, dtype=TorchSigComplexDataType)
-    start = taps_per_phase - 1
-    end = start + len(x)
-    input_padded[start:end] = x
+    input_start = taps_per_phase - 1
+    input_end = input_start + len(x)
+    input_padded[input_start:input_end] = x
 
     # Track the ideal sampling path in absolute polyphase units. Timing
     # impairments are accumulated separately and applied only to each read.
@@ -866,8 +879,8 @@ def sampling_clock_impairments(
     drift_std = drift_ppm * 1e-6
 
     # Run the resampler
-    max_start = len(input_padded) - taps_per_phase
-    max_sample_position = max_start * uprate + (uprate - 1)
+    max_input_idx = len(input_padded) - taps_per_phase
+    max_sample_position = max_input_idx * uprate + (uprate - 1)
 
     while nominal_position <= max_sample_position:
         sample_position = np.clip(

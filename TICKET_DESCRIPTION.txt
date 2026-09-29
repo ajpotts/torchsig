@@ -1,0 +1,28 @@
+Title: Validate and clarify sampling-clock engine inputs
+
+Problem
+
+The NumPy and Numba sampling-clock entry points currently rely on downstream
+arithmetic and random-number calls to reject invalid parameters. This produces
+indirect errors and fails when the optional random-number generator is omitted.
+Several internal position and boundary names are also ambiguous.
+
+Scope
+
+- Require a positive integer polyphase up-rate.
+- Require a finite, positive down-rate.
+- Require finite, nonnegative jitter and finite drift values.
+- Reject drift values whose effective nominal increment is nonfinite or
+  nonpositive.
+- Create a default NumPy generator when `rng` is omitted.
+- Rename internal input-boundary variables for clarity.
+
+Acceptance criteria
+
+- NumPy and Numba entry paths raise the same explicit `ValueError` messages.
+- Valid calls with `rng=None` complete successfully.
+- Validation does not change valid sampling-clock behavior.
+
+Out of scope
+
+Changes to drift, jitter, output-length, or boundary-clamping semantics.
