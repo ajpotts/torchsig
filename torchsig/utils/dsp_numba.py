@@ -40,9 +40,7 @@ def sampling_clock_impairments_numba(
     x_imag,
     uprate,
     drate,
-    jitter_ppm,
-    drift_ppm,
-    jitter_drift_pool,
+    jitter_values,
     h_pfb_reversed,
     taps_per_phase,
     padded_len,
@@ -53,7 +51,7 @@ def sampling_clock_impairments_numba(
     """Apply sampling-clock impairments with precomputed filter and RNG data.
 
     The wrapper prepares contiguous real and imaginary inputs, a reversed
-    polyphase filter bank, and interleaved jitter/drift samples for this kernel.
+    polyphase filter bank, and one jitter value per output sample.
     """
     input_padded_real = np.zeros(padded_len, dtype=np.float32)
     input_padded_imag = np.zeros(padded_len, dtype=np.float32)
@@ -74,11 +72,10 @@ def sampling_clock_impairments_numba(
 
     output_idx = 0
     while nominal_position <= max_sample_position:
-        if output_idx >= num_output_samples or (output_idx * 2 + 1) >= len(jitter_drift_pool):
+        if output_idx >= num_output_samples or output_idx >= len(jitter_values):
             raise RuntimeError(_OUTPUT_CAPACITY_ERROR)
 
-        pool_index = output_idx * 2
-        sample_position = nominal_position + jitter_drift_pool[pool_index]
+        sample_position = nominal_position + jitter_values[output_idx]
         if sample_position < 0.0:
             sample_position = 0.0
         elif sample_position > max_sample_position:
@@ -121,8 +118,7 @@ def sampling_clock_impairments_numba_wrapper(
 ):
     """Wrapper for the numba-optimized sampling clock impairments function.
 
-    Matches the signature of the original function and aims for bit-identical results.
-    Generates interleaved jitter/drift pairs to match NumPy RNG consumption order.
+    Matches the NumPy implementation's signature and seeded jitter stream.
     """
     if not isinstance(uprate, (int, np.integer)) or uprate <= 0:
         raise ValueError("uprate must be a positive integer")
@@ -156,13 +152,9 @@ def sampling_clock_impairments_numba_wrapper(
     if jitter_ppm != 0.0:
         jitter_std = uprate * jitter_ppm * 1e-6
 
-        pairs = rng.normal(0.0, 1.0, (num_output_samples, 2)).astype(np.float32)
-
-        jitter_drift_pool = np.empty(num_output_samples * 2, dtype=np.float32)
-        jitter_drift_pool[0::2] = pairs[:, 0] * jitter_std
-        jitter_drift_pool[1::2] = 0.0
+        jitter_values = rng.normal(0.0, jitter_std, num_output_samples)
     else:
-        jitter_drift_pool = np.zeros(num_output_samples * 2, dtype=np.float32)
+        jitter_values = np.zeros(num_output_samples, dtype=np.float64)
 
     x_real = np.ascontiguousarray(x.real, dtype=np.float32)
     x_imag = np.ascontiguousarray(x.imag, dtype=np.float32)
@@ -176,9 +168,7 @@ def sampling_clock_impairments_numba_wrapper(
                 x_imag,
                 uprate,
                 drate,
-                jitter_ppm,
-                drift_ppm,
-                jitter_drift_pool,
+                jitter_values,
                 h_pfb_reversed,
                 taps_per_phase,
                 padded_len,
@@ -193,14 +183,11 @@ def sampling_clock_impairments_numba_wrapper(
         new_capacity = min(2 * num_output_samples, max_output_samples)
         additional_count = new_capacity - num_output_samples
         if jitter_ppm != 0.0:
-            pairs = rng.normal(0.0, 1.0, (additional_count, 2)).astype(np.float32)
-            additional_pool = np.empty(additional_count * 2, dtype=np.float32)
-            additional_pool[0::2] = pairs[:, 0] * jitter_std
-            additional_pool[1::2] = 0.0
+            additional_jitter = rng.normal(0.0, jitter_std, additional_count)
         else:
-            additional_pool = np.zeros(additional_count * 2, dtype=np.float32)
+            additional_jitter = np.zeros(additional_count, dtype=np.float64)
 
-        jitter_drift_pool = np.concatenate((jitter_drift_pool, additional_pool))
+        jitter_values = np.concatenate((jitter_values, additional_jitter))
         num_output_samples = new_capacity
 
 

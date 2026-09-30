@@ -268,16 +268,14 @@ def test_sampling_clock_impairments_numba_py_func_covers_kernel_body():
     num_output_samples = int(np.ceil(padded_len * uprate / drate)) + 1
 
     rng = np.random.default_rng(123)
-    jitter_drift_pool = rng.normal(0.0, 1.0, num_output_samples * 2).astype(np.float32) * 1e-6
+    jitter_values = rng.normal(0.0, 1e-6, num_output_samples)
 
     out = sampling_clock_impairments_numba.py_func(
         x.real.astype(np.float32),
         x.imag.astype(np.float32),
         uprate,
         drate,
-        10.0,
-        10.0,
-        jitter_drift_pool,
+        jitter_values,
         h_pfb_reversed,
         taps_per_phase,
         padded_len,
@@ -300,9 +298,7 @@ def test_sampling_clock_impairments_numba_py_func_handles_empty_output():
         x.imag.astype(np.float32),
         1,
         1,
-        0.0,
-        0.0,
-        np.zeros(2, dtype=np.float32),
+        np.zeros(1, dtype=np.float64),
         np.array([[1.0]], dtype=np.float32),
         1,
         0,
@@ -322,9 +318,7 @@ def test_sampling_clock_numba_kernel_rejects_exhausted_output_capacity():
             np.zeros(4, dtype=np.float32),
             1,
             1.0,
-            0.0,
-            0.0,
-            np.zeros(2, dtype=np.float32),
+            np.zeros(1, dtype=np.float64),
             np.array([[1.0]], dtype=np.float32),
             1,
             4,

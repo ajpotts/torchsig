@@ -1,19 +1,19 @@
-Title: Apply independent sampling-time jitter
+Title: Align seeded NumPy and Numba sampling-clock streams
 
 Target branch: 3.0.0-dev
 
 Summary
 
-This MR makes clock jitter an independent displacement of each sampling instant
-and defines its PPM scale relative to one input-sample period.
+This MR gives the NumPy and Numba sampling-clock paths one equivalent seeded
+jitter stream and adds explicit combined-impairment parity coverage.
 
 Changes
 
-- Apply jitter only to the current read position.
-- Exclude jitter from nominal-position advancement.
-- Scale jitter by the polyphase up-rate.
-- Test output-length invariance and finite complex64 output.
+- Replace the interleaved compatibility pool with one float64 jitter array.
+- Pass one jitter value per output sample to the compiled kernel.
+- Preserve seeded values during capacity growth.
+- Test combined drift/jitter parity and reproducibility.
 
 Verification
 
-pytest -q tests/utils/test_sampling_clock_independent_jitter.py
+pytest -q tests/utils/test_sampling_clock_seeded_parity.py

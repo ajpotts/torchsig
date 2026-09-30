@@ -1,26 +1,26 @@
-Title: Apply independent sampling-time jitter
+Title: Align seeded NumPy and Numba sampling-clock streams
 
 Problem
 
-Clock jitter currently accumulates into subsequent sampling positions and is
-scaled in polyphase units rather than input-sample periods. Aperture jitter
-should perturb each sampling instant independently.
+The NumPy implementation draws one jitter value at a time while the Numba
+wrapper retains an interleaved compatibility pool. The two implementations
+should consume one equivalent seeded jitter stream and produce numerically
+equivalent results.
 
 Scope
 
-- Draw one timing displacement for each output sample.
-- Apply the displacement only to the current read position.
-- Scale jitter by the polyphase up-rate so PPM refers to an input-sample
-  period.
-- Preserve the nominal output length.
+- Generate one float64 jitter value per output sample.
+- Pass that stream directly to the compiled kernel.
+- Preserve generated values when capacity grows.
+- Test combined drift and jitter with identical seeds.
 
 Acceptance criteria
 
-- Jitter does not accumulate into later nominal positions.
-- Jitter does not change nominal output length.
-- NumPy and Numba use the same input-period scaling.
-- Output remains finite complex64 data.
+- Identical seeds produce reproducible output in each implementation.
+- NumPy and Numba outputs agree for combined drift and jitter.
+- The compiled kernel accepts one jitter value per output sample.
+- Output remains complex64.
 
 Out of scope
 
-Random-stream cleanup and public transform documentation.
+Clock-model semantics and public transform documentation.

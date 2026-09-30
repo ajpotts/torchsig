@@ -884,8 +884,6 @@ def sampling_clock_impairments(
         timing_offset = 0.0
         if jitter_ppm != 0.0:
             timing_offset = rng.normal(0.0, jitter_std)
-            # Preserve paired RNG consumption until the dedicated parity MR.
-            rng.normal(0.0, 0.0)
 
         sample_position = np.clip(
             nominal_position + timing_offset,
