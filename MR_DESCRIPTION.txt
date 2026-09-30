@@ -1,19 +1,19 @@
-Title: Align seeded NumPy and Numba sampling-clock streams
+Title: Document sampling-clock drift and jitter semantics
 
 Target branch: 3.0.0-dev
 
 Summary
 
-This MR gives the NumPy and Numba sampling-clock paths one equivalent seeded
-jitter stream and adds explicit combined-impairment parity coverage.
+This documentation-only MR describes the fixed drift and independent jitter
+contracts established by the preceding sampling-clock MRs.
 
 Changes
 
-- Replace the interleaved compatibility pool with one float64 jitter array.
-- Pass one jitter value per output sample to the compiled kernel.
-- Preserve seeded values during capacity growth.
-- Test combined drift/jitter parity and reproducibility.
+- Document signed fixed-rate drift.
+- Document independent jitter measured in input-sample periods.
+- Update functional and transform-class API descriptions.
+- Document the DSP helper's complex64 return and validation errors.
 
 Verification
 
-pytest -q tests/utils/test_sampling_clock_seeded_parity.py
+Documentation-only change; no additional tests required.

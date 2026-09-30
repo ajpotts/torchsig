@@ -821,23 +821,30 @@ def sampling_clock_impairments(
     drift_ppm: float,
     rng: np.random.Generator | None = None,
 ) -> np.ndarray:
-    """Implements sampling clock impairments (jitter and drift) using polyphase filtering.
+    """Apply sampling-clock offset and jitter using polyphase filtering.
 
-    This function applies clock jitter and drift to a signal by introducing random variations
-    in the sampling rate during resampling. It uses a polyphase filter bank approach for
-    efficient implementation.
+    ``drift_ppm`` is a signed, fixed fractional error in the nominal
+    input-position increment. ``jitter_ppm`` is the standard deviation of an
+    independent displacement of each sampling instant, expressed in millionths
+    of one input-sample period.
 
     Args:
-        h: Filter coefficients (1D array of floats)
-        x: Input signal (1D array of complex numbers)
-        uprate: Upsampling factor (integer)
-        drate: Downsampling factor (float)
-        jitter_ppm: Jitter in parts per million (float)
-        drift_ppm: Drift in parts per million (float)
-        seed: Random seed (optional)
+        h: One-dimensional array of filter coefficients.
+        x: One-dimensional array of complex input samples.
+        uprate: Number of polyphase branches.
+        drate: Nominal position increment in polyphase units.
+        jitter_ppm: Nonnegative RMS timing jitter in PPM of one input-sample
+            period.
+        drift_ppm: Signed fixed sampling-rate offset in PPM.
+        rng: Random number generator. A new generator is used when omitted.
 
     Returns:
-        Output signal with clock impairments (1D array of complex numbers)
+        One-dimensional complex64 array containing the resampled signal.
+
+    Raises:
+        ValueError: If an argument is invalid or drift produces a nonpositive
+            sampling-position increment.
+        RuntimeError: If the output exceeds its defensive capacity limit.
     """
     if not isinstance(uprate, (int, np.integer)) or uprate <= 0:
         raise ValueError("uprate must be a positive integer")
@@ -873,7 +880,7 @@ def sampling_clock_impairments(
     max_output_samples = num_output_samples * 16
     output_idx = 0
 
-    # Generate random jitter and drift
+    # Convert jitter from input-sample periods to polyphase-position units.
     jitter_std = uprate * jitter_ppm * 1e-6
 
     # Run the resampler

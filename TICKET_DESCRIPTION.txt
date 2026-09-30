@@ -1,26 +1,24 @@
-Title: Align seeded NumPy and Numba sampling-clock streams
+Title: Document sampling-clock drift and jitter semantics
 
 Problem
 
-The NumPy implementation draws one jitter value at a time while the Numba
-wrapper retains an interleaved compatibility pool. The two implementations
-should consume one equivalent seeded jitter stream and produce numerically
-equivalent results.
+The public clock drift and jitter documentation still describes the previous
+accumulated-random-drift model and does not define jitter units or independence.
 
 Scope
 
-- Generate one float64 jitter value per output sample.
-- Pass that stream directly to the compiled kernel.
-- Preserve generated values when capacity grows.
-- Test combined drift and jitter with identical seeds.
+- Document drift as a signed fixed sampling-rate offset.
+- Document jitter as an independent per-sample displacement.
+- State that jitter PPM is measured against one input-sample period.
+- Update functional, transform-class, and DSP helper documentation.
 
 Acceptance criteria
 
-- Identical seeds produce reproducible output in each implementation.
-- NumPy and Numba outputs agree for combined drift and jitter.
-- The compiled kernel accepts one jitter value per output sample.
-- Output remains complex64.
+- Public documentation agrees with implemented drift and jitter behavior.
+- Parameter units and sign conventions are explicit.
+- Return dtype and validation errors are documented on the DSP helper.
+- No executable behavior changes are included.
 
 Out of scope
 
-Clock-model semantics and public transform documentation.
+Additional clock models, API controls, and implementation changes.
