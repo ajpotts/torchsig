@@ -1,0 +1,20 @@
+Title: Simplify the Numba sampling-clock kernel
+
+Target branch: 3.0.0-dev
+
+Summary
+
+This MR performs a behavior-preserving cleanup of the private Numba
+sampling-clock implementation in preparation for smaller semantic changes.
+
+Changes
+
+- Remove the unused filter argument from the compiled kernel.
+- Use descriptive tap and input-position names in the accumulation loop.
+- Consolidate empty and nonempty complex64 result construction.
+- Pass contiguous float32 filter and input arrays to the kernel.
+- Update direct kernel tests for the simplified private signature.
+
+Verification
+
+pytest -q --test-mode=full tests/utils/test_dsp_numba.py

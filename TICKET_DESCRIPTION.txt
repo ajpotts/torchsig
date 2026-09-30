@@ -1,0 +1,27 @@
+Title: Simplify the Numba sampling-clock kernel interface
+
+Problem
+
+The compiled sampling-clock kernel accepts an unused filter argument, repeats
+index expressions inside its tap loop, and handles empty and nonempty output
+through separate return paths. Its wrapper also relies on implicit array
+contiguity and dtype conversion.
+
+Scope
+
+- Remove the unused filter argument from the private kernel.
+- Use descriptive tap and input-position variable names.
+- Use one complex64 output-construction path for empty and nonempty results.
+- Prepare filter and input arrays as contiguous float32 arrays in the wrapper.
+- Format and document the private kernel interface clearly.
+
+Acceptance criteria
+
+- Existing sampling-clock output remains numerically unchanged.
+- Empty output remains an empty complex64 array.
+- NumPy/Numba parity and reproducibility tests continue to pass.
+- Direct private-kernel tests use the simplified signature.
+
+Out of scope
+
+Changes to drift, jitter, output-capacity, validation, or public API semantics.

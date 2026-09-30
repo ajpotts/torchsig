@@ -271,7 +271,6 @@ def test_sampling_clock_impairments_numba_py_func_covers_kernel_body():
     jitter_drift_pool = rng.normal(0.0, 1.0, num_output_samples * 2).astype(np.float32) * 1e-6
 
     out = sampling_clock_impairments_numba.py_func(
-        h,
         x.real.astype(np.float32),
         x.imag.astype(np.float32),
         uprate,
@@ -296,7 +295,6 @@ def test_sampling_clock_impairments_numba_py_func_handles_empty_output():
     x = np.array([], dtype=np.complex64)
 
     out = sampling_clock_impairments_numba.py_func(
-        h,
         x.real.astype(np.float32),
         x.imag.astype(np.float32),
         1,
