@@ -1,0 +1,32 @@
+TorchSIG #165 sampling-clock merge order
+========================================
+
+Ultimate target: 3.0.0-dev
+
+Initial stacked targets
+-----------------------
+
+1. Merge 165-clock-numba-cleanup into 3.0.0-dev.
+2. Merge 165-clock-output-capacity into 165-clock-numba-cleanup.
+3. Merge 165-clock-fixed-drift into 165-clock-output-capacity.
+4. Merge 165-clock-independent-jitter into 165-clock-fixed-drift.
+5. Merge 165-clock-seeded-parity into 165-clock-independent-jitter.
+6. Merge 165-clock-public-docs into 165-clock-seeded-parity.
+
+Retargeting procedure
+---------------------
+
+After each parent merges, retarget its direct child to 3.0.0-dev. Do not merge
+a downstream branch before its direct parent. Each MR is reviewed against its
+immediate parent so it displays only its own focused changes.
+
+Branch stack
+------------
+
+3.0.0-dev
+└── 165-clock-numba-cleanup
+    └── 165-clock-output-capacity
+        └── 165-clock-fixed-drift
+            └── 165-clock-independent-jitter
+                └── 165-clock-seeded-parity
+                    └── 165-clock-public-docs
