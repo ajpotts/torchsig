@@ -1,25 +1,25 @@
-Title: Harden sampling-clock output capacity
+Title: Define drift as a fixed sampling-rate offset
 
 Problem
 
-Sampling-clock output is written into a preallocated buffer. Future signed
-rate-offset behavior can produce more samples than the initial estimate, which
-would otherwise result in an uncontrolled out-of-bounds write.
+Clock drift is currently generated as accumulated Gaussian noise. The
+`drift_ppm` parameter should instead represent one signed sampling-rate offset
+that remains constant for the duration of the signal.
 
 Scope
 
-- Check capacity before NumPy and Numba output writes.
-- Grow output and random-value buffers geometrically when needed.
-- Apply a defensive maximum growth multiplier.
-- Raise a clear error if the defensive limit is exhausted.
+- Convert `drift_ppm` to a signed nominal-position increment.
+- Advance NumPy and Numba nominal positions with that fixed increment.
+- Size initial output storage using the effective increment.
+- Stop consuming random values for drift-only calls.
 
 Acceptance criteria
 
-- Existing in-capacity output remains numerically unchanged.
-- The compiled kernel rejects undersized output storage before writing.
-- Wrapper-managed growth preserves existing random values.
-- Exhausting the defensive limit raises a clear `RuntimeError`.
+- Positive drift produces fewer raw output samples than zero drift.
+- Negative drift produces more raw output samples than zero drift.
+- Drift-only processing does not consume random values.
+- NumPy and Numba implement the same signed-offset behavior.
 
 Out of scope
 
-Changes to drift, jitter, validation, or public API semantics.
+Independent jitter semantics and public transform documentation.

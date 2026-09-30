@@ -1,20 +1,19 @@
-Title: Harden sampling-clock output capacity
+Title: Define drift as a fixed sampling-rate offset
 
 Target branch: 3.0.0-dev
 
 Summary
 
-This MR adds explicit output bounds and controlled capacity growth to the NumPy
-and Numba sampling-clock implementations.
+This MR changes `drift_ppm` from accumulated random drift to a signed, fixed
+sampling-rate offset in both sampling-clock implementations.
 
 Changes
 
-- Check capacity before every output write.
-- Grow NumPy output storage geometrically within a defensive limit.
-- Grow Numba wrapper output and random-value capacity together.
-- Raise a clear error when the defensive capacity is exhausted.
-- Add direct coverage for an undersized compiled-kernel buffer.
+- Advance nominal positions using the validated drift-adjusted increment.
+- Size initial output storage for positive and negative rate offsets.
+- Remove random-number consumption from drift-only processing.
+- Test positive, zero, and negative drift in NumPy and Numba.
 
 Verification
 
-pytest -q --test-mode=full tests/utils/test_dsp_numba.py
+pytest -q tests/utils/test_sampling_clock_fixed_drift.py

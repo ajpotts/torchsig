@@ -282,6 +282,7 @@ def test_sampling_clock_impairments_numba_py_func_covers_kernel_body():
         taps_per_phase,
         padded_len,
         max_start,
+        drate,
         num_output_samples,
     )
 
@@ -306,6 +307,7 @@ def test_sampling_clock_impairments_numba_py_func_handles_empty_output():
         1,
         0,
         -1,
+        1.0,
         1,
     )
 
@@ -327,6 +329,7 @@ def test_sampling_clock_numba_kernel_rejects_exhausted_output_capacity():
             1,
             4,
             3,
+            1.0,
             1,
         )
 
