@@ -313,6 +313,24 @@ def test_sampling_clock_impairments_numba_py_func_handles_empty_output():
     assert out.dtype == np.complex64
 
 
+def test_sampling_clock_numba_kernel_rejects_exhausted_output_capacity():
+    with pytest.raises(RuntimeError, match="sampling clock output capacity exhausted"):
+        sampling_clock_impairments_numba.py_func(
+            np.ones(4, dtype=np.float32),
+            np.zeros(4, dtype=np.float32),
+            1,
+            1.0,
+            0.0,
+            0.0,
+            np.zeros(2, dtype=np.float32),
+            np.array([[1.0]], dtype=np.float32),
+            1,
+            4,
+            3,
+            1,
+        )
+
+
 def test_digital_agc_numba_py_func_covers_kernel_body():
     x = _agc_data(n=64)
 

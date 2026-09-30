@@ -1,27 +1,25 @@
-Title: Simplify the Numba sampling-clock kernel interface
+Title: Harden sampling-clock output capacity
 
 Problem
 
-The compiled sampling-clock kernel accepts an unused filter argument, repeats
-index expressions inside its tap loop, and handles empty and nonempty output
-through separate return paths. Its wrapper also relies on implicit array
-contiguity and dtype conversion.
+Sampling-clock output is written into a preallocated buffer. Future signed
+rate-offset behavior can produce more samples than the initial estimate, which
+would otherwise result in an uncontrolled out-of-bounds write.
 
 Scope
 
-- Remove the unused filter argument from the private kernel.
-- Use descriptive tap and input-position variable names.
-- Use one complex64 output-construction path for empty and nonempty results.
-- Prepare filter and input arrays as contiguous float32 arrays in the wrapper.
-- Format and document the private kernel interface clearly.
+- Check capacity before NumPy and Numba output writes.
+- Grow output and random-value buffers geometrically when needed.
+- Apply a defensive maximum growth multiplier.
+- Raise a clear error if the defensive limit is exhausted.
 
 Acceptance criteria
 
-- Existing sampling-clock output remains numerically unchanged.
-- Empty output remains an empty complex64 array.
-- NumPy/Numba parity and reproducibility tests continue to pass.
-- Direct private-kernel tests use the simplified signature.
+- Existing in-capacity output remains numerically unchanged.
+- The compiled kernel rejects undersized output storage before writing.
+- Wrapper-managed growth preserves existing random values.
+- Exhausting the defensive limit raises a clear `RuntimeError`.
 
 Out of scope
 
-Changes to drift, jitter, output-capacity, validation, or public API semantics.
+Changes to drift, jitter, validation, or public API semantics.

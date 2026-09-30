@@ -15,6 +15,9 @@ import numpy as np
 from numba import jit
 from numba.types import complex64, float32
 
+_OUTPUT_CAPACITY_ERROR = "sampling clock output capacity exhausted"
+_MAX_OUTPUT_CAPACITY_MULTIPLIER = 16
+
 
 @jit(nopython=True, cache=True)
 def partition_polyphase_numba(h, up_rate, taps_per_phase):
@@ -73,6 +76,9 @@ def sampling_clock_impairments_numba(
     clock_drift = 0.0
 
     while nominal_position <= max_sample_position:
+        if output_idx >= num_output_samples or (output_idx * 2 + 1) >= len(jitter_drift_pool):
+            raise RuntimeError(_OUTPUT_CAPACITY_ERROR)
+
         sample_position = nominal_position + position_offset
         if sample_position < 0.0:
             sample_position = 0.0
@@ -169,20 +175,40 @@ def sampling_clock_impairments_numba_wrapper(
     x_real = np.ascontiguousarray(x.real, dtype=np.float32)
     x_imag = np.ascontiguousarray(x.imag, dtype=np.float32)
 
-    return sampling_clock_impairments_numba(
-        x_real,
-        x_imag,
-        uprate,
-        drate,
-        jitter_ppm,
-        drift_ppm,
-        jitter_drift_pool,
-        h_pfb_reversed,
-        taps_per_phase,
-        padded_len,
-        max_input_idx,
-        num_output_samples,
-    )
+    max_output_samples = num_output_samples * _MAX_OUTPUT_CAPACITY_MULTIPLIER
+
+    while True:
+        try:
+            return sampling_clock_impairments_numba(
+                x_real,
+                x_imag,
+                uprate,
+                drate,
+                jitter_ppm,
+                drift_ppm,
+                jitter_drift_pool,
+                h_pfb_reversed,
+                taps_per_phase,
+                padded_len,
+                max_input_idx,
+                num_output_samples,
+            )
+        except RuntimeError as exc:
+            if str(exc) != _OUTPUT_CAPACITY_ERROR or num_output_samples >= max_output_samples:
+                raise
+
+        new_capacity = min(2 * num_output_samples, max_output_samples)
+        additional_count = new_capacity - num_output_samples
+        if jitter_ppm != 0.0 or drift_ppm != 0.0:
+            pairs = rng.normal(0.0, 1.0, (additional_count, 2)).astype(np.float32)
+            additional_pool = np.empty(additional_count * 2, dtype=np.float32)
+            additional_pool[0::2] = pairs[:, 0] * jitter_std
+            additional_pool[1::2] = pairs[:, 1] * drift_std
+        else:
+            additional_pool = np.zeros(additional_count * 2, dtype=np.float32)
+
+        jitter_drift_pool = np.concatenate((jitter_drift_pool, additional_pool))
+        num_output_samples = new_capacity
 
 
 @jit(nopython=True, cache=True)

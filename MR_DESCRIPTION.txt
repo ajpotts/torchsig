@@ -1,19 +1,19 @@
-Title: Simplify the Numba sampling-clock kernel
+Title: Harden sampling-clock output capacity
 
 Target branch: 3.0.0-dev
 
 Summary
 
-This MR performs a behavior-preserving cleanup of the private Numba
-sampling-clock implementation in preparation for smaller semantic changes.
+This MR adds explicit output bounds and controlled capacity growth to the NumPy
+and Numba sampling-clock implementations.
 
 Changes
 
-- Remove the unused filter argument from the compiled kernel.
-- Use descriptive tap and input-position names in the accumulation loop.
-- Consolidate empty and nonempty complex64 result construction.
-- Pass contiguous float32 filter and input arrays to the kernel.
-- Update direct kernel tests for the simplified private signature.
+- Check capacity before every output write.
+- Grow NumPy output storage geometrically within a defensive limit.
+- Grow Numba wrapper output and random-value capacity together.
+- Raise a clear error when the defensive capacity is exhausted.
+- Add direct coverage for an undersized compiled-kernel buffer.
 
 Verification
 

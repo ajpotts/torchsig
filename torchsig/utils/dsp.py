@@ -871,6 +871,7 @@ def sampling_clock_impairments(
     position_offset = 0.0
     num_output_samples = int(np.ceil(len(input_padded) * uprate / drate)) + 1
     output_samples = np.zeros(num_output_samples, dtype=TorchSigComplexDataType)
+    max_output_samples = num_output_samples * 16
     output_idx = 0
     clock_drift = 0.0
 
@@ -899,6 +900,12 @@ def sampling_clock_impairments(
         acc_re = np.sum(h_phase * delay_slice[::-1].real)
         acc_im = np.sum(h_phase * delay_slice[::-1].imag)
         pfb_out = acc_re + 1j * acc_im
+
+        if output_idx >= len(output_samples):
+            if len(output_samples) >= max_output_samples:
+                raise RuntimeError("sampling clock output capacity exhausted")
+            new_size = min(2 * len(output_samples), max_output_samples)
+            output_samples.resize(new_size, refcheck=False)
 
         output_samples[output_idx] = pfb_out
         output_idx += 1
