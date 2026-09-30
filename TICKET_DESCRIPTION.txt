@@ -1,25 +1,26 @@
-Title: Define drift as a fixed sampling-rate offset
+Title: Apply independent sampling-time jitter
 
 Problem
 
-Clock drift is currently generated as accumulated Gaussian noise. The
-`drift_ppm` parameter should instead represent one signed sampling-rate offset
-that remains constant for the duration of the signal.
+Clock jitter currently accumulates into subsequent sampling positions and is
+scaled in polyphase units rather than input-sample periods. Aperture jitter
+should perturb each sampling instant independently.
 
 Scope
 
-- Convert `drift_ppm` to a signed nominal-position increment.
-- Advance NumPy and Numba nominal positions with that fixed increment.
-- Size initial output storage using the effective increment.
-- Stop consuming random values for drift-only calls.
+- Draw one timing displacement for each output sample.
+- Apply the displacement only to the current read position.
+- Scale jitter by the polyphase up-rate so PPM refers to an input-sample
+  period.
+- Preserve the nominal output length.
 
 Acceptance criteria
 
-- Positive drift produces fewer raw output samples than zero drift.
-- Negative drift produces more raw output samples than zero drift.
-- Drift-only processing does not consume random values.
-- NumPy and Numba implement the same signed-offset behavior.
+- Jitter does not accumulate into later nominal positions.
+- Jitter does not change nominal output length.
+- NumPy and Numba use the same input-period scaling.
+- Output remains finite complex64 data.
 
 Out of scope
 
-Independent jitter semantics and public transform documentation.
+Random-stream cleanup and public transform documentation.

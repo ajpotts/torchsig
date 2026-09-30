@@ -1,19 +1,19 @@
-Title: Define drift as a fixed sampling-rate offset
+Title: Apply independent sampling-time jitter
 
 Target branch: 3.0.0-dev
 
 Summary
 
-This MR changes `drift_ppm` from accumulated random drift to a signed, fixed
-sampling-rate offset in both sampling-clock implementations.
+This MR makes clock jitter an independent displacement of each sampling instant
+and defines its PPM scale relative to one input-sample period.
 
 Changes
 
-- Advance nominal positions using the validated drift-adjusted increment.
-- Size initial output storage for positive and negative rate offsets.
-- Remove random-number consumption from drift-only processing.
-- Test positive, zero, and negative drift in NumPy and Numba.
+- Apply jitter only to the current read position.
+- Exclude jitter from nominal-position advancement.
+- Scale jitter by the polyphase up-rate.
+- Test output-length invariance and finite complex64 output.
 
 Verification
 
-pytest -q tests/utils/test_sampling_clock_fixed_drift.py
+pytest -q tests/utils/test_sampling_clock_independent_jitter.py

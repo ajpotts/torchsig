@@ -868,22 +868,27 @@ def sampling_clock_impairments(
     # Track the ideal sampling path in absolute polyphase units. Timing
     # impairments are accumulated separately and applied only to each read.
     nominal_position = uprate / drate
-    position_offset = 0.0
     num_output_samples = int(np.ceil(len(input_padded) * uprate / nominal_position_increment)) + 1
     output_samples = np.zeros(num_output_samples, dtype=TorchSigComplexDataType)
     max_output_samples = num_output_samples * 16
     output_idx = 0
 
     # Generate random jitter and drift
-    jitter_std = jitter_ppm * 1e-6
+    jitter_std = uprate * jitter_ppm * 1e-6
 
     # Run the resampler
     max_input_idx = len(input_padded) - taps_per_phase
     max_sample_position = max_input_idx * uprate + (uprate - 1)
 
     while nominal_position <= max_sample_position:
+        timing_offset = 0.0
+        if jitter_ppm != 0.0:
+            timing_offset = rng.normal(0.0, jitter_std)
+            # Preserve paired RNG consumption until the dedicated parity MR.
+            rng.normal(0.0, 0.0)
+
         sample_position = np.clip(
-            nominal_position + position_offset,
+            nominal_position + timing_offset,
             0.0,
             max_sample_position,
         )
@@ -907,13 +912,6 @@ def sampling_clock_impairments(
 
         output_samples[output_idx] = pfb_out
         output_idx += 1
-
-        if jitter_ppm != 0.0:
-            clock_jitter = rng.normal(0.0, jitter_std)
-            # Preserve the existing paired RNG consumption until jitter stream
-            # generation is refactored in the dedicated parity change.
-            rng.normal(0.0, 0.0)
-            position_offset += clock_jitter
 
         nominal_position += nominal_position_increment
 

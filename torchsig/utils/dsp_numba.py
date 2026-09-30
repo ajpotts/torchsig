@@ -67,7 +67,6 @@ def sampling_clock_impairments_numba(
     # Track the ideal sampling path in absolute polyphase units. Timing
     # impairments are accumulated separately and applied only to each read.
     nominal_position = uprate / drate
-    position_offset = 0.0
     max_sample_position = max_input_idx * uprate + (uprate - 1)
 
     output_real = np.zeros(num_output_samples, dtype=np.float32)
@@ -78,7 +77,8 @@ def sampling_clock_impairments_numba(
         if output_idx >= num_output_samples or (output_idx * 2 + 1) >= len(jitter_drift_pool):
             raise RuntimeError(_OUTPUT_CAPACITY_ERROR)
 
-        sample_position = nominal_position + position_offset
+        pool_index = output_idx * 2
+        sample_position = nominal_position + jitter_drift_pool[pool_index]
         if sample_position < 0.0:
             sample_position = 0.0
         elif sample_position > max_sample_position:
@@ -100,11 +100,6 @@ def sampling_clock_impairments_numba(
         output_real[output_idx] = acc_re
         output_imag[output_idx] = acc_im
         output_idx += 1
-
-        if jitter_ppm != 0.0:
-            pool_index = (output_idx - 1) * 2
-            clock_jitter = jitter_drift_pool[pool_index]
-            position_offset += clock_jitter
 
         nominal_position += nominal_position_increment
 
@@ -159,7 +154,7 @@ def sampling_clock_impairments_numba_wrapper(
     num_output_samples = int(np.ceil(padded_len * uprate / nominal_position_increment)) + 1
 
     if jitter_ppm != 0.0:
-        jitter_std = jitter_ppm * 1e-6
+        jitter_std = uprate * jitter_ppm * 1e-6
 
         pairs = rng.normal(0.0, 1.0, (num_output_samples, 2)).astype(np.float32)
 
