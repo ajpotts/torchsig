@@ -1,0 +1,27 @@
+Title: Add initial sampling phase control to clock impairments
+
+Target branch: 3.0.0-dev
+
+Summary
+
+This MR adds an optional initial_phase argument to sampling-clock impairment
+APIs so callers can select the initial fractional sampling position while
+preserving existing behavior by default.
+
+Changes
+
+- Add initial_phase=0.0 to the NumPy and Numba sampling-clock implementations.
+- Interpret initial_phase in input-sample periods and apply it to the initial
+  absolute polyphase position.
+- Validate that initial_phase is finite and in the half-open interval [0, 1).
+- Propagate initial_phase through clock_drift, clock_jitter, ClockDrift, and
+  ClockJitter.
+- Configure initial_phase distributions directly on ClockDrift and ClockJitter,
+  matching their existing drift/jitter parameter handling.
+- Add coverage for defaults, representative phases, invalid values, initial
+  position changes, NumPy/Numba behavior, and public API propagation.
+
+Verification
+
+pytest -q --test-mode=full tests/utils/test_sampling_clock_initial_phase.py tests/utils/test_sampling_clock_validation.py tests/utils/test_dsp_numba.py
+pytest -q tests/transforms/test_functional.py tests/transforms/test_transforms.py

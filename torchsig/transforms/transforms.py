@@ -642,16 +642,34 @@ class ChannelSwap(SignalTransform):
 class ClockDrift(SignalTransform):
     """Simulates a clock drift effect, which applies a random error to the sampling rate."""
 
-    def __init__(self, drift_ppm: tuple[float, float] = (1, 10), **kwargs):
+    def __init__(
+        self,
+        drift_ppm: tuple[float, float] = (1, 10),
+        initial_phase: float | tuple[float, float] = 0.0,
+        **kwargs,
+    ):
         """Initialize the ClockDrift transform.
 
         Args:
             drift_ppm: Drift in parts per million (ppm). Default (1,10).
+            initial_phase: Initial sampling phase in input-sample periods, or
+                a range from which to draw it. Values must be in the half-open
+                interval ``[0, 1)``. Defaults to 0.
             **kwargs: Additional keyword arguments passed to the parent class.
         """
         super().__init__(required_metadata=[], data_dtype=TorchSigComplexDataType, **kwargs)
+        initial_phase_values = np.asarray(initial_phase, dtype=float)
+        if (
+            np.any(~np.isfinite(initial_phase_values))
+            or np.any(initial_phase_values < 0.0)
+            or np.any(initial_phase_values >= 1.0)
+        ):
+            raise ValueError("initial_phase must be finite and in the interval [0, 1)")
         self.drift_ppm = drift_ppm
+        self.initial_phase = initial_phase
         self.drift_ppm_distribution = self.get_distribution(self.drift_ppm, "log10")
+        initial_phase_distribution_params = initial_phase if isinstance(initial_phase, tuple) else [initial_phase]
+        self.initial_phase_distribution = self.get_distribution(initial_phase_distribution_params)
 
     def __apply__(self, signal: Signal) -> Signal:
         """Apply clock drift to the signal.
@@ -663,8 +681,14 @@ class ClockDrift(SignalTransform):
             Signal with clock drift applied.
         """
         drift_ppm = self.drift_ppm_distribution()
+        initial_phase = self.initial_phase_distribution()
 
-        signal.data = F.clock_drift(data=signal.data, drift_ppm=drift_ppm, rng=self.random_generator)
+        signal.data = F.clock_drift(
+            data=signal.data,
+            drift_ppm=drift_ppm,
+            rng=self.random_generator,
+            initial_phase=initial_phase,
+        )
 
         return signal
 
@@ -672,16 +696,34 @@ class ClockDrift(SignalTransform):
 class ClockJitter(SignalTransform):
     """Simulates a clock jitter effect, which applies a random error to the sampling phase."""
 
-    def __init__(self, jitter_ppm: tuple[float, float] = (1, 10), **kwargs):
+    def __init__(
+        self,
+        jitter_ppm: tuple[float, float] = (1, 10),
+        initial_phase: float | tuple[float, float] = 0.0,
+        **kwargs,
+    ):
         """Initialize the ClockJitter transform.
 
         Args:
             jitter_ppm: Jitter in parts per million (ppm). Default (1,10).
+            initial_phase: Initial sampling phase in input-sample periods, or
+                a range from which to draw it. Values must be in the half-open
+                interval ``[0, 1)``. Defaults to 0.
             **kwargs: Additional keyword arguments passed to the parent class.
         """
         super().__init__(required_metadata=[], data_dtype=TorchSigComplexDataType, **kwargs)
+        initial_phase_values = np.asarray(initial_phase, dtype=float)
+        if (
+            np.any(~np.isfinite(initial_phase_values))
+            or np.any(initial_phase_values < 0.0)
+            or np.any(initial_phase_values >= 1.0)
+        ):
+            raise ValueError("initial_phase must be finite and in the interval [0, 1)")
         self.jitter_ppm = jitter_ppm
+        self.initial_phase = initial_phase
         self.jitter_ppm_distribution = self.get_distribution(self.jitter_ppm, "log10")
+        initial_phase_distribution_params = initial_phase if isinstance(initial_phase, tuple) else [initial_phase]
+        self.initial_phase_distribution = self.get_distribution(initial_phase_distribution_params)
 
     def __apply__(self, signal: Signal) -> Signal:
         """Apply clock jitter to the signal.
@@ -693,8 +735,14 @@ class ClockJitter(SignalTransform):
             Signal with clock jitter applied.
         """
         jitter_ppm = self.jitter_ppm_distribution()
+        initial_phase = self.initial_phase_distribution()
 
-        signal.data = F.clock_jitter(data=signal.data, jitter_ppm=jitter_ppm, rng=self.random_generator)
+        signal.data = F.clock_jitter(
+            data=signal.data,
+            jitter_ppm=jitter_ppm,
+            rng=self.random_generator,
+            initial_phase=initial_phase,
+        )
 
         return signal
 

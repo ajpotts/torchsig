@@ -240,6 +240,7 @@ def clock_drift(
     data: np.ndarray,
     drift_ppm: float = 10,
     rng: np.random.Generator | None = None,
+    initial_phase: float = 0.0,
 ) -> np.ndarray:
     """Clock drift from a Local Oscillator (LO), modeled as accumulated gaussian random noise impacting the
     sampling rate.
@@ -252,6 +253,8 @@ def clock_drift(
         data: Complex valued IQ data samples.
         drift_ppm: Clock drift in parts per million (ppm). Default 10.
         rng: Random number generator. Defaults to np.random.default_rng(seed=None).
+        initial_phase: Initial sampling phase in input-sample periods. Must be
+            in the half-open interval ``[0, 1)``. Defaults to 0.
 
     Returns:
         Data with LO drift applied.
@@ -272,7 +275,16 @@ def clock_drift(
     pfb_prototype_filter = pfb_prototype_filter.astype(TorchSigRealDataType)
 
     # call the impairment
-    data_with_drift = _sampling_clock_impairments(h=pfb_prototype_filter, x=data, uprate=uprate, drate=downrate, jitter_ppm=0, drift_ppm=drift_ppm, rng=rng)
+    data_with_drift = _sampling_clock_impairments(
+        h=pfb_prototype_filter,
+        x=data,
+        uprate=uprate,
+        drate=downrate,
+        jitter_ppm=0,
+        drift_ppm=drift_ppm,
+        rng=rng,
+        initial_phase=initial_phase,
+    )
 
     return _preserve_sampling_clock_output(data_with_drift, len(data))
 
@@ -281,6 +293,7 @@ def clock_jitter(
     data: np.ndarray,
     jitter_ppm: float = 10,
     rng: np.random.Generator | None = None,
+    initial_phase: float = 0.0,
 ) -> np.ndarray:
     """Clock jitter from a Local Oscillator (LO), modeled as gaussian random noise impacting the
     sampling phase.
@@ -293,6 +306,8 @@ def clock_jitter(
         data: Complex valued IQ data samples.
         jitter_ppm: Jitter in parts per million (ppm). Default 10.
         rng: Random number generator. Defaults to np.random.default_rng(seed=None).
+        initial_phase: Initial sampling phase in input-sample periods. Must be
+            in the half-open interval ``[0, 1)``. Defaults to 0.
 
     Returns:
         Data with LO drift applied.
@@ -321,6 +336,7 @@ def clock_jitter(
         jitter_ppm=jitter_ppm,
         drift_ppm=0,
         rng=rng,
+        initial_phase=initial_phase,
     )
 
     return _preserve_sampling_clock_output(data_with_jitter, len(data))

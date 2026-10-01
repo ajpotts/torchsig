@@ -6,7 +6,6 @@ import pytest
 from torchsig.utils.dsp import sampling_clock_impairments
 from torchsig.utils.dsp_numba import sampling_clock_impairments_numba_wrapper
 
-
 IMPLEMENTATIONS = (
     sampling_clock_impairments,
     sampling_clock_impairments_numba_wrapper,
@@ -36,6 +35,9 @@ def _kwargs() -> dict:
         ({"jitter_ppm": -1.0}, "jitter_ppm must be finite and nonnegative"),
         ({"jitter_ppm": np.nan}, "jitter_ppm must be finite and nonnegative"),
         ({"drift_ppm": np.nan}, "drift_ppm must be finite"),
+        ({"initial_phase": -0.1}, "initial_phase must be finite and in the interval"),
+        ({"initial_phase": 1.0}, "initial_phase must be finite and in the interval"),
+        ({"initial_phase": np.nan}, "initial_phase must be finite and in the interval"),
         (
             {"drift_ppm": -1_000_000.0},
             "drift_ppm produces a nonfinite or nonpositive sampling-position increment",

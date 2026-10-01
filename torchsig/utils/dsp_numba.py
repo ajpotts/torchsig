@@ -48,6 +48,7 @@ def sampling_clock_impairments_numba(
     padded_len,
     max_input_idx,
     num_output_samples,
+    initial_phase,
 ):
     """Apply sampling-clock impairments with precomputed filter and RNG data.
 
@@ -65,7 +66,7 @@ def sampling_clock_impairments_numba(
 
     # Track the ideal sampling path in absolute polyphase units. Timing
     # impairments are accumulated separately and applied only to each read.
-    nominal_position = uprate / drate
+    nominal_position = uprate / drate + initial_phase * uprate
     position_offset = 0.0
     max_sample_position = max_input_idx * uprate + (uprate - 1)
 
@@ -125,6 +126,7 @@ def sampling_clock_impairments_numba_wrapper(
     jitter_ppm,
     drift_ppm,
     rng,
+    initial_phase=0.0,
 ):
     """Wrapper for the numba-optimized sampling clock impairments function.
 
@@ -139,6 +141,8 @@ def sampling_clock_impairments_numba_wrapper(
         raise ValueError("jitter_ppm must be finite and nonnegative")
     if not np.isfinite(drift_ppm):
         raise ValueError("drift_ppm must be finite")
+    if not np.isfinite(initial_phase) or not 0.0 <= initial_phase < 1.0:
+        raise ValueError("initial_phase must be finite and in the interval [0, 1)")
 
     nominal_position_increment = drate * (1.0 + drift_ppm * 1e-6)
     if not np.isfinite(nominal_position_increment) or nominal_position_increment <= 0.0:
@@ -192,6 +196,7 @@ def sampling_clock_impairments_numba_wrapper(
                 padded_len,
                 max_input_idx,
                 num_output_samples,
+                initial_phase,
             )
         except RuntimeError as exc:
             if str(exc) != _OUTPUT_CAPACITY_ERROR or num_output_samples >= max_output_samples:

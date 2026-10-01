@@ -820,6 +820,7 @@ def sampling_clock_impairments(
     jitter_ppm: float,
     drift_ppm: float,
     rng: np.random.Generator | None = None,
+    initial_phase: float = 0.0,
 ) -> np.ndarray:
     """Implements sampling clock impairments (jitter and drift) using polyphase filtering.
 
@@ -834,7 +835,9 @@ def sampling_clock_impairments(
         drate: Downsampling factor (float)
         jitter_ppm: Jitter in parts per million (float)
         drift_ppm: Drift in parts per million (float)
-        seed: Random seed (optional)
+        rng: Random number generator. Defaults to ``np.random.default_rng()``.
+        initial_phase: Initial sampling phase in input-sample periods. Must be
+            in the half-open interval ``[0, 1)``. Defaults to 0.
 
     Returns:
         Output signal with clock impairments (1D array of complex numbers)
@@ -847,6 +850,8 @@ def sampling_clock_impairments(
         raise ValueError("jitter_ppm must be finite and nonnegative")
     if not np.isfinite(drift_ppm):
         raise ValueError("drift_ppm must be finite")
+    if not np.isfinite(initial_phase) or not 0.0 <= initial_phase < 1.0:
+        raise ValueError("initial_phase must be finite and in the interval [0, 1)")
 
     nominal_position_increment = drate * (1.0 + drift_ppm * 1e-6)
     if not np.isfinite(nominal_position_increment) or nominal_position_increment <= 0.0:
@@ -867,7 +872,7 @@ def sampling_clock_impairments(
 
     # Track the ideal sampling path in absolute polyphase units. Timing
     # impairments are accumulated separately and applied only to each read.
-    nominal_position = uprate / drate
+    nominal_position = uprate / drate + initial_phase * uprate
     position_offset = 0.0
     num_output_samples = int(np.ceil(len(input_padded) * uprate / drate)) + 1
     output_samples = np.zeros(num_output_samples, dtype=TorchSigComplexDataType)

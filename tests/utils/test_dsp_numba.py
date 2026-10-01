@@ -283,6 +283,7 @@ def test_sampling_clock_impairments_numba_py_func_covers_kernel_body():
         padded_len,
         max_start,
         num_output_samples,
+        0.0,
     )
 
     assert out.dtype == np.complex64
@@ -307,6 +308,7 @@ def test_sampling_clock_impairments_numba_py_func_handles_empty_output():
         0,
         -1,
         1,
+        0.0,
     )
 
     assert out.shape == (0,)
@@ -328,6 +330,7 @@ def test_sampling_clock_numba_kernel_rejects_exhausted_output_capacity():
             4,
             3,
             1,
+            0.0,
         )
 
 
