@@ -1,0 +1,35 @@
+### Ticket: Add `initial_phase` to sampling clock impairments
+
+**Summary**
+
+Add an `initial_phase` argument to `sampling_clock_impairments` and related sampling-clock impairment functions so callers can control the initial sampling phase.
+
+**Requested changes**
+
+- Add the following argument to `sampling_clock_impairments` and any related functions/classes that construct or apply the sampling-clock impairment:
+
+```python
+initial_phase: float = 0.0
+```
+
+- Document it as:
+
+> `initial_phase`: Initial sampling phase in input-sample periods. Must be in the half-open interval `[0, 1)`. Defaults to 0.
+
+- Propagate `initial_phase` through the relevant call chain to the underlying resampling/interpolation implementation.
+- Validate that `0 <= initial_phase < 1`; raise `ValueError` otherwise.
+- Preserve existing behavior when `initial_phase=0`.
+- Update docstrings/type hints as appropriate.
+
+**Tests**
+
+Add tests verifying:
+- Default `initial_phase=0` preserves current behavior.
+- Nonzero `initial_phase` changes the initial sampling position as expected.
+- Representative values in `[0, 1)` work correctly.
+- Values `< 0` and `>= 1` raise `ValueError`.
+- `initial_phase` is correctly propagated through related public APIs.
+
+**Acceptance criteria**
+
+Users can explicitly specify the initial fractional sampling phase for sampling-clock impairments, while existing callers that do not provide the argument see no behavioral change.
