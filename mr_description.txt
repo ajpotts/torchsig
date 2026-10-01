@@ -1,0 +1,15 @@
+Summary
+
+- Expand WorkerSeedingDataLoader.__init__ with the TorchSig 3.0-supported DataLoader arguments so Lightning can introspect the constructor.
+- Forward each DataLoader option explicitly while preserving the TorchSig seed initialization path.
+- Continue rejecting external worker_init_fn callbacks, while recognizing the loader's own bound callback when Lightning reconstructs an existing instance.
+- Add regression tests for argument forwarding and Lightning sampler replacement.
+
+Testing
+
+- pytest -q tests/utils/test_data_loading.py
+  - 17 passed
+- pytest -q tests/utils/test_seeding_dataloader.py::test_dataset_seeds_correctly tests/utils/test_seeding_dataloader.py::test_dataloader_seeds_correctly_single_worker tests/utils/test_seeding_dataloader.py::test_WorkerSeedingDataLoader_rejects_worker_init_fn
+  - 3 passed
+- ruff check torchsig/utils/data_loading.py tests/utils/test_data_loading.py
+  - Reports nine pre-existing findings in these files (test-helper docstrings, existing PLR2004/PERF203/NPY002 findings); no new lint category remains from this change.
