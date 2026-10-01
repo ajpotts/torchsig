@@ -1,0 +1,51 @@
+## Summary
+
+`WorkerSeedingDataLoader` is not compatible with PyTorch Lightning's DataLoader reconstruction logic because its constructor exposes most `DataLoader` parameters only through `**kwargs`.
+
+When Lightning reconstructs the DataLoader, for example to inject a distributed sampler during DDP training, the `kwargs` parameter can be treated as a named constructor argument. `WorkerSeedingDataLoader` then forwards this to `torch.utils.data.DataLoader`, resulting in:
+
+```text
+TypeError: DataLoader.__init__() got an unexpected keyword argument 'kwargs'
+```
+
+## Current implementation
+
+```python
+class WorkerSeedingDataLoader(DataLoader, Seedable):
+    def __init__(self, dataset, seed=None, **kwargs):
+        ...
+        DataLoader.__init__(self, dataset, **kwargs)
+```
+
+This works when the loader is instantiated directly, but fails when PyTorch Lightning introspects and reconstructs the loader.
+
+## Requested changes
+
+Update `WorkerSeedingDataLoader.__init__` so that its constructor is compatible with PyTorch Lightning DataLoader reconstruction.
+
+In particular:
+
+- Expose the relevant `torch.utils.data.DataLoader` constructor parameters explicitly rather than representing all of them through `**kwargs`.
+- Preserve the TorchSig-specific `seed` parameter and worker-seeding behavior.
+- Ensure Lightning can replace or inject `sampler` when reconstructing the DataLoader.
+- Continue to prohibit externally supplied `worker_init_fn`.
+- Preserve existing behavior for non-Lightning users.
+- Update the `**kwargs` documentation if it is retained; currently the docstring states that kwargs are passed to both `DataLoader` and `Seedable`, although they are only forwarded to `DataLoader`.
+
+The implemented signature should be based on the supported PyTorch `DataLoader.__init__` signature for TorchSig 3.0 rather than copying a signature from an arbitrary PyTorch version.
+
+## Tests
+
+Add regression coverage that:
+
+1. Instantiates `WorkerSeedingDataLoader` with representative DataLoader arguments.
+2. Verifies existing worker seeding behavior remains unchanged.
+3. Verifies that the loader can be reconstructed with a different `sampler`, following the behavior used by PyTorch Lightning.
+4. If practical, includes a minimal Lightning/DDP integration test demonstrating that Lightning can prepare the loader without producing a `kwargs` constructor error.
+
+## Acceptance criteria
+
+- `WorkerSeedingDataLoader` remains backward compatible for normal TorchSig use.
+- Existing seeding behavior is preserved.
+- PyTorch Lightning can introspect and reconstruct the loader.
+- DDP training no longer fails with `DataLoader.__init__() got an unexpected keyword argument 'kwargs'`.
