@@ -56,8 +56,8 @@ def _hdf5_key(obj) -> str:
     exists" guard to skip the write silently.
     """
     try:
-        return obj._hdf5_key
-    except AttributeError:
+        return vars(obj)["_hdf5_key"]
+    except (KeyError, TypeError):
         return str(id(obj))
 
 
@@ -75,7 +75,7 @@ def populate_hdf5_group_with_metadata(group, metadata_obj) -> bool:
     if key in group:
         return False
     metadata_group = group.create_group(key)
-    for k in metadata_obj.keys():
+    for k in metadata_obj.keys():  # noqa: SIM118 - metadata objects are not iterable
         if not metadata_obj[k] == None:
             metadata_group.create_dataset(k, data=metadata_obj[k])
     if not metadata_obj.parent == None:
@@ -289,9 +289,10 @@ class HDF5Writer(FileWriter):
         visited: set[int] = set()
         while parent is not None and id(parent) not in visited:
             visited.add(id(parent))
-            if getattr(parent, "_hdf5_writer_token", None) is not self._hdf5_writer_token:
-                parent._hdf5_key = str(self._key_counter)
-                parent._hdf5_writer_token = self._hdf5_writer_token
+            parent_attributes = vars(parent)
+            if parent_attributes.get("_hdf5_writer_token") is not self._hdf5_writer_token:
+                parent_attributes["_hdf5_key"] = str(self._key_counter)
+                parent_attributes["_hdf5_writer_token"] = self._hdf5_writer_token
                 self._key_counter += 1
             parent = getattr(parent, "parent", None)
 
@@ -303,8 +304,9 @@ class HDF5Writer(FileWriter):
         string key. The module-level populate helpers therefore do not depend
         on recyclable CPython memory addresses for writer-managed objects.
         """
-        signal._hdf5_key = str(self._key_counter)
-        signal._hdf5_writer_token = self._hdf5_writer_token
+        signal_attributes = vars(signal)
+        signal_attributes["_hdf5_key"] = str(self._key_counter)
+        signal_attributes["_hdf5_writer_token"] = self._hdf5_writer_token
         self._key_counter += 1
         self._assign_hdf5_keys_to_parent_chain(signal)
         for cs in signal.component_signals:
@@ -416,7 +418,7 @@ def fill_object_metadata_from_group_and_id(obj, group, id_str):
     Returns:
         The object with filled metadata.
     """
-    for key in group["metadata"][id_str].keys():
+    for key in group["metadata"][id_str]:
         if not key == "parent_metadata_id":
             obj[key] = load_value_from_group(group["metadata"][id_str], key)
     try:

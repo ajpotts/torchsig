@@ -83,7 +83,7 @@ class DatasetSummary:
             A populated ``DatasetSummary``.
         """
         instance = cls.__new__(cls)
-        instance._build(dataset, n_bins)
+        cls._build(instance, dataset, n_bins)
         return instance
 
     def _build(

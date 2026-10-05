@@ -75,7 +75,7 @@ def get_absolute_center_freq(signal: Signal) -> float:
             break
         visited.add(signal_id)
 
-        if "center_freq" in current.keys():
+        if "center_freq" in current.keys():  # noqa: SIM118 - metadata objects are not iterable
             center_freq = float(current["center_freq"])
             if not np.isfinite(center_freq):
                 raise ValueError(f"get_absolute_center_freq found non-finite center_freq: {center_freq}")
@@ -850,7 +850,7 @@ class DopplerShift(GeoSignalTransform):
             f_doppler = (v_radial / effective_speed) * f_center
 
             s.data = frequency_shift(s.data, f_doppler, sr)
-            if "center_freq" in s.keys():
+            if "center_freq" in s.keys():  # noqa: SIM118 - Signal is not an iterable mapping
                 s["center_freq"] = float(s["center_freq"]) + f_doppler
             else:
                 # The carrier is inherited; store only the new local offset.

@@ -161,7 +161,7 @@ class HierarchicalMetadataObject(MetadataDebugMixin, Seedable):
 
         full_metadata = {}
         for metadata_object in reversed(hierarchy):
-            for key in metadata_object.keys():
+            for key in metadata_object.keys():  # noqa: SIM118 - metadata objects are not iterable
                 full_metadata[key] = metadata_object[key]
         return full_metadata
 

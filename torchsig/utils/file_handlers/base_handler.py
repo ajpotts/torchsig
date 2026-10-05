@@ -92,19 +92,24 @@ class FileWriter:
             pass  # Ignore errors during cleanup
 
     def __str__(self) -> str:
+        """Return the writer class name."""
         return f"{self.__class__.__name__}"
 
     def __repr__(self) -> str:
+        """Return a detailed representation of the writer."""
         return generate_repr_str(self)
 
     def __len__(self) -> int:
+        """Return the dataset length supplied by a concrete writer."""
         raise NotImplementedError
 
     def __enter__(self):
+        """Set up the writer and enter its context."""
         self.setup()
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
+        """Tear down the writer when leaving its context."""
         self.teardown()
         return False
 
@@ -141,12 +146,15 @@ class FileReader:
         raise NotImplementedError
 
     def __str__(self) -> str:
+        """Return the reader class name."""
         return f"{self.__class__.__name__}"
 
     def __repr__(self) -> str:
+        """Return a detailed representation of the reader."""
         return generate_repr_str(self)
 
     def __len__(self) -> int:
+        """Return the dataset length supplied by a concrete reader."""
         raise NotImplementedError
 
 
@@ -182,7 +190,9 @@ class BaseFileHandler:
         raise ValueError(f"Invalid File Handler mode: {mode}")
 
     def __str__(self) -> str:
+        """Return the handler class name."""
         return f"{self.__class__.__name__}"
 
     def __repr__(self) -> str:
+        """Return a detailed representation of the handler."""
         return generate_repr_str(self)
