@@ -38,6 +38,7 @@ from torchsig.utils.file_handlers.packed_hdf5 import (
     PackedHDF5Reader,
     PackedHDF5Writer,
 )
+from torchsig.utils.file_handlers.packed_npy import PackedNPYReader, PackedNPYWriter
 from torchsig.utils.writer import DatasetCreator, identity_collate_fn
 from torchsig.utils.yaml import load_config_from_yaml
 
@@ -84,6 +85,7 @@ def _resolve_file_reader(file_writer, file_reader):
         HDF5Writer: HDF5Reader,
         PackedHDF5Writer: PackedHDF5Reader,
         HomogeneousHDF5Writer: HomogeneousHDF5Reader,
+        PackedNPYWriter: PackedNPYReader,
     }
     expected_reader = known_pairs.get(file_writer)
     if file_reader is None:

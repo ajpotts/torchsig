@@ -28,6 +28,8 @@ if TYPE_CHECKING:
     from .ogg import OGGReader as OGGReader
     from .packed_hdf5 import PackedHDF5Reader as PackedHDF5Reader
     from .packed_hdf5 import PackedHDF5Writer as PackedHDF5Writer
+    from .packed_npy import PackedNPYReader as PackedNPYReader
+    from .packed_npy import PackedNPYWriter as PackedNPYWriter
     from .sigmf import SigMFReader as SigMFReader
     from .structured_hdf5 import StructuredHDF5Reader as StructuredHDF5Reader
     from .structured_hdf5 import StructuredHDF5Writer as StructuredHDF5Writer
@@ -43,6 +45,7 @@ _EXPORTS = {
     "homogeneous_hdf5": ("torchsig.utils.file_handlers.homogeneous_hdf5", None),
     "npy": ("torchsig.utils.file_handlers.npy", None),
     "packed_hdf5": ("torchsig.utils.file_handlers.packed_hdf5", None),
+    "packed_npy": ("torchsig.utils.file_handlers.packed_npy", None),
     "structured_hdf5": ("torchsig.utils.file_handlers.structured_hdf5", None),
     "structured_schema": ("torchsig.utils.file_handlers.structured_schema", None),
     "BaseFileHandler": ("torchsig.utils.file_handlers.base_handler", "BaseFileHandler"),
@@ -59,6 +62,8 @@ _EXPORTS = {
     "OGGReader": ("torchsig.utils.file_handlers.ogg", "OGGReader"),
     "PackedHDF5Reader": ("torchsig.utils.file_handlers.packed_hdf5", "PackedHDF5Reader"),
     "PackedHDF5Writer": ("torchsig.utils.file_handlers.packed_hdf5", "PackedHDF5Writer"),
+    "PackedNPYReader": ("torchsig.utils.file_handlers.packed_npy", "PackedNPYReader"),
+    "PackedNPYWriter": ("torchsig.utils.file_handlers.packed_npy", "PackedNPYWriter"),
     "SigMFReader": ("torchsig.utils.file_handlers.sigmf", "SigMFReader"),
     "StructuredHDF5Reader": ("torchsig.utils.file_handlers.structured_hdf5", "StructuredHDF5Reader"),
     "StructuredHDF5Writer": ("torchsig.utils.file_handlers.structured_hdf5", "StructuredHDF5Writer"),

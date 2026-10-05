@@ -23,6 +23,7 @@ from torchsig.utils.file_handlers.packed_hdf5 import (
     PackedHDF5Reader,
     PackedHDF5Writer,
 )
+from torchsig.utils.file_handlers.packed_npy import PackedNPYReader, PackedNPYWriter
 
 if TYPE_CHECKING:
     from torch.utils.data import DataLoader
@@ -38,6 +39,7 @@ _KNOWN_FILE_HANDLER_PAIRS = {
     HDF5Writer: HDF5Reader,
     PackedHDF5Writer: PackedHDF5Reader,
     HomogeneousHDF5Writer: HomogeneousHDF5Reader,
+    PackedNPYWriter: PackedNPYReader,
 }
 
 
