@@ -64,7 +64,7 @@ def default_dataset(impairment_level=None, transforms=[], component_transforms=[
     Returns:
         TorchSigIterableDataset: A configured dataset instance.
     """
-    from torchsig.datasets.datasets import TorchSigIterableDataset
+    from torchsig.datasets.datasets import TorchSigIterableDataset  # noqa: PLC0415
 
     defaults_to_use = TorchSigDefaults()
     dataset_metadata = defaults_to_use.default_dataset_metadata

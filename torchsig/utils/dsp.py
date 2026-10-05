@@ -666,7 +666,7 @@ def _prototype_polyphase_filter_cached(num_branches: int, attenuation_db: float 
         # weight file exists
         try:
             filter_weights = np.load(path_to_file)
-        except Exception:
+        except (EOFError, OSError, ValueError):
             # failed to load weights, corrupted file?
             regen_weights = True
     else:

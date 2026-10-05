@@ -1164,7 +1164,7 @@ def test_fallback_on_calculation_error(monkeypatch):
         raise RuntimeError("Simulated internal math failure")
 
     # 2. Monkeypatch _build_full_profile since that is where the logic starts now
-    from torchsig.transforms import functional
+    from torchsig.transforms import functional  # noqa: PLC0415
 
     monkeypatch.setattr(functional, "_build_full_profile", mock_fail)
 
@@ -1178,7 +1178,7 @@ def test_fallback_raise_mode(monkeypatch):
     data = np.random.randn(1024)
     rng = np.random.default_rng(42)
 
-    from torchsig.transforms import functional
+    from torchsig.transforms import functional  # noqa: PLC0415
 
     def mock_fail(*args, **kwargs):
         raise RuntimeError("Simulated internal math failure")
@@ -1236,7 +1236,7 @@ def test_fft_filter_reconstruction_error(num_taps, trim_tol, ripple_amp):
 
 
 def test_build_full_profile_hermitian_symmetry():
-    from torchsig.transforms.functional import _build_full_profile
+    from torchsig.transforms.functional import _build_full_profile  # noqa: PLC0415
 
     rng = np.random.default_rng(42)
     N = 1025

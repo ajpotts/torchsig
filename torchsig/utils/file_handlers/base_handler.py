@@ -88,7 +88,7 @@ class FileWriter:
         """Destructor to ensure clean resource cleanup"""
         try:
             self.teardown()
-        except Exception:
+        except Exception:  # noqa: BLE001 - destructors must not propagate cleanup failures
             pass  # Ignore errors during cleanup
 
     def __str__(self) -> str:

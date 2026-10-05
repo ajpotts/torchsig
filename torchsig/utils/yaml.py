@@ -1,9 +1,12 @@
 """YAML utilities"""
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
+
+if TYPE_CHECKING:
+    from torchsig.datasets.datasets import TorchSigDatasetConfig, TorchSigIterableDataset
 
 __all__ = ["custom_representer", "dataset_from_yaml_dict", "dataset_metadata_to_yaml_dict", "load_config_from_yaml", "load_dataset_yaml", "save_dataset_yaml", "write_dict_to_yaml"]
 
@@ -40,8 +43,8 @@ def load_config_from_yaml(path: Path) -> "TorchSigDatasetConfig":
     Returns:
         A dictionary containing the dataset metadata extracted from the YAML file.
     """
-    from torchsig.datasets.datasets import TorchSigDatasetConfig
-    from torchsig.utils.experiment_config import load_experiment_config
+    from torchsig.datasets.datasets import TorchSigDatasetConfig  # noqa: PLC0415
+    from torchsig.utils.experiment_config import load_experiment_config  # noqa: PLC0415
 
     # load configuration from yaml file
     cfg = yaml.safe_load(path.read_text()) or {}
@@ -102,7 +105,7 @@ def dataset_from_yaml_dict(yaml_dict: dict[str, Any]) -> "TorchSigIterableDatase
     Returns:
         Configured TorchSigIterableDataset instance.
     """
-    from torchsig.datasets.datasets import TorchSigIterableDataset
+    from torchsig.datasets.datasets import TorchSigIterableDataset  # noqa: PLC0415
 
     dataset_metadata = yaml_dict["dataset_metadata"]
     return TorchSigIterableDataset(
@@ -126,7 +129,7 @@ def load_dataset_yaml(filepath: str) -> "TorchSigIterableDataset":
         Configured TorchSigIterableDataset instance.
     """
     loaded_dict = {}
-    with open(filepath) as yaml_file:
+    with Path(filepath).open() as yaml_file:
         loaded_dict = yaml.safe_load(yaml_file)
     return dataset_from_yaml_dict(loaded_dict)
 
@@ -179,5 +182,5 @@ def write_dict_to_yaml(filename: str, info_dict: dict[str, Any]) -> None:
     """
     yaml.add_representer(list, custom_representer)
 
-    with open(filename, "w+") as file:
+    with Path(filename).open("w+") as file:
         yaml.dump(info_dict, file, default_flow_style=False, sort_keys=False, width=200)

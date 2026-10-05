@@ -274,7 +274,7 @@ class HDF5Writer(FileWriter):
             try:
                 self._file.flush()
                 self._file.close()
-            except Exception:
+            except (OSError, RuntimeError, ValueError):
                 pass  # File might already be closed
             del self._file
 
@@ -290,8 +290,8 @@ class HDF5Writer(FileWriter):
         while parent is not None and id(parent) not in visited:
             visited.add(id(parent))
             if getattr(parent, "_hdf5_writer_token", None) is not self._hdf5_writer_token:
-                setattr(parent, "_hdf5_key", str(self._key_counter))
-                setattr(parent, "_hdf5_writer_token", self._hdf5_writer_token)
+                parent._hdf5_key = str(self._key_counter)
+                parent._hdf5_writer_token = self._hdf5_writer_token
                 self._key_counter += 1
             parent = getattr(parent, "parent", None)
 
@@ -303,8 +303,8 @@ class HDF5Writer(FileWriter):
         string key. The module-level populate helpers therefore do not depend
         on recyclable CPython memory addresses for writer-managed objects.
         """
-        setattr(signal, "_hdf5_key", str(self._key_counter))
-        setattr(signal, "_hdf5_writer_token", self._hdf5_writer_token)
+        signal._hdf5_key = str(self._key_counter)
+        signal._hdf5_writer_token = self._hdf5_writer_token
         self._key_counter += 1
         self._assign_hdf5_keys_to_parent_chain(signal)
         for cs in signal.component_signals:

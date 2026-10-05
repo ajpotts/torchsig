@@ -1,11 +1,10 @@
 """Tests for YAML-backed signal-generation configuration."""
 
-from types import SimpleNamespace
+import pickle
+from types import MappingProxyType, SimpleNamespace
 
 import pytest
 import yaml
-import pickle
-from types import MappingProxyType
 
 from torchsig.datasets.datasets import TorchSigIterableDataset
 from torchsig.utils.defaults import TorchSigDefaults

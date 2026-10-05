@@ -594,43 +594,49 @@ class GroupingLabel(MetadataTransform):
     ) -> Any:
         """Evaluate a previously validated formula syntax tree."""
         if isinstance(node, ast.Constant):
-            return node.value
-        if isinstance(node, ast.Name):
-            return value
-        if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            result = node.value
+        elif isinstance(node, ast.Name):
+            result = value
+        elif isinstance(node, (ast.List, ast.Tuple, ast.Set)):
             items = [self._evaluate_formula(item, value) for item in node.elts]
             if isinstance(node, ast.List):
-                return items
-            if isinstance(node, ast.Tuple):
-                return tuple(items)
-            return set(items)
-        if isinstance(node, ast.BoolOp):
-            if isinstance(node.op, ast.And):
-                return all(bool(self._evaluate_formula(item, value)) for item in node.values)
-            return any(bool(self._evaluate_formula(item, value)) for item in node.values)
-        if isinstance(node, ast.UnaryOp):
+                result = items
+            elif isinstance(node, ast.Tuple):
+                result = tuple(items)
+            else:
+                result = set(items)
+        elif isinstance(node, ast.BoolOp):
+            result = (
+                all(bool(self._evaluate_formula(item, value)) for item in node.values)
+                if isinstance(node.op, ast.And)
+                else any(bool(self._evaluate_formula(item, value)) for item in node.values)
+            )
+        elif isinstance(node, ast.UnaryOp):
             operand = self._evaluate_formula(node.operand, value)
             if isinstance(node.op, ast.Not):
-                return not bool(operand)
-            if isinstance(node.op, ast.UAdd):
-                return +operand
-            return -operand
-        if isinstance(node, ast.BinOp):
+                result = not bool(operand)
+            elif isinstance(node.op, ast.UAdd):
+                result = +operand
+            else:
+                result = -operand
+        elif isinstance(node, ast.BinOp):
             left = self._evaluate_formula(node.left, value)
             right = self._evaluate_formula(node.right, value)
             if isinstance(node.op, ast.Add):
-                return left + right
-            if isinstance(node.op, ast.Sub):
-                return left - right
-            if isinstance(node.op, ast.Mult):
-                return left * right
-            if isinstance(node.op, ast.Div):
-                return left / right
-            if isinstance(node.op, ast.FloorDiv):
-                return left // right
-            return left % right
-        if isinstance(node, ast.Compare):
+                result = left + right
+            elif isinstance(node.op, ast.Sub):
+                result = left - right
+            elif isinstance(node.op, ast.Mult):
+                result = left * right
+            elif isinstance(node.op, ast.Div):
+                result = left / right
+            elif isinstance(node.op, ast.FloorDiv):
+                result = left // right
+            else:
+                result = left % right
+        elif isinstance(node, ast.Compare):
             left = self._evaluate_formula(node.left, value)
+            result = True
             for operator, comparator in zip(
                 node.ops,
                 node.comparators,
@@ -654,15 +660,17 @@ class GroupingLabel(MetadataTransform):
                 else:
                     matches = left >= right
                 if not matches:
-                    return False
+                    result = False
+                    break
                 left = right
-            return True
-        if isinstance(node, ast.Call):
+        elif isinstance(node, ast.Call):
             target = self._evaluate_formula(node.func.value, value)
             method = getattr(target, node.func.attr)
             args = [self._evaluate_formula(argument, value) for argument in node.args]
-            return method(*args)
-        raise TypeError(f"unsupported validated formula node: {type(node).__name__}")
+            result = method(*args)
+        else:
+            raise TypeError(f"unsupported validated formula node: {type(node).__name__}")
+        return result
 
     def _rule_matches(
         self,

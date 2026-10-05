@@ -40,40 +40,42 @@ def _add_signal_generator(
 def _family_name(signal_name: str) -> str | None:
     """Return the modulation family for a concrete signal generator name."""
     if signal_name.startswith("ofdm-"):
-        return "ofdm"
-    if signal_name.startswith("am-"):
-        return "am"
-    if signal_name.startswith("lfm-"):
-        return "lfm"
-    if signal_name.startswith("fm-"):
-        return "fm"
-    if signal_name.endswith("fsk") or signal_name.endswith("gfsk"):
-        return "fsk"
-    if signal_name.endswith("msk") or signal_name.endswith("gmsk"):
-        return "msk"
-    if "psk" in signal_name:
-        return "psk"
-    if "qam" in signal_name:
-        return "qam"
-    if "ask" in signal_name:
-        return "ask"
-    if "adsb" in signal_name:
-        return "adsb"
-    if "btle" in signal_name:
-        return "btle"
-    if "gsm" in signal_name:
-        return "cellular"
-    if "dvb" in signal_name:
-        return "dvb"
-    if ("dmr" in signal_name) or ("p25" in signal_name):
-        return "lmr"
-    if "lora" in signal_name:
-        return "lora"
-    if "80211a" in signal_name:
-        return "wifi"
-    if "zigbee" in signal_name:
-        return "zigbee"
-    return None
+        family = "ofdm"
+    elif signal_name.startswith("am-"):
+        family = "am"
+    elif signal_name.startswith("lfm-"):
+        family = "lfm"
+    elif signal_name.startswith("fm-"):
+        family = "fm"
+    elif signal_name.endswith("fsk") or signal_name.endswith("gfsk"):
+        family = "fsk"
+    elif signal_name.endswith("msk") or signal_name.endswith("gmsk"):
+        family = "msk"
+    elif "psk" in signal_name:
+        family = "psk"
+    elif "qam" in signal_name:
+        family = "qam"
+    elif "ask" in signal_name:
+        family = "ask"
+    elif "adsb" in signal_name:
+        family = "adsb"
+    elif "btle" in signal_name:
+        family = "btle"
+    elif "gsm" in signal_name:
+        family = "cellular"
+    elif "dvb" in signal_name:
+        family = "dvb"
+    elif ("dmr" in signal_name) or ("p25" in signal_name):
+        family = "lmr"
+    elif "lora" in signal_name:
+        family = "lora"
+    elif "80211a" in signal_name:
+        family = "wifi"
+    elif "zigbee" in signal_name:
+        family = "zigbee"
+    else:
+        family = None
+    return family
 
 
 # Initialize lookup table with signal generators

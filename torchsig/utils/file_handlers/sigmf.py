@@ -129,7 +129,7 @@ class SigMFReader(MetadataReader):
         if not meta_path.exists():
             raise FileNotFoundError(f"Missing SigMF metadata file for {data_path}")
 
-        with open(meta_path) as f:
+        with meta_path.open() as f:
             return json.load(f)
 
     def _resolve_dtype(self) -> str:

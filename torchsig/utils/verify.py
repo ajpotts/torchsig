@@ -375,7 +375,7 @@ def verify_transforms(t: Transform) -> list[Transform | callable]:
     Returns:
         List[Transform | callable]: The verified list of transforms.
     """
-    from torchsig.transforms.base_transforms import Transform
+    from torchsig.transforms.base_transforms import Transform  # noqa: PLC0415
 
     if t is None:
         return []
@@ -406,7 +406,7 @@ def verify_metadata_transforms(
     Returns:
         List[MetadataTransform | callable]: The verified list of target transforms.
     """
-    from torchsig.transforms.metadata_transforms import MetadataTransform
+    from torchsig.transforms.metadata_transforms import MetadataTransform  # noqa: PLC0415
 
     if tt is None:
         return []

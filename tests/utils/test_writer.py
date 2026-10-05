@@ -1,5 +1,7 @@
 """Unit Tests for writer utilities."""
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 import yaml
@@ -296,10 +298,10 @@ def test_writer_memory_growth(tmp_path):
     The per-run numbers are printed so they appear in the pytest log when
     running with ``-s`` and are useful for manual inspection.
     """
-    import gc
-    import tracemalloc
+    import gc  # noqa: PLC0415
+    import tracemalloc  # noqa: PLC0415
 
-    from torchsig.signals.signal_types import Signal
+    from torchsig.signals.signal_types import Signal  # noqa: PLC0415
 
     SEED = 27182
     BATCH_SIZE = 4
@@ -320,7 +322,7 @@ def test_writer_memory_growth(tmp_path):
 
     def current_rss_bytes() -> int:
         """Current RSS in bytes, read from /proc/self/status (Linux)."""
-        with open("/proc/self/status") as fh:
+        with Path("/proc/self/status").open() as fh:
             for line in fh:
                 if line.startswith("VmRSS:"):
                     return int(line.split()[1]) * 1024  # kB → bytes

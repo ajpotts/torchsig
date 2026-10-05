@@ -1,6 +1,6 @@
 """Tests for the DSP utilities."""
 
-from unittest.mock import Mock, MagicMock
+from unittest.mock import MagicMock, Mock
 
 import numpy as np
 import pytest

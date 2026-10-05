@@ -963,7 +963,7 @@ def main() -> None:
         print(f"[{number}/{len(cases)}] {case.pipeline} {case.access} workers={case.workers} compression={case.compression} chunk={case.chunk_samples} layout={case.layout} rep={case.repetition}")
         try:
             result = _run_fresh(case, args.output_dir)
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001 - isolate failures between benchmark cases
             failure = {**asdict(case), "error": f"{type(error).__name__}: {error}"}
             failures.append(failure)
             print(f"Case failed: {failure['error']}", file=sys.stderr)
