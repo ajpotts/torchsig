@@ -10,6 +10,8 @@ when they are uniform.
 
 from __future__ import annotations
 
+import contextlib
+
 # Built-In
 import threading
 from typing import Any
@@ -76,9 +78,9 @@ def populate_hdf5_group_with_metadata(group, metadata_obj) -> bool:
         return False
     metadata_group = group.create_group(key)
     for k in metadata_obj.keys():  # noqa: SIM118 - metadata objects are not iterable
-        if not metadata_obj[k] == None:
+        if metadata_obj[k] is not None:
             metadata_group.create_dataset(k, data=metadata_obj[k])
-    if not metadata_obj.parent == None:
+    if metadata_obj.parent is not None:
         try:
             metadata_group.create_dataset("parent_metadata_id", data=_hdf5_key(metadata_obj.parent))
             populate_hdf5_group_with_metadata(group, metadata_obj.parent)
@@ -347,7 +349,7 @@ class HDF5Writer(FileWriter):
             self._batch_buffer.sort(key=lambda x: x[0])
 
             # Process all batches in buffer
-            for batch_idx, data in self._batch_buffer:
+            for _batch_idx, data in self._batch_buffer:
                 self._write_batch_to_hdf5(data)
 
             # Clear buffer
@@ -419,14 +421,12 @@ def fill_object_metadata_from_group_and_id(obj, group, id_str):
         The object with filled metadata.
     """
     for key in group["metadata"][id_str]:
-        if not key == "parent_metadata_id":
+        if key != "parent_metadata_id":
             obj[key] = load_value_from_group(group["metadata"][id_str], key)
-    try:
+    with contextlib.suppress(KeyError):
         parent_id = load_value_from_group(group["metadata"][id_str], "parent_metadata_id")
         metadata_obj = fill_object_metadata_from_group_and_id(HierarchicalMetadataObject(), group, parent_id)
         obj.add_parent(metadata_obj)
-    except:
-        pass  # we have no parent set; do nothing
     return obj
 
 
@@ -441,16 +441,13 @@ def load_signal_from_group_by_id(group, id_str):
         Signal: The loaded signal.
     """
     component_signals = []
-    try:
+    with contextlib.suppress(KeyError):
         component_signals = [load_signal_from_group_by_id(group, temp_id) for temp_id in load_value_from_group(group["component_signals"], id_str)]
-    except:
-        pass
     signal = Signal(
         data=load_value_from_group(group["data"], id_str),
         component_signals=component_signals,
     )
-    signal = fill_object_metadata_from_group_and_id(signal, group, id_str)
-    return signal
+    return fill_object_metadata_from_group_and_id(signal, group, id_str)
 
 
 def load_signal_from_group_by_index(group, ind):

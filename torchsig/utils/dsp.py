@@ -521,9 +521,8 @@ def multistage_polyphase_decimator(input_signal: np.ndarray, decimation_rate: fl
     # decimate by integer rate, if no integer decimation, pass through only
     decimation_integer_out = polyphase_decimator(input_signal, decimation_integer_rate) if decimation_integer_rate > 1 else input_signal
     # apply fractional rate resampling, if no resampling, pass through
-    decimation_fractional_out = polyphase_fractional_resampler(decimation_integer_out, 1 / decimation_fractional_rate) if decimation_fractional_rate > 1 else decimation_integer_out
+    return polyphase_fractional_resampler(decimation_integer_out, 1 / decimation_fractional_rate) if decimation_fractional_rate > 1 else decimation_integer_out
 
-    return decimation_fractional_out
 
 
 def multistage_polyphase_interpolator(input_signal: np.ndarray, resample_rate_ideal: float) -> np.ndarray:
@@ -554,9 +553,8 @@ def multistage_polyphase_interpolator(input_signal: np.ndarray, resample_rate_id
     # interpolate by a fractional rate, if no rate change, just a pass through
     interpolate_fractional_out = polyphase_fractional_resampler(input_signal, interpolation_fractional_rate) if interpolation_fractional_rate > 1 else input_signal
     # interpolate by an integer rate, if no rate change, just a pass through
-    interpolate_integer_out = polyphase_integer_interpolator(interpolate_fractional_out, interpolation_integer_rate) if interpolation_integer_rate > 1 else interpolate_fractional_out
+    return polyphase_integer_interpolator(interpolate_fractional_out, interpolation_integer_rate) if interpolation_integer_rate > 1 else interpolate_fractional_out
 
-    return interpolate_integer_out
 
 
 def _polyphase_fractional_integer_rates(fractional_rate: float) -> tuple[int, int]:

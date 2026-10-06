@@ -86,7 +86,7 @@ def metadata_padding_collate_fn(batch):
     for key, sequences in y_tensor_obj.items():
         try:
             final_tensor_obj[key] = torch.Tensor(np.array(sequences))
-        except (ValueError, TypeError, MemoryError) as e:
+        except (ValueError, TypeError, MemoryError) as e:  # noqa: PERF203 - each metadata key is converted independently
             warnings.warn(f"Dropping key value: '{key}' because it contained invalid tensor values: {type(e).__name__}", stacklevel=2)
     return torch.Tensor(np.array(iqs)), final_tensor_obj
 
@@ -110,7 +110,7 @@ class WorkerSeedingDataLoader(DataLoader, Seedable):
             ValueError: if `worker_init_fn` is provided in kwargs.
         """
         if seed is None:
-            seed = np.random.randint(1000)  # just pick a random seed if none is given
+            seed = np.random.randint(1000)  # noqa: NPY002 - honor callers that seed NumPy's global RNG
         DataLoader.__init__(self, dataset, **kwargs)
         Seedable.__init__(self, seed=seed)
         if self.worker_init_fn:

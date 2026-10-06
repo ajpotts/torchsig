@@ -93,6 +93,7 @@ def build_plheader(rng: np.random.Generator | None = None) -> np.ndarray:
     Returns:
         np.ndarray: 90 complex PLHEADER symbols.
     """
+    _ = rng  # Retained for a uniform signal-builder API.
     sof_bits = np.unpackbits(np.frombuffer(bytes.fromhex(DVBS2_SOF_HEX), dtype=np.uint8))
     sof_bits = sof_bits[-DVBS2_SOF_SYMBOLS:]  # low 26 bits
     # Fixed PLSC placeholder pattern (alternating), toy stand-in for MODCOD code.

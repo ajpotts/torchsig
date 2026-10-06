@@ -92,7 +92,7 @@ def default_collate_fn(batch):
     Returns:
         tuple: A tuple of zipped elements, where each element corresponds to a single batch item.
     """
-    return tuple(zip(*batch))
+    return tuple(zip(*batch, strict=False))
 
 
 def identity_collate_fn(batch):

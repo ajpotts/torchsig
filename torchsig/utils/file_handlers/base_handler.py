@@ -2,6 +2,7 @@
 
 import pathlib
 import shutil
+from contextlib import suppress
 from typing import Any
 
 from torchsig.utils.printing import generate_repr_str
@@ -48,6 +49,7 @@ class FileWriter:
         Args:
             root (str): Location on disk to write dataset.
         """
+        _ = kwargs  # Accepted for a uniform file-handler constructor API.
         self.root: pathlib.Path = pathlib.Path(root).resolve()
 
     def _setup(self) -> None:
@@ -86,10 +88,8 @@ class FileWriter:
 
     def __del__(self):
         """Destructor to ensure clean resource cleanup"""
-        try:
+        with suppress(Exception):  # Destructors must not propagate cleanup failures.
             self.teardown()
-        except Exception:  # noqa: BLE001 - destructors must not propagate cleanup failures
-            pass  # Ignore errors during cleanup
 
     def __str__(self) -> str:
         """Return the writer class name."""
@@ -128,6 +128,7 @@ class FileReader:
         Args:
             root (str): Dataset location on disk.
         """
+        _ = kwargs  # Accepted for a uniform file-handler constructor API.
         self.root = pathlib.Path(root).resolve()
         self.dataset_info_filepath = self.root.joinpath("dataset_info.yaml")
 

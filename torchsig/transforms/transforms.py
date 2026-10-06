@@ -1,16 +1,16 @@
 """Transforms on Signal objects."""
 
-import os
 import secrets
 import time
 import warnings
 from copy import copy
+from pathlib import Path
 from typing import Literal
 
 import numpy as np
 import numpy.typing as npt
 
-import torchsig.transforms.functional as F
+import torchsig.transforms.functional as F  # noqa: N812 - conventional functional API alias
 from torchsig.signals.signal_types import Signal
 from torchsig.transforms.base_transforms import Transform
 from torchsig.utils.dsp import TorchSigComplexDataType, TorchSigRealDataType, low_pass
@@ -148,7 +148,7 @@ def transform_crash_logger(transform_func, data, **kwargs):
         timestamp = int(time.time() * 1000)
         filename = f"crash_{transform_func.__name__}_{timestamp}.npz"
         counter = 0
-        while os.path.exists(filename):
+        while Path(filename).exists():
             counter += 1
             filename = f"crash_{transform_func.__name__}_{timestamp}_{counter}.npz"
 
@@ -157,7 +157,7 @@ def transform_crash_logger(transform_func, data, **kwargs):
 
         print(f"!!! Transform failed. State saved to {filename}")
         print(f"Error: {e}")
-        raise e  # Re-raise original exception
+        raise  # Re-raise original exception
 
 
 class SignalTransform(Transform):
@@ -1840,7 +1840,7 @@ class Spectrogram(SignalTransform):
         fft_size: The FFT size (number of bins) in the spectrogram.
     """
 
-    def __init__(self, fft_size: int, fft_stride: int = None, **kwargs):
+    def __init__(self, fft_size: int, fft_stride: int | None = None, **kwargs):
         """Initialize the Spectrogram transform.
 
         Args:

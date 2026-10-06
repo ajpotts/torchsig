@@ -239,7 +239,7 @@ def _make_payload_symbol(constellation_name: str, ifft_size: int, cp_len: int, r
     values = np.zeros(53, dtype=TorchSigComplexDataType)
     # random (uncoded) data subcarriers
     data_idx = rng.integers(0, len(symbol_map), len(WIFI_DATA_SUBCARRIERS))
-    for k, sym in zip(WIFI_DATA_SUBCARRIERS, symbol_map[data_idx]):
+    for k, sym in zip(WIFI_DATA_SUBCARRIERS, symbol_map[data_idx], strict=False):
         values[_subcarrier_index(k)] = sym
     # fixed pilots (toy: polarity = +1)
     for k in WIFI_PILOT_SUBCARRIERS:

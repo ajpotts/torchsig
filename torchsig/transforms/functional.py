@@ -508,10 +508,7 @@ def digital_agc(
         low_level_db,
         high_level_db,
     )
-    if _digital_agc_numba is not None:
-        output = _digital_agc_numba(data, *args)
-    else:  # pragma: no cover - exercised only when numba is unavailable
-        output = _digital_agc_python(data, *args)
+    output = _digital_agc_numba(data, *args) if _digital_agc_numba is not None else _digital_agc_python(data, *args)
     return output.astype(TorchSigComplexDataType)
 
 
@@ -1704,10 +1701,7 @@ def spurs(
         # instead of taking an FFT of the spur (which only existed to find this peak).
         bin_offset = (center_freq / sample_rate) * num_samples
         frac = bin_offset - np.round(bin_offset)  # distance to nearest DFT bin
-        if np.isclose(frac, 0.0):
-            spur_max = float(num_samples)  # on-bin: all samples add coherently
-        else:
-            spur_max = np.abs(np.sin(np.pi * frac) / np.sin(np.pi * frac / num_samples))
+        spur_max = float(num_samples) if np.isclose(frac, 0.0) else np.abs(np.sin(np.pi * frac) / np.sin(np.pi * frac / num_samples))
         spur_max_db = 20 * np.log10(spur_max)
         # calculate change to set spur power properly
         gain_change_db = (noise_floor_db - spur_max_db) + relative_power_db_array[spur_index]

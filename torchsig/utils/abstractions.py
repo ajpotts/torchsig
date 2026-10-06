@@ -127,10 +127,8 @@ class HierarchicalMetadataObject(MetadataDebugMixin, Seedable):
         if metadata is not None and len(metadata.keys()) > 0:
             for key in metadata:
                 self._metadata[key] = metadata[key]
-        for key in kwargs:
-            self._metadata[key] = kwargs[
-                key
-            ]  # this will override fields in the object passed in with arguments directly given to the generator; useful for making multiple similar but not identical objects
+        for key, value in kwargs.items():
+            self._metadata[key] = value  # Explicit arguments override values from the metadata object.
 
     def get_full_metadata(self) -> dict[str, Any]:
         """Function for modifying and returning a new metadata with all the fields in parent or child, with child overriding parent in conflicts.

@@ -50,9 +50,9 @@ def _family_name(signal_name: str) -> str | None:
         family = "lfm"
     elif signal_name.startswith("fm-"):
         family = "fm"
-    elif signal_name.endswith("fsk") or signal_name.endswith("gfsk"):
+    elif signal_name.endswith(("fsk", "gfsk")):
         family = "fsk"
-    elif signal_name.endswith("msk") or signal_name.endswith("gmsk"):
+    elif signal_name.endswith(("msk", "gmsk")):
         family = "msk"
     elif "psk" in signal_name:
         family = "psk"
@@ -171,17 +171,16 @@ def lookup_signal_generator_by_string(signal_generator_name: str) -> Any:
         ValueError: If the signal generator name is not found in the lookup table
             or if there's an error instantiating the generator.
     """
-    try:
-        lookup_value = signal_generator_lookup_table[signal_generator_name]
-        if len(lookup_value) == _SIMPLE_GENERATOR_SPEC_LENGTH:
-            generator_init, metadata = lookup_value
-            return generator_init(metadata=metadata)
-        if len(lookup_value) == _CONCAT_GENERATOR_SPEC_LENGTH and lookup_value[0] == ConcatSignalGenerator:
-            generator_init, generator_list, metadata = lookup_value
-            return generator_init(
-                signal_generators=[el[0](metadata=el[1]) for el in generator_list],
-                metadata=metadata,
-            )
-        raise KeyError("bad data found in generator lookup table")
-    except KeyError:
-        raise ValueError("could not instantiate signal generator: '" + str(signal_generator_name) + "'")
+    lookup_value = signal_generator_lookup_table.get(signal_generator_name)
+    if lookup_value is None:
+        raise ValueError(f"could not instantiate signal generator: {signal_generator_name!r}")
+    if len(lookup_value) == _SIMPLE_GENERATOR_SPEC_LENGTH:
+        generator_init, metadata = lookup_value
+        return generator_init(metadata=metadata)
+    if len(lookup_value) == _CONCAT_GENERATOR_SPEC_LENGTH and lookup_value[0] == ConcatSignalGenerator:
+        generator_init, generator_list, metadata = lookup_value
+        return generator_init(
+            signal_generators=[element[0](metadata=element[1]) for element in generator_list],
+            metadata=metadata,
+        )
+    raise ValueError(f"could not instantiate signal generator: {signal_generator_name!r}")

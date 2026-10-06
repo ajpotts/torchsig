@@ -205,7 +205,7 @@ def fsk_symbol_timing(
         tuple: (bandwidth_symbol_product, samples_per_symbol).
     """
     gamma = fsk_bandwidth_symbol_product(constellation_size, mod_idx, bt, gaussian_span)
-    samples_per_symbol = max(MIN_SAMPLES_PER_SYMBOL, int(round(oversampling_rate_nominal * gamma)))
+    samples_per_symbol = max(MIN_SAMPLES_PER_SYMBOL, round(oversampling_rate_nominal * gamma))
     return gamma, samples_per_symbol
 
 
