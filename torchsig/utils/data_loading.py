@@ -15,6 +15,8 @@ from torchsig.utils.random import Seedable
 
 __all__ = ["WorkerSeedingDataLoader", "metadata_padding_collate_fn"]
 
+_DATA_PAIR_LENGTH = 2
+
 
 def metadata_padding_collate_fn(batch):
     """Collate a batch of (data, metadata_list) pairs, padding metadata to equal lengths.
@@ -45,7 +47,7 @@ def metadata_padding_collate_fn(batch):
     y_tensor_obj = {}
 
     for data_pair in batch:
-        if not isinstance(data_pair, tuple) or len(data_pair) != 2:
+        if not isinstance(data_pair, tuple) or len(data_pair) != _DATA_PAIR_LENGTH:
             raise ValueError(f"{data_pair} is not a valid (x, y) pair; this collate function expects datasets to return tuples of (x, y)")
 
         _, metadata_list = data_pair

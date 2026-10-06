@@ -1162,8 +1162,9 @@ def convolve(signal: np.ndarray, taps: np.ndarray) -> np.ndarray:
     Returns:
         np.ndarray: The convolution output
     """
+    two_tap_filter_length = 2
     filtered = sp.convolve(signal, taps, mode="full")
-    if len(taps) == 2:
+    if len(taps) == two_tap_filter_length:
         return filtered[1:]
     if is_even(len(taps)):  # even-length filter
         slice_length = int(len(taps) / 2)

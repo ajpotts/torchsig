@@ -24,6 +24,9 @@ __all__ = ["family_names", "lookup_signal_generator_by_string", "num_subcarrier_
 # Stores generator class and metadata for generators to make per label
 SignalGeneratorSpec = tuple[type, dict[str, Any]] | tuple[type, list[tuple[type, dict[str, Any]]], dict[str, Any]]
 
+_SIMPLE_GENERATOR_SPEC_LENGTH = 2
+_CONCAT_GENERATOR_SPEC_LENGTH = 3
+
 non_public_generator_names = {"80211a_ack", "80211a_cts", "80211a_rts"}
 
 signal_generator_lookup_table: dict[str, SignalGeneratorSpec] = {}
@@ -170,10 +173,10 @@ def lookup_signal_generator_by_string(signal_generator_name: str) -> Any:
     """
     try:
         lookup_value = signal_generator_lookup_table[signal_generator_name]
-        if len(lookup_value) == 2:
+        if len(lookup_value) == _SIMPLE_GENERATOR_SPEC_LENGTH:
             generator_init, metadata = lookup_value
             return generator_init(metadata=metadata)
-        if len(lookup_value) == 3 and lookup_value[0] == ConcatSignalGenerator:
+        if len(lookup_value) == _CONCAT_GENERATOR_SPEC_LENGTH and lookup_value[0] == ConcatSignalGenerator:
             generator_init, generator_list, metadata = lookup_value
             return generator_init(
                 signal_generators=[el[0](metadata=el[1]) for el in generator_list],

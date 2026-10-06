@@ -18,6 +18,8 @@ from torchsig.utils.dsp import (
 
 __all__ = ["OFDMSignalGenerator", "ofdm_modulator", "ofdm_modulator_baseband"]
 
+_CYCLIC_PREFIX_PROBABILITY = 0.5
+
 
 def ofdm_modulator_baseband(
     num_subcarriers: int,
@@ -231,7 +233,7 @@ class OFDMSignalGenerator(BaseSignalGenerator):
         bandwidth = self.random_generator.integers(low=self["bandwidth_min"], high=self["bandwidth_max"] + 1)
         num_subcarriers = self["num_subcarriers"]
 
-        has_cyclic_prefix = bool(self.random_generator.uniform(0, 1) >= 0.50)
+        has_cyclic_prefix = bool(self.random_generator.uniform(0, 1) >= _CYCLIC_PREFIX_PROBABILITY)
         cyclic_prefix_len = int(self.random_generator.integers(2, int(num_subcarriers / 2))) if has_cyclic_prefix else 0
 
         # Generate signal
