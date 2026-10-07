@@ -148,6 +148,7 @@ def additive_noise(
 
 def adjacent_channel_interference(
     data: np.ndarray,
+    *,
     sample_rate: float = 4.0,
     power: float = 1.0,
     center_frequency: float = 0.2,
@@ -344,6 +345,7 @@ def clock_jitter(
 
 def cochannel_interference(
     data: np.ndarray,
+    *,
     power: float = 1.0,
     filter_weights: np.ndarray | None = None,
     color: str = "white",
@@ -470,6 +472,7 @@ def cut_out(
 
 def digital_agc(
     data: np.ndarray,
+    *,
     initial_gain_db: float = 0.0,
     alpha_smooth: float = 1e-4,
     alpha_track: float = 1e-3,
@@ -508,14 +511,11 @@ def digital_agc(
         low_level_db,
         high_level_db,
     )
-    if _digital_agc_numba is not None:
-        output = _digital_agc_numba(data, *args)
-    else:  # pragma: no cover - exercised only when numba is unavailable
-        output = _digital_agc_python(data, *args)
+    output = _digital_agc_numba(data, *args) if _digital_agc_numba is not None else _digital_agc_python(data, *args)
     return output.astype(TorchSigComplexDataType)
 
 
-def _digital_agc_python(
+def _digital_agc_python(  # noqa: PLR0917
     data: np.ndarray,
     initial_gain_db: float,
     alpha_smooth: float,
@@ -750,6 +750,7 @@ def iq_imbalance(
     phase_imbalance: float,
     dc_offset_db: float,
     dc_offset_phase_rads: float,
+    *,
     noise_power_db: float | None = None,
 ) -> np.ndarray:
     """Applies IQ imbalance to IQ data.
@@ -889,6 +890,7 @@ def carrier_phase_noise(
 
 def nonlinear_amplifier(
     data: np.ndarray,
+    *,
     gain: float = 1.0,
     psat_backoff: float = 10.0,
     phi_max: float = 0.1,
@@ -1119,6 +1121,7 @@ def _fft_filter(freq_profile: np.ndarray, trim_tol: float = 1e-6, fit_metric: st
 
 def _build_full_profile(
     num_taps: int = 1025,
+    *,
     ripple_amp: float = 0.1,
     ripple_freq: float = 5.0,
     passband_fuzz: Literal["smooth", "random"] = "smooth",
@@ -1201,6 +1204,7 @@ def _build_profile_freq_grid(num_taps):
 
 def passband_ripple(
     data: np.ndarray,
+    *,
     num_taps: int = 65,
     max_ripple_db: float = 2.0,
     ripple_freq: float = 5.0,
@@ -1704,10 +1708,7 @@ def spurs(
         # instead of taking an FFT of the spur (which only existed to find this peak).
         bin_offset = (center_freq / sample_rate) * num_samples
         frac = bin_offset - np.round(bin_offset)  # distance to nearest DFT bin
-        if np.isclose(frac, 0.0):
-            spur_max = float(num_samples)  # on-bin: all samples add coherently
-        else:
-            spur_max = np.abs(np.sin(np.pi * frac) / np.sin(np.pi * frac / num_samples))
+        spur_max = float(num_samples) if np.isclose(frac, 0.0) else np.abs(np.sin(np.pi * frac) / np.sin(np.pi * frac / num_samples))
         spur_max_db = 20 * np.log10(spur_max)
         # calculate change to set spur power properly
         gain_change_db = (noise_floor_db - spur_max_db) + relative_power_db_array[spur_index]
@@ -1740,6 +1741,7 @@ def time_varying_noise(
     noise_power_high: float,
     inflections: int,
     random_regions: bool,
+    *,
     rng: np.random.Generator | None = None,
 ) -> np.ndarray:
     """Adds time-varying complex additive white Gaussian noise.

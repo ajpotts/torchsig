@@ -7,6 +7,7 @@ record contains ``num_iq_samples`` complex samples.
 import bisect
 import json
 from pathlib import Path
+from typing import ClassVar
 
 import numpy as np
 
@@ -14,7 +15,7 @@ from torchsig.signals.signal_types import Signal
 
 from .metadata_reader import MetadataReader
 
-__all__ = ["SIGMFReader"]
+__all__ = ["SigMFReader"]
 
 
 class SigMFReader(MetadataReader):
@@ -38,7 +39,7 @@ class SigMFReader(MetadataReader):
 
     DEFAULT_DTYPE = "cf32_le"
 
-    SIGMF_DTYPE_MAP = {
+    SIGMF_DTYPE_MAP: ClassVar[dict[str, np.dtype]] = {
         "cf32_le": np.dtype("<c8"),
         "cf32_be": np.dtype(">c8"),
         "ci16_le": np.dtype([("i", "<i2"), ("q", "<i2")]),
@@ -51,7 +52,7 @@ class SigMFReader(MetadataReader):
         super().__init__(root)
         self.root = Path(self.root).resolve()
 
-        self.data_files = sorted(self.root.rglob("*.sigmf-data"), key=lambda p: str(p))
+        self.data_files = sorted(self.root.rglob("*.sigmf-data"), key=str)
         if not self.data_files:
             raise FileNotFoundError(f"No .sigmf-data files found in {self.root}")
 

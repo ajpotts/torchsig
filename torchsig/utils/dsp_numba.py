@@ -35,7 +35,7 @@ def partition_polyphase_numba(h, up_rate, taps_per_phase):
 
 
 @jit(nopython=True, cache=True)
-def sampling_clock_impairments_numba(
+def sampling_clock_impairments_numba(  # noqa: PLR0917
     x_real,
     x_imag,
     uprate,
@@ -118,7 +118,7 @@ def sampling_clock_impairments_numba(
     return result
 
 
-def sampling_clock_impairments_numba_wrapper(
+def sampling_clock_impairments_numba_wrapper(  # noqa: PLR0917
     h,
     x,
     uprate,
@@ -217,7 +217,7 @@ def sampling_clock_impairments_numba_wrapper(
 
 
 @jit(nopython=True, cache=True)
-def digital_agc_numba(
+def digital_agc_numba(  # noqa: PLR0917
     data: complex64[:],  # 1D complex64 array (Numba type)
     initial_gain_db: float32,  # All scalars must be Numba types
     alpha_smooth: float32,

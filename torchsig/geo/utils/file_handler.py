@@ -32,6 +32,7 @@ from typing import Any
 
 import numpy as np
 import yaml
+from typing_extensions import Self
 
 from torchsig.signals.signal_types import Signal
 from torchsig.utils.file_handlers.base_handler import BaseFileHandler, FileReader, FileWriter
@@ -135,7 +136,7 @@ class GeoDatasetWriter(FileWriter):
         self.blocklist = blocklist
         self._counter = 0
 
-    def __enter__(self) -> GeoDatasetWriter:
+    def __enter__(self) -> Self:
         """Enter the writer context after handling an existing dataset."""
         existing_files = [path for pattern in ("*.yaml", "*.dat") for path in self.root.glob(pattern) if path.stem.isdigit()]
 
@@ -174,6 +175,7 @@ class GeoDatasetWriter(FileWriter):
             batch_idx: Index of the batch (unused, for API compatibility)
             data: Single Signal or list of Signals to write
         """
+        _ = batch_idx  # Required by the FileWriter interface.
         signals = [data] if isinstance(data, Signal) else data
 
         for signal in signals:

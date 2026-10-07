@@ -178,7 +178,7 @@ def pad_head_tail_to_length(input_signal: np.ndarray, num_samples: int) -> np.nd
 
 # apply an anti-aliasing filter to a signal which has aliased and wrapped around the
 # -fs/2 or +fs/2 boundary due to upconversion
-def upconversion_anti_aliasing_filter(
+def upconversion_anti_aliasing_filter(  # noqa: PLR0917
     input_signal: np.ndarray,
     center_freq: float,
     bandwidth: float,
@@ -521,9 +521,7 @@ def multistage_polyphase_decimator(input_signal: np.ndarray, decimation_rate: fl
     # decimate by integer rate, if no integer decimation, pass through only
     decimation_integer_out = polyphase_decimator(input_signal, decimation_integer_rate) if decimation_integer_rate > 1 else input_signal
     # apply fractional rate resampling, if no resampling, pass through
-    decimation_fractional_out = polyphase_fractional_resampler(decimation_integer_out, 1 / decimation_fractional_rate) if decimation_fractional_rate > 1 else decimation_integer_out
-
-    return decimation_fractional_out
+    return polyphase_fractional_resampler(decimation_integer_out, 1 / decimation_fractional_rate) if decimation_fractional_rate > 1 else decimation_integer_out
 
 
 def multistage_polyphase_interpolator(input_signal: np.ndarray, resample_rate_ideal: float) -> np.ndarray:
@@ -554,9 +552,7 @@ def multistage_polyphase_interpolator(input_signal: np.ndarray, resample_rate_id
     # interpolate by a fractional rate, if no rate change, just a pass through
     interpolate_fractional_out = polyphase_fractional_resampler(input_signal, interpolation_fractional_rate) if interpolation_fractional_rate > 1 else input_signal
     # interpolate by an integer rate, if no rate change, just a pass through
-    interpolate_integer_out = polyphase_integer_interpolator(interpolate_fractional_out, interpolation_integer_rate) if interpolation_integer_rate > 1 else interpolate_fractional_out
-
-    return interpolate_integer_out
+    return polyphase_integer_interpolator(interpolate_fractional_out, interpolation_integer_rate) if interpolation_integer_rate > 1 else interpolate_fractional_out
 
 
 def _polyphase_fractional_integer_rates(fractional_rate: float) -> tuple[int, int]:
@@ -812,7 +808,7 @@ def partition_polyphase(h: np.ndarray, up_rate: int, taps_per_phase: int) -> np.
     return h_pfb
 
 
-def sampling_clock_impairments(
+def sampling_clock_impairments(  # noqa: PLR0917
     h: np.ndarray,
     x: np.ndarray,
     uprate: int,
@@ -1162,8 +1158,9 @@ def convolve(signal: np.ndarray, taps: np.ndarray) -> np.ndarray:
     Returns:
         np.ndarray: The convolution output
     """
+    two_tap_filter_length = 2
     filtered = sp.convolve(signal, taps, mode="full")
-    if len(taps) == 2:
+    if len(taps) == two_tap_filter_length:
         return filtered[1:]
     if is_even(len(taps)):  # even-length filter
         slice_length = int(len(taps) / 2)

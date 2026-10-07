@@ -6,7 +6,6 @@ hooks for the production transform and model factories. Run ``--help`` for the
 adapter contract and full benchmark matrix options.
 """
 
-
 from __future__ import annotations
 
 import argparse

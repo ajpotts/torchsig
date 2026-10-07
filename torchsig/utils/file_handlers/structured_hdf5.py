@@ -42,6 +42,7 @@ class StructuredHDF5Writer(FileWriter):
     def __init__(
         self,
         root,
+        *,
         schema: StructuredSampleSchema | None = None,
         compression: str | None = "lzf",
         compression_opts: int | None = None,

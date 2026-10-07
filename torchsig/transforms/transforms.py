@@ -1,16 +1,16 @@
 """Transforms on Signal objects."""
 
-import os
 import secrets
 import time
 import warnings
 from copy import copy
+from pathlib import Path
 from typing import Literal
 
 import numpy as np
 import numpy.typing as npt
 
-import torchsig.transforms.functional as F
+import torchsig.transforms.functional as F  # noqa: N812 - conventional functional API alias
 from torchsig.signals.signal_types import Signal
 from torchsig.transforms.base_transforms import Transform
 from torchsig.utils.dsp import TorchSigComplexDataType, TorchSigRealDataType, low_pass
@@ -148,7 +148,7 @@ def transform_crash_logger(transform_func, data, **kwargs):
         timestamp = int(time.time() * 1000)
         filename = f"crash_{transform_func.__name__}_{timestamp}.npz"
         counter = 0
-        while os.path.exists(filename):
+        while Path(filename).exists():
             counter += 1
             filename = f"crash_{transform_func.__name__}_{timestamp}_{counter}.npz"
 
@@ -157,7 +157,7 @@ def transform_crash_logger(transform_func, data, **kwargs):
 
         print(f"!!! Transform failed. State saved to {filename}")
         print(f"Error: {e}")
-        raise e  # Re-raise original exception
+        raise  # Re-raise original exception
 
 
 class SignalTransform(Transform):
@@ -429,6 +429,7 @@ class AdjacentChannelInterference(SignalTransform):
 
     def __init__(
         self,
+        *,
         sample_rate: float = 1.0,
         power_range: tuple = (0.01, 10.0),
         center_frequency_range: tuple = (0.2, 0.3),
@@ -659,11 +660,7 @@ class ClockDrift(SignalTransform):
         """
         super().__init__(required_metadata=[], data_dtype=TorchSigComplexDataType, **kwargs)
         initial_phase_values = np.asarray(initial_phase, dtype=float)
-        if (
-            np.any(~np.isfinite(initial_phase_values))
-            or np.any(initial_phase_values < 0.0)
-            or np.any(initial_phase_values >= 1.0)
-        ):
+        if np.any(~np.isfinite(initial_phase_values)) or np.any(initial_phase_values < 0.0) or np.any(initial_phase_values >= 1.0):
             raise ValueError("initial_phase must be finite and in the interval [0, 1)")
         self.drift_ppm = drift_ppm
         self.initial_phase = initial_phase
@@ -713,11 +710,7 @@ class ClockJitter(SignalTransform):
         """
         super().__init__(required_metadata=[], data_dtype=TorchSigComplexDataType, **kwargs)
         initial_phase_values = np.asarray(initial_phase, dtype=float)
-        if (
-            np.any(~np.isfinite(initial_phase_values))
-            or np.any(initial_phase_values < 0.0)
-            or np.any(initial_phase_values >= 1.0)
-        ):
+        if np.any(~np.isfinite(initial_phase_values)) or np.any(initial_phase_values < 0.0) or np.any(initial_phase_values >= 1.0):
             raise ValueError("initial_phase must be finite and in the interval [0, 1)")
         self.jitter_ppm = jitter_ppm
         self.initial_phase = initial_phase
@@ -1009,6 +1002,7 @@ class DigitalAGC(SignalTransform):
 
     def __init__(
         self,
+        *,
         initial_gain_db: tuple[float] = (0, 0),
         alpha_smooth: tuple[float] = (1e-7, 1e-6),
         alpha_track: tuple[float] = (1e-6, 1e-5),
@@ -1039,7 +1033,7 @@ class DigitalAGC(SignalTransform):
         self.initial_gain_db_distribution = self.get_distribution(self.initial_gain_db)
         self.alpha_smooth_distribution = self.get_distribution(self.alpha_smooth, "log10")
         self.alpha_track_distribution = self.get_distribution(self.alpha_track, "log10")
-        self.alpha_overflow_distribution = self.get_distribution(self.alpha_track, "log10")
+        self.alpha_overflow_distribution = self.get_distribution(self.alpha_overflow, "log10")
         self.alpha_acquire_distribution = self.get_distribution(self.alpha_acquire, "log10")
         self.track_range_db_distribution = self.get_distribution(self.track_range_db)
 
@@ -1102,15 +1096,15 @@ class DigitalAGC(SignalTransform):
 
         signal.data = F.digital_agc(
             np.ascontiguousarray(signal.data, dtype=np.complex64),
-            np.float64(initial_gain_db),
-            np.float64(alpha_smooth),
-            np.float64(alpha_track),
-            np.float64(alpha_overflow),
-            np.float64(alpha_acquire),
-            np.float64(ref_level_db),
-            np.float64(track_range_db),
-            np.float64(low_level_db),
-            np.float64(high_level_db),
+            initial_gain_db=np.float64(initial_gain_db),
+            alpha_smooth=np.float64(alpha_smooth),
+            alpha_track=np.float64(alpha_track),
+            alpha_overflow=np.float64(alpha_overflow),
+            alpha_acquire=np.float64(alpha_acquire),
+            ref_level_db=np.float64(ref_level_db),
+            track_range_db=np.float64(track_range_db),
+            low_level_db=np.float64(low_level_db),
+            high_level_db=np.float64(high_level_db),
         )
 
         return signal
@@ -1840,7 +1834,7 @@ class Spectrogram(SignalTransform):
         fft_size: The FFT size (number of bins) in the spectrogram.
     """
 
-    def __init__(self, fft_size: int, fft_stride: int = None, **kwargs):
+    def __init__(self, fft_size: int, fft_stride: int | None = None, **kwargs):
         """Initialize the Spectrogram transform.
 
         Args:

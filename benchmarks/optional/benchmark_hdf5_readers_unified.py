@@ -219,7 +219,9 @@ def measure(configuration: DatasetConfiguration, operation: Operation, samples: 
     }
 
 
-def configurations(formats: Sequence[Format], workloads: Sequence[Workload], compressions: Sequence[str], chunk_sizes: Sequence[int], output_dir: Path, arrays: dict[Workload, np.ndarray], batch_size: int) -> list[DatasetConfiguration]:
+def configurations(
+    formats: Sequence[Format], workloads: Sequence[Workload], compressions: Sequence[str], chunk_sizes: Sequence[int], output_dir: Path, arrays: dict[Workload, np.ndarray], batch_size: int
+) -> list[DatasetConfiguration]:
     """Generate the supported format/configuration matrix."""
     result = []
     for workload in workloads:

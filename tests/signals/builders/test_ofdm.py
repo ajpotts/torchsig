@@ -750,9 +750,9 @@ def test_ofdm_modulator_calculates_resampling_parameters():
     # ceil(100 / 2.5) = 40
     baseband_modulator.assert_called_once_with(
         64,
-        40,
-        4,
-        rng,
+        max_num_samples=40,
+        oversampling_rate_nominal=4,
+        rng=rng,
     )
     resampler.assert_called_once_with(
         baseband,
@@ -965,11 +965,11 @@ def test_ofdm_signal_generator_generate():
 
     modulator.assert_called_once_with(
         64,
-        800,
-        10_000,
-        150,
-        rng,
-        16,
+        bandwidth=800,
+        sample_rate=10_000,
+        num_samples=150,
+        rng=rng,
+        cyclic_prefix_len=16,
     )
 
     signal_class.assert_called_once_with(

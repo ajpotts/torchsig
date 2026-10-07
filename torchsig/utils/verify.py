@@ -30,6 +30,7 @@ __all__ = [
 def verify_bounds(
     a: float,
     name: str,
+    *,
     low: float | None = None,
     high: float | None = None,
     clip_low: bool = False,
@@ -78,6 +79,7 @@ def verify_bounds(
 def verify_int(
     a: int,
     name: str,
+    *,
     low: int = 0,
     high: int | None = None,
     clip_low: bool = False,
@@ -121,6 +123,7 @@ def verify_int(
 def verify_float(
     f: float,
     name: str,
+    *,
     low: float = 0.0,
     high: float | None = None,
     clip_low: bool = False,
@@ -276,6 +279,7 @@ def verify_list(
 def verify_numpy_array(
     n: np.ndarray,
     name: str,
+    *,
     min_length: int | None = None,
     max_length: int | None = None,
     exact_length: int | None = None,

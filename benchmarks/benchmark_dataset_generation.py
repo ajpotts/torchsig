@@ -1,6 +1,5 @@
 """End-to-end benchmarks for TorchSIG's default training-data pipelines."""
 
-
 from __future__ import annotations
 
 from pathlib import Path

@@ -178,14 +178,14 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
 
     def __init__(
         self,
+        *,
         signal_generators: str | ConcatSignalGenerator | list = "all",
         transforms: list[Transform | callable] | None = None,
         component_transforms: list[Transform | callable] | None = None,
         target_labels: list | None = None,
-        sampling_grouping: (GroupingLabel | str | Path | Mapping[str, Any] | None) = None,
+        sampling_grouping: GroupingLabel | str | Path | Mapping[str, Any] | None = None,
         per_signal_metadata: dict[str, dict[str, int | float]] | None = None,
         experiment_config: ExperimentConfig | str | Path | Mapping[str, Any] | None = None,
-        # will try to validate required metadata in this dataset; can be turned off if a dataset needs to be initialized before it's metadata is known
         validate_init: bool = True,
         **kwargs,
     ):
@@ -491,6 +491,7 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
     def add_signal_generator(
         self,
         signal_generator: callable,
+        *,
         class_name: str | None = None,
         class_index: int | None = None,
         likelihood: float | None = None,

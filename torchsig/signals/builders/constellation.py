@@ -26,6 +26,7 @@ __all__ = ["ConstellationSignalGenerator", "constellation_modulator", "constella
 def constellation_modulator_baseband(
     constellation_name: str,
     pulse_shape_name: str,
+    *,
     max_num_samples: int,
     oversampling_rate_nominal: int,
     alpha_rolloff: float | None = None,
@@ -108,6 +109,7 @@ def constellation_modulator_baseband(
 def constellation_modulator(
     constellation_name: str,
     pulse_shape_name: str,
+    *,
     bandwidth: float,
     sample_rate: float,
     num_samples: int,
@@ -161,10 +163,10 @@ def constellation_modulator(
     constellation_signal_baseband = constellation_modulator_baseband(
         constellation_name,
         pulse_shape_name,
-        num_samples_baseband,
-        oversampling_rate_baseband,
-        alpha_rolloff,
-        rng,
+        max_num_samples=num_samples_baseband,
+        oversampling_rate_nominal=oversampling_rate_baseband,
+        alpha_rolloff=alpha_rolloff,
+        rng=rng,
     )
 
     # Apply resampling
@@ -281,11 +283,11 @@ class ConstellationSignalGenerator(BaseSignalGenerator):
         signal_data = constellation_modulator(
             constellation_name,
             pulse_shape_name,
-            bandwidth,
-            sample_rate,
-            num_iq_samples_signal,
-            alpha_rolloff,
-            self.random_generator,
+            bandwidth=bandwidth,
+            sample_rate=sample_rate,
+            num_samples=num_iq_samples_signal,
+            alpha_rolloff=alpha_rolloff,
+            rng=self.random_generator,
         )
 
         return Signal(

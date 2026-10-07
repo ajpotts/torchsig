@@ -14,7 +14,7 @@ __all__ = [
 from abc import ABC
 from typing import TYPE_CHECKING, Literal
 
-import torchsig.transforms.functional as F
+import torchsig.transforms.functional as F  # noqa: N812 - conventional functional API alias
 from torchsig.utils.printing import generate_repr_str
 from torchsig.utils.random import Seedable
 

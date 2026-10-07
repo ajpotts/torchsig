@@ -133,7 +133,7 @@ class BaseSignalGenerator(HierarchicalMetadataObject):
         Raises:
             NotImplementedError: If the method is not implemented by a subclass.
         """
-        raise NotImplementedError("Subclasses must implement 'build'")
+        raise NotImplementedError("Subclasses must implement 'generate'")
 
 
 class ConcatSignalGenerator(BaseSignalGenerator):

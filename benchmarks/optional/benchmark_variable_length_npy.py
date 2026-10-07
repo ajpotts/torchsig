@@ -57,6 +57,7 @@ def _fd_count() -> int | None:
     fd_root = Path("/proc/self/fd")
     return len(list(fd_root.iterdir())) if fd_root.exists() else None
 
+
 def _measure(read, indices: list[int]) -> dict[str, float | int | None]:
     before = _fd_count()
     start = time.perf_counter()
@@ -76,6 +77,7 @@ def _measure(read, indices: list[int]) -> dict[str, float | int | None]:
         "fd_delta": None if before is None or after is None else after - before,
         "checksum": checksum,
     }
+
 
 def _measure_dataloader(layout: str, root: Path, indices: list[int], workers: int) -> dict[str, float | int]:
     dataset = Subset(_LayoutDataset(layout, root, len(indices)), indices)

@@ -18,6 +18,8 @@ from torchsig.utils.dsp import (
 
 __all__ = ["OFDMSignalGenerator", "ofdm_modulator", "ofdm_modulator_baseband"]
 
+_CYCLIC_PREFIX_PROBABILITY = 0.5
+
 
 def ofdm_modulator_baseband(
     num_subcarriers: int,
@@ -111,6 +113,7 @@ def ofdm_modulator(
     bandwidth: float,
     sample_rate: float,
     num_samples: int,
+    *,
     rng: np.random.Generator | None = None,
     cyclic_prefix_len: int | None = None,
 ) -> np.ndarray:
@@ -158,17 +161,17 @@ def ofdm_modulator(
     if cyclic_prefix_len is None:
         ofdm_signal_baseband = ofdm_modulator_baseband(
             num_subcarriers,
-            num_samples_baseband,
-            oversampling_rate_baseband,
-            rng,
+            max_num_samples=num_samples_baseband,
+            oversampling_rate_nominal=oversampling_rate_baseband,
+            rng=rng,
         )
     else:
         ofdm_signal_baseband = ofdm_modulator_baseband(
             num_subcarriers,
-            num_samples_baseband,
-            oversampling_rate_baseband,
-            rng,
-            cyclic_prefix_len,
+            max_num_samples=num_samples_baseband,
+            oversampling_rate_nominal=oversampling_rate_baseband,
+            rng=rng,
+            cyclic_prefix_len=cyclic_prefix_len,
         )
 
     ofdm_signal_correct_bw = multistage_polyphase_resampler(ofdm_signal_baseband, resample_rate_ideal)
@@ -231,17 +234,17 @@ class OFDMSignalGenerator(BaseSignalGenerator):
         bandwidth = self.random_generator.integers(low=self["bandwidth_min"], high=self["bandwidth_max"] + 1)
         num_subcarriers = self["num_subcarriers"]
 
-        has_cyclic_prefix = bool(self.random_generator.uniform(0, 1) >= 0.50)
+        has_cyclic_prefix = bool(self.random_generator.uniform(0, 1) >= _CYCLIC_PREFIX_PROBABILITY)
         cyclic_prefix_len = int(self.random_generator.integers(2, int(num_subcarriers / 2))) if has_cyclic_prefix else 0
 
         # Generate signal
         signal_data = ofdm_modulator(
             num_subcarriers,
-            bandwidth,
-            sample_rate,
-            num_iq_samples_signal,
-            self.random_generator,
-            cyclic_prefix_len,
+            bandwidth=bandwidth,
+            sample_rate=sample_rate,
+            num_samples=num_iq_samples_signal,
+            rng=self.random_generator,
+            cyclic_prefix_len=cyclic_prefix_len,
         )
 
         return Signal(

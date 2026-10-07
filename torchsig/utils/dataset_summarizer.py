@@ -83,7 +83,7 @@ class DatasetSummary:
             A populated ``DatasetSummary``.
         """
         instance = cls.__new__(cls)
-        instance._build(dataset, n_bins)
+        cls._build(instance, dataset, n_bins)
         return instance
 
     def _build(
@@ -144,6 +144,7 @@ class DatasetSummary:
     def plot(
         self,
         metrics: list[str] | None = None,
+        *,
         max_cols: int = 2,
         width_per_plot: int = 15,
         height_per_plot: int = 10,

@@ -619,10 +619,10 @@ def test_constellation_modulator_calculates_resampling_parameters():
     baseband_modulator.assert_called_once_with(
         "qpsk",
         "srrc",
-        40,
-        4,
-        0.25,
-        rng,
+        max_num_samples=40,
+        oversampling_rate_nominal=4,
+        alpha_rolloff=0.25,
+        rng=rng,
     )
 
     resampler.assert_called_once_with(
@@ -660,14 +660,14 @@ def test_constellation_modulator_uses_minimum_baseband_length():
             rng=rng,
         )
 
-    baseband_modulator.assert_called_once_with(
-        "qpsk",
-        "rectangular",
-        4,
-        4,
-        None,
-        rng,
-    )
+        baseband_modulator.assert_called_once_with(
+            "qpsk",
+            "rectangular",
+            max_num_samples=4,
+            oversampling_rate_nominal=4,
+            alpha_rolloff=None,
+            rng=rng,
+        )
 
 
 def test_constellation_modulator_slices_long_resampled_signal():
@@ -880,11 +880,11 @@ def test_constellation_signal_generator_generate_with_srrc():
     modulator.assert_called_once_with(
         "qpsk",
         "srrc",
-        800,
-        10_000,
-        150,
-        0.25,
-        rng,
+        bandwidth=800,
+        sample_rate=10_000,
+        num_samples=150,
+        alpha_rolloff=0.25,
+        rng=rng,
     )
 
     signal_class.assert_called_once_with(
@@ -944,11 +944,11 @@ def test_constellation_signal_generator_generate_with_rectangular():
     modulator.assert_called_once_with(
         "16qam",
         "rectangular",
-        1_500,
-        20_000,
-        300,
-        None,
-        rng,
+        bandwidth=1_500,
+        sample_rate=20_000,
+        num_samples=300,
+        alpha_rolloff=None,
+        rng=rng,
     )
 
     signal_class.assert_called_once_with(
@@ -1004,11 +1004,11 @@ def test_constellation_signal_generator_honors_fixed_pulse_shaping(
     modulator.assert_called_once_with(
         "qpsk",
         expected_shape,
-        800,
-        10_000,
-        128,
-        expected_alpha,
-        generator.random_generator,
+        bandwidth=800,
+        sample_rate=10_000,
+        num_samples=128,
+        alpha_rolloff=expected_alpha,
+        rng=generator.random_generator,
     )
     assert signal.pulse_shape_name == expected_shape
     assert signal.alpha_rolloff == expected_alpha
@@ -1037,7 +1037,7 @@ def test_constellation_signal_generator_fixed_srrc_randomizes_missing_alpha():
         generator.generate()
 
     generator.random_generator.uniform.assert_called_once_with(0.1, 0.5)
-    assert modulator.call_args.args[5] == 0.4
+    assert modulator.call_args.kwargs["alpha_rolloff"] == 0.4
 
 
 @pytest.mark.parametrize(

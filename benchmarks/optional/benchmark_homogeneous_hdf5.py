@@ -95,11 +95,7 @@ CASES = tuple(
     (workload, compression_name, compression, format_name, *classes) for workload in WORKLOADS for compression_name, compression in COMPRESSIONS.items() for format_name, classes in FORMATS.items()
 )
 WORKER_CASES = tuple(
-    (workload, format_name, *classes, num_workers, shuffled)
-    for workload in WORKLOADS
-    for format_name, classes in FORMATS.items()
-    for num_workers in (0, 2, 8)
-    for shuffled in (False, True)
+    (workload, format_name, *classes, num_workers, shuffled) for workload in WORKLOADS for format_name, classes in FORMATS.items() for num_workers in (0, 2, 8) for shuffled in (False, True)
 )
 
 
@@ -261,11 +257,7 @@ def _packed_contiguous_read(
 
 
 def _contiguous_signal_read(reader, start: int, stop: int) -> int:
-    signals = (
-        reader.read_signals_batch(start, stop)
-        if isinstance(reader, HomogeneousHDF5Reader)
-        else [reader.read(idx) for idx in range(start, stop)]
-    )
+    signals = reader.read_signals_batch(start, stop) if isinstance(reader, HomogeneousHDF5Reader) else [reader.read(idx) for idx in range(start, stop)]
     return sum(1 + len(signal.component_signals) for signal in signals)
 
 
@@ -675,16 +667,10 @@ def test_benchmark_homogeneous_contiguous_signal_batch_read(
     )
     start = (workload.signal_count - workload.read_count) // 2
     stop = start + workload.read_count
-    expected_count = sum(
-        1 + len(signal.component_signals)
-        for signal in signals[start:stop]
-    )
+    expected_count = sum(1 + len(signal.component_signals) for signal in signals[start:stop])
     reader = reader_class(root)
     try:
-        assert (
-            benchmark(_contiguous_signal_read, reader, start, stop)
-            == expected_count
-        )
+        assert benchmark(_contiguous_signal_read, reader, start, stop) == expected_count
     finally:
         reader.teardown()
     _set_extra_info(benchmark, workload, compression_name, file_size)

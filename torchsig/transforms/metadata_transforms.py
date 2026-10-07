@@ -606,11 +606,7 @@ class GroupingLabel(MetadataTransform):
             else:
                 result = set(items)
         elif isinstance(node, ast.BoolOp):
-            result = (
-                all(bool(self._evaluate_formula(item, value)) for item in node.values)
-                if isinstance(node.op, ast.And)
-                else any(bool(self._evaluate_formula(item, value)) for item in node.values)
-            )
+            result = all(bool(self._evaluate_formula(item, value)) for item in node.values) if isinstance(node.op, ast.And) else any(bool(self._evaluate_formula(item, value)) for item in node.values)
         elif isinstance(node, ast.UnaryOp):
             operand = self._evaluate_formula(node.operand, value)
             if isinstance(node.op, ast.Not):

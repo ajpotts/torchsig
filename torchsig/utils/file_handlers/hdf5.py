@@ -10,6 +10,8 @@ when they are uniform.
 
 from __future__ import annotations
 
+import contextlib
+
 # Built-In
 import threading
 from typing import Any
@@ -56,8 +58,8 @@ def _hdf5_key(obj) -> str:
     exists" guard to skip the write silently.
     """
     try:
-        return obj._hdf5_key
-    except AttributeError:
+        return vars(obj)["_hdf5_key"]
+    except (KeyError, TypeError):
         return str(id(obj))
 
 
@@ -75,10 +77,10 @@ def populate_hdf5_group_with_metadata(group, metadata_obj) -> bool:
     if key in group:
         return False
     metadata_group = group.create_group(key)
-    for k in metadata_obj.keys():
-        if not metadata_obj[k] == None:
+    for k in metadata_obj.keys():  # noqa: SIM118 - metadata objects are not iterable
+        if metadata_obj[k] is not None:
             metadata_group.create_dataset(k, data=metadata_obj[k])
-    if not metadata_obj.parent == None:
+    if metadata_obj.parent is not None:
         try:
             metadata_group.create_dataset("parent_metadata_id", data=_hdf5_key(metadata_obj.parent))
             populate_hdf5_group_with_metadata(group, metadata_obj.parent)
@@ -180,6 +182,7 @@ class HDF5Writer(FileWriter):
     def __init__(
         self,
         root,
+        *,
         compression: str = "lzf",
         compression_opts: int | None = None,
         shuffle: bool = True,
@@ -289,9 +292,10 @@ class HDF5Writer(FileWriter):
         visited: set[int] = set()
         while parent is not None and id(parent) not in visited:
             visited.add(id(parent))
-            if getattr(parent, "_hdf5_writer_token", None) is not self._hdf5_writer_token:
-                parent._hdf5_key = str(self._key_counter)
-                parent._hdf5_writer_token = self._hdf5_writer_token
+            parent_attributes = vars(parent)
+            if parent_attributes.get("_hdf5_writer_token") is not self._hdf5_writer_token:
+                parent_attributes["_hdf5_key"] = str(self._key_counter)
+                parent_attributes["_hdf5_writer_token"] = self._hdf5_writer_token
                 self._key_counter += 1
             parent = getattr(parent, "parent", None)
 
@@ -303,8 +307,9 @@ class HDF5Writer(FileWriter):
         string key. The module-level populate helpers therefore do not depend
         on recyclable CPython memory addresses for writer-managed objects.
         """
-        signal._hdf5_key = str(self._key_counter)
-        signal._hdf5_writer_token = self._hdf5_writer_token
+        signal_attributes = vars(signal)
+        signal_attributes["_hdf5_key"] = str(self._key_counter)
+        signal_attributes["_hdf5_writer_token"] = self._hdf5_writer_token
         self._key_counter += 1
         self._assign_hdf5_keys_to_parent_chain(signal)
         for cs in signal.component_signals:
@@ -345,7 +350,7 @@ class HDF5Writer(FileWriter):
             self._batch_buffer.sort(key=lambda x: x[0])
 
             # Process all batches in buffer
-            for batch_idx, data in self._batch_buffer:
+            for _batch_idx, data in self._batch_buffer:
                 self._write_batch_to_hdf5(data)
 
             # Clear buffer
@@ -416,15 +421,13 @@ def fill_object_metadata_from_group_and_id(obj, group, id_str):
     Returns:
         The object with filled metadata.
     """
-    for key in group["metadata"][id_str].keys():
-        if not key == "parent_metadata_id":
+    for key in group["metadata"][id_str]:
+        if key != "parent_metadata_id":
             obj[key] = load_value_from_group(group["metadata"][id_str], key)
-    try:
+    with contextlib.suppress(KeyError):
         parent_id = load_value_from_group(group["metadata"][id_str], "parent_metadata_id")
         metadata_obj = fill_object_metadata_from_group_and_id(HierarchicalMetadataObject(), group, parent_id)
         obj.add_parent(metadata_obj)
-    except:
-        pass  # we have no parent set; do nothing
     return obj
 
 
@@ -439,16 +442,13 @@ def load_signal_from_group_by_id(group, id_str):
         Signal: The loaded signal.
     """
     component_signals = []
-    try:
+    with contextlib.suppress(KeyError):
         component_signals = [load_signal_from_group_by_id(group, temp_id) for temp_id in load_value_from_group(group["component_signals"], id_str)]
-    except:
-        pass
     signal = Signal(
         data=load_value_from_group(group["data"], id_str),
         component_signals=component_signals,
     )
-    signal = fill_object_metadata_from_group_and_id(signal, group, id_str)
-    return signal
+    return fill_object_metadata_from_group_and_id(signal, group, id_str)
 
 
 def load_signal_from_group_by_index(group, ind):

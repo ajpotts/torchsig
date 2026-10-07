@@ -208,6 +208,7 @@ class PackedHDF5Writer(FileWriter):
     def __init__(
         self,
         root,
+        *,
         compression: str | None = "lzf",
         compression_opts: int | None = None,
         shuffle: bool = True,

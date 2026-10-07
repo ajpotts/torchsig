@@ -59,12 +59,12 @@ __all__ = [
 def set_global_seed(seed: int) -> None:
     """Set *all* relevant RNGs to the same seed."""
     random.seed(seed)
-    np.random.seed(seed)
+    np.random.seed(seed)  # noqa: NPY002 - seed the global RNG used by downstream code
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
     # Force deterministic algorithms (fails loudly if an op is nondet.)
-    torch.use_deterministic_algorithms(True)
+    torch.use_deterministic_algorithms(mode=True)
 
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
@@ -265,20 +265,18 @@ class TorchSigDataModule(pl.LightningDataModule):
         root: str,
         metadata,
         dataset_size: int,
+        *,
         dataset_splits: list[float] | list[int] = [0.70, 0.20, 0.10],
-        # dataloader params
         batch_size: int = 1,
-        num_workers: int | None = None,  # ← can be None → default to 0
+        num_workers: int | None = None,
         collate_fn: Callable | None = None,
         shuffle: bool = True,
-        # dataset creator params
         create_batch_size: int = 8,
         create_num_workers: int = 4,
         file_writer: BaseFileHandler = HDF5Writer,
         file_reader: BaseFileHandler | None = None,
         file_writer_kwargs: dict[str, Any] | None = None,
         overwrite: bool = False,
-        # transforms
         impairment_level: int = 0,
         transforms: list | None = None,
         target_labels: list[str] | None = None,
@@ -505,6 +503,7 @@ class TorchSigDataModule(pl.LightningDataModule):
             FileNotFoundError: If the dataset files are not found at the specified root.
             ValueError: If dataset splits are invalid.
         """
+        _ = stage  # Required by the LightningDataModule hook signature.
         full_dataset = StaticTorchSigDataset(
             root=self.root,
             file_handler_class=self.file_reader,
