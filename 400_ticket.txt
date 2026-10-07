@@ -1,0 +1,35 @@
+Summary
+Make grouped signal metadata easier to consume as dataset target labels without requiring downstream datasets or wrappers to reconstruct relationships between independently generated target-label lists.
+Motivation
+A dataset can currently request multiple target labels such as:
+target_labels=[ "class_name", "yolo_label", ]
+These labels are generated independently from signal metadata. Downstream code may then assume that the returned lists correspond element-for-element.
+This becomes fragile when one target is unavailable or filtered for a component signal. For example, code such as:
+for class_name, box in zip(class_names, boxes, strict=True): ...
+depends on both independently generated targets having identical membership and ordering.
+Grouping makes this especially noticeable because consumers often need the grouped name/index associated with each detection.
+Proposed Change
+Provide a supported way for target transforms to consume metadata produced by GroupingLabel while retaining the association with the originating component signal.
+This should allow consumers to request grouped detection labels without joining separate target-label arrays after dataset retrieval.
+The implementation should remain generic and work with arbitrary GroupingLabel configurations.
+Acceptance Criteria
+
+
+        
+      Grouped metadata can be used directly when generating detection targets.
+
+        
+      The association between a component signal and its detection annotation is preserved.
+
+        
+      Consumers do not need to zip independently generated class-name and bounding-box lists to perform grouping.
+
+        
+      Built-in family grouping works through the same mechanism as custom grouping configurations.
+
+        
+      Existing target-label behavior remains backward compatible.
+
+        
+      Tests cover signals for which different requested metadata attributes are present or absent.
+ 
