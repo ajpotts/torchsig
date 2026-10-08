@@ -1,0 +1,20 @@
+Title: Derive sampling-clock output capacity from loop bounds
+
+Target branch: 3.0.0-dev
+
+Summary
+
+This MR fixes sampling-clock output capacity calculation by deriving it from
+the same initial position, termination bound, and increment used by the
+resampling loop.
+
+Changes
+
+- Replace the length-based estimate in the NumPy and Numba implementations.
+- Allocate zero elements when the loop cannot execute.
+- Cover extremely small `drate` values that previously requested an enormous
+  unnecessary allocation.
+
+Verification
+
+`pytest -q tests/utils/test_sampling_clock_output_capacity.py tests/utils/test_sampling_clock_validation.py tests/utils/test_dsp_numba.py`

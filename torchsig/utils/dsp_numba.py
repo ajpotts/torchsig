@@ -162,8 +162,14 @@ def sampling_clock_impairments_numba_wrapper(  # noqa: PLR0917
 
     padded_len = len(x) + 2 * taps_per_phase - 1
     max_input_idx = padded_len - taps_per_phase
-
-    num_output_samples = int(np.ceil(padded_len * uprate / nominal_position_increment)) + 1
+    nominal_position = uprate / drate + initial_phase * uprate
+    max_sample_position = max_input_idx * uprate + (uprate - 1)
+    if nominal_position > max_sample_position:
+        num_output_samples = 0
+    else:
+        num_output_samples = int(
+            np.floor((max_sample_position - nominal_position) / nominal_position_increment)
+        ) + 1
 
     if jitter_ppm != 0.0 or drift_ppm != 0.0:
         jitter_std = jitter_ppm * 1e-6

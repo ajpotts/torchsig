@@ -1,0 +1,28 @@
+Title: Derive sampling-clock output capacity from loop bounds
+
+Problem
+
+The sampling-clock output buffer estimate is not derived from the loop's
+initial position and termination bound. Although it usually overallocates,
+unusual parameter combinations can make the estimate inconsistent with the
+actual loop iteration count. Extremely small `drate` values can request an
+enormous allocation even when the initial position is already beyond the loop
+bound and the correct output is empty.
+
+Scope
+
+- Derive output capacity from the loop's initial position, termination bound,
+  and nominal-position increment.
+- Apply the same calculation to the NumPy and Numba implementations.
+
+Acceptance criteria
+
+- The allocated capacity matches the loop's derived iteration count.
+- An initial position beyond the termination bound allocates zero output
+  elements and returns an empty complex64 array.
+- Extremely small positive `drate` values do not trigger an unnecessary large
+  allocation.
+
+Out of scope
+
+Changes to sampling-clock impairment semantics, RNG behavior, or public APIs.
