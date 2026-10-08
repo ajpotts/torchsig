@@ -508,8 +508,9 @@ def test_ClockDrift(signal: Signal, params: dict, is_error: bool) -> None:
 @pytest.mark.parametrize(
     "signal, params, is_error",
     [
-        (new_test_signal(), {"jitter_ppm": (0.1, 1.0)}, False),
-        (new_test_signal(), {"jitter_ppm": (1.0, 10.0)}, False),
+        (new_test_signal(), {"jitter_ppm": (0.1, 1.0), "jitter_model": "independent"}, False),
+        (new_test_signal(), {"jitter_ppm": (1.0, 10.0), "jitter_model": "period"}, False),
+        (new_test_signal(), {"jitter_ppm": (1.0, 10.0), "jitter_model": "unknown"}, True),
     ],
 )
 def test_ClockJitter(signal: Signal, params: dict, is_error: bool) -> None:
@@ -524,20 +525,22 @@ def test_ClockJitter(signal: Signal, params: dict, is_error: bool) -> None:
         AssertionError: If unexpected test outcome.
     """
     jitter_ppm = params["jitter_ppm"]
+    jitter_model = params["jitter_model"]
 
     if is_error:
         with pytest.raises(Exception, match=r".*"):
-            T = ClockJitter(jitter_ppm=jitter_ppm, seed=42)
+            T = ClockJitter(jitter_ppm=jitter_ppm, jitter_model=jitter_model, seed=42)
             signal = T(signal)
     else:
         signal_test = signal.copy()
 
-        T = ClockJitter(jitter_ppm=jitter_ppm, seed=42)
+        T = ClockJitter(jitter_ppm=jitter_ppm, jitter_model=jitter_model, seed=42)
         signal = T(signal)
 
         assert isinstance(T, ClockJitter)
         assert isinstance(T.random_generator, np.random.Generator)
         assert isinstance(T.jitter_ppm_distribution(), float)
+        assert T.jitter_model == jitter_model
 
         assert len(signal.data) == len(signal_test.data)
         assert signal.data.dtype == TorchSigComplexDataType

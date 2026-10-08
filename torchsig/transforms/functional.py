@@ -295,23 +295,26 @@ def clock_jitter(
     jitter_ppm: float = 10,
     rng: np.random.Generator | None = None,
     initial_phase: float = 0.0,
+    jitter_model: Literal["independent", "period"] = "independent",
 ) -> np.ndarray:
-    """Clock jitter from a Local Oscillator (LO), modeled as gaussian random noise impacting the
-    sampling phase.
+    """Apply Gaussian sampling-clock jitter.
 
-    The jitter applies a randomness to the sampling phase, applying a slight
-    increment or decrement to the sampling phase and therefore potentially changing the number of
-    samples by a very small number.
+    By default, each sampling instant receives an independent absolute timing
+    error. The ``"period"`` model instead accumulates independent errors in
+    successive sample periods.
 
     Args:
         data: Complex valued IQ data samples.
-        jitter_ppm: Jitter in parts per million (ppm). Default 10.
+        jitter_ppm: Standard deviation in millionths of one input-sample
+            period. Default 10.
         rng: Random number generator. Defaults to np.random.default_rng(seed=None).
         initial_phase: Initial sampling phase in input-sample periods. Must be
             in the half-open interval ``[0, 1)``. Defaults to 0.
+        jitter_model: ``"independent"`` for independent absolute timing
+            jitter, or ``"period"`` for accumulated period jitter.
 
     Returns:
-        Data with LO drift applied.
+        Data with sampling-clock jitter applied.
     """
     rng = rng or np.random.default_rng()
 
@@ -338,6 +341,7 @@ def clock_jitter(
         drift_ppm=0,
         rng=rng,
         initial_phase=initial_phase,
+        jitter_model=jitter_model,
     )
 
     return _preserve_sampling_clock_output(data_with_jitter, len(data))

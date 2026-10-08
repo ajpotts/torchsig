@@ -817,6 +817,7 @@ def sampling_clock_impairments(  # noqa: PLR0917
     drift_ppm: float,
     rng: np.random.Generator | None = None,
     initial_phase: float = 0.0,
+    jitter_model: str = "independent",
 ) -> np.ndarray:
     """Implements sampling clock impairments (jitter and drift) using polyphase filtering.
 
@@ -829,11 +830,16 @@ def sampling_clock_impairments(  # noqa: PLR0917
         x: Input signal (1D array of complex numbers)
         uprate: Upsampling factor (integer)
         drate: Downsampling factor (float)
-        jitter_ppm: Jitter in parts per million (float)
+        jitter_ppm: Standard deviation of the timing jitter, in millionths of
+            one input-sample period.
         drift_ppm: Drift in parts per million (float)
         rng: Random number generator. Defaults to ``np.random.default_rng()``.
         initial_phase: Initial sampling phase in input-sample periods. Must be
             in the half-open interval ``[0, 1)``. Defaults to 0.
+        jitter_model: ``"independent"`` applies independent absolute timing
+            errors to the sampling instants. ``"period"`` applies independent
+            sample-period errors whose accumulated sum determines the timing
+            error. Defaults to ``"independent"``.
 
     Returns:
         Output signal with clock impairments (1D array of complex numbers)
@@ -848,6 +854,8 @@ def sampling_clock_impairments(  # noqa: PLR0917
         raise ValueError("drift_ppm must be finite")
     if not np.isfinite(initial_phase) or not 0.0 <= initial_phase < 1.0:
         raise ValueError("initial_phase must be finite and in the interval [0, 1)")
+    if jitter_model not in {"independent", "period"}:
+        raise ValueError("jitter_model must be 'independent' or 'period'")
 
     nominal_position_increment = drate * (1.0 + drift_ppm * 1e-6)
     if not np.isfinite(nominal_position_increment) or nominal_position_increment <= 0.0:
@@ -877,7 +885,10 @@ def sampling_clock_impairments(  # noqa: PLR0917
     clock_drift = 0.0
 
     # Generate random jitter and drift
-    jitter_std = jitter_ppm * 1e-6
+    # Timing offsets below are represented in polyphase units. A jitter value
+    # of one ppm therefore means 1e-6 input-sample periods, or uprate * 1e-6
+    # polyphase units.
+    jitter_std = jitter_ppm * 1e-6 * uprate
     drift_std = drift_ppm * 1e-6
 
     # Run the resampler
@@ -885,8 +896,10 @@ def sampling_clock_impairments(  # noqa: PLR0917
     max_sample_position = max_input_idx * uprate + (uprate - 1)
 
     while nominal_position <= max_sample_position:
+        clock_jitter = rng.normal(0.0, jitter_std) if jitter_ppm != 0.0 or drift_ppm != 0.0 else 0.0
+        jitter_offset = clock_jitter if jitter_model == "independent" else 0.0
         sample_position = np.clip(
-            nominal_position + position_offset,
+            nominal_position + position_offset + jitter_offset,
             0.0,
             max_sample_position,
         )
@@ -912,9 +925,10 @@ def sampling_clock_impairments(  # noqa: PLR0917
         output_idx += 1
 
         if jitter_ppm != 0.0 or drift_ppm != 0.0:
-            clock_jitter = rng.normal(0.0, jitter_std)
             clock_drift += rng.normal(0.0, drift_std)
-            position_offset += clock_jitter + clock_drift
+            if jitter_model == "period":
+                position_offset += clock_jitter
+            position_offset += clock_drift
 
         nominal_position += drate
 

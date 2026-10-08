@@ -35,13 +35,26 @@ def _filter_and_data(seed=123, n=4096):
 
 @pytest.mark.slow
 @pytest.mark.parametrize(
-    "jitter_ppm,drift_ppm",
-    [(0.0, 10.0), (10.0, 0.0), (0.0, 0.0)],
+    ("jitter_ppm", "drift_ppm", "jitter_model"),
+    [
+        (0.0, 10.0, "independent"),
+        (10.0, 0.0, "independent"),
+        (10.0, 0.0, "period"),
+        (0.0, 0.0, "independent"),
+    ],
 )
-def test_numba_matches_reference(jitter_ppm, drift_ppm):
+def test_numba_matches_reference(jitter_ppm, drift_ppm, jitter_model):
     """Numba output matches the NumPy reference to float32 precision."""
     h, x = _filter_and_data()
-    kw = dict(h=h, x=x, uprate=UPRATE, drate=UPRATE, jitter_ppm=jitter_ppm, drift_ppm=drift_ppm)
+    kw = {
+        "h": h,
+        "x": x,
+        "uprate": UPRATE,
+        "drate": UPRATE,
+        "jitter_ppm": jitter_ppm,
+        "drift_ppm": drift_ppm,
+        "jitter_model": jitter_model,
+    }
 
     ref = sampling_clock_impairments(rng=np.random.default_rng(42), **kw)
     out = sampling_clock_impairments_numba_wrapper(rng=np.random.default_rng(42), **kw)
@@ -58,6 +71,23 @@ def test_numba_reproducible():
     a = sampling_clock_impairments_numba_wrapper(rng=np.random.default_rng(7), **kw)
     b = sampling_clock_impairments_numba_wrapper(rng=np.random.default_rng(7), **kw)
     np.testing.assert_array_equal(a, b)
+
+
+def test_independent_is_default_and_differs_from_period_jitter():
+    """The public default is absolute-time jitter, not accumulated period jitter."""
+    h, x = _filter_and_data(n=512)
+    kwargs = {"h": h, "x": x, "uprate": UPRATE, "drate": UPRATE, "jitter_ppm": 1000.0, "drift_ppm": 0.0}
+
+    default = sampling_clock_impairments_numba_wrapper(rng=np.random.default_rng(9), **kwargs)
+    independent = sampling_clock_impairments_numba_wrapper(
+        rng=np.random.default_rng(9), jitter_model="independent", **kwargs
+    )
+    period = sampling_clock_impairments_numba_wrapper(
+        rng=np.random.default_rng(9), jitter_model="period", **kwargs
+    )
+
+    np.testing.assert_array_equal(default, independent)
+    assert not np.array_equal(independent, period)
 
 
 @pytest.mark.parametrize("seed", [3, 11])
