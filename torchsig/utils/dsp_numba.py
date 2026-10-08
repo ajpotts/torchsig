@@ -50,6 +50,7 @@ def sampling_clock_impairments_numba(  # noqa: PLR0917
     nominal_position_increment,
     num_output_samples,
     initial_phase,
+    jitter_mode=0,
 ):
     """Apply sampling-clock impairments with precomputed filter and RNG data.
 
@@ -83,8 +84,12 @@ def sampling_clock_impairments_numba(  # noqa: PLR0917
             pool_index = iteration_idx * 2
             if (pool_index + 1) >= len(jitter_drift_pool):
                 raise RuntimeError(_OUTPUT_CAPACITY_ERROR)
+            clock_jitter = jitter_drift_pool[pool_index]
+        else:
+            clock_jitter = 0.0
 
-        sample_position = nominal_position + position_offset
+        jitter_offset = clock_jitter if jitter_mode == 0 else 0.0
+        sample_position = nominal_position + position_offset + jitter_offset
         if 0.0 <= sample_position <= max_sample_position:
             if output_idx >= num_output_samples:
                 raise RuntimeError(_OUTPUT_CAPACITY_ERROR)
@@ -107,9 +112,10 @@ def sampling_clock_impairments_numba(  # noqa: PLR0917
             output_idx += 1
 
         if jitter_ppm != 0.0 or drift_ppm != 0.0:
-            clock_jitter = jitter_drift_pool[pool_index]
             clock_drift += jitter_drift_pool[pool_index + 1]
-            position_offset += clock_jitter + clock_drift
+            if jitter_mode == 1:
+                position_offset += clock_jitter
+            position_offset += clock_drift
 
         iteration_idx += 1
         nominal_position += nominal_position_increment
@@ -130,6 +136,7 @@ def sampling_clock_impairments_numba_wrapper(  # noqa: PLR0917
     drift_ppm,
     rng,
     initial_phase=0.0,
+    jitter_model="independent",
 ):
     """Wrapper for the numba-optimized sampling clock impairments function.
 
@@ -146,6 +153,9 @@ def sampling_clock_impairments_numba_wrapper(  # noqa: PLR0917
         raise ValueError("drift_ppm must be finite")
     if not np.isfinite(initial_phase) or not 0.0 <= initial_phase < 1.0:
         raise ValueError("initial_phase must be finite and in the interval [0, 1)")
+    if jitter_model not in {"independent", "period"}:
+        raise ValueError("jitter_model must be 'independent' or 'period'")
+    jitter_mode = 0 if jitter_model == "independent" else 1
 
     nominal_position_increment = drate * (1.0 + drift_ppm * 1e-6)
     if not np.isfinite(nominal_position_increment) or nominal_position_increment <= 0.0:
@@ -174,7 +184,7 @@ def sampling_clock_impairments_numba_wrapper(  # noqa: PLR0917
         ) + 1
 
     if jitter_ppm != 0.0 or drift_ppm != 0.0:
-        jitter_std = jitter_ppm * 1e-6
+        jitter_std = jitter_ppm * 1e-6 * uprate
         drift_std = drift_ppm * 1e-6
 
         pairs = rng.normal(0.0, 1.0, (num_output_samples, 2)).astype(np.float32)
@@ -207,6 +217,7 @@ def sampling_clock_impairments_numba_wrapper(  # noqa: PLR0917
                 nominal_position_increment,
                 num_output_samples,
                 initial_phase,
+                jitter_mode,
             )
         except RuntimeError as exc:
             if str(exc) != _OUTPUT_CAPACITY_ERROR or num_output_samples >= max_output_samples:
