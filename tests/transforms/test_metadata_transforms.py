@@ -195,6 +195,7 @@ def test_yolo_label_initializes_expected_metadata_fields():
         "dataset_metadata",
     ]
     assert transform.bandwidth_key == "estimated_occupied_bandwidth"
+    assert transform.class_index_field == "class_index"
     assert transform.targets_metadata == ["yolo_label"]
 
 
@@ -238,6 +239,12 @@ def test_yolo_label_rejects_invalid_bandwidth_key():
         YOLOLabel(bandwidth_key="occupied_bandwidth")
 
 
+@pytest.mark.parametrize("class_index_field", ["", None, 3])
+def test_yolo_label_rejects_invalid_class_index_field(class_index_field):
+    with pytest.raises(ValueError, match="class_index_field must be"):
+        YOLOLabel(class_index_field=class_index_field)
+
+
 def test_yolo_label_requires_selected_bandwidth(component_signal):
     del component_signal["estimated_occupied_bandwidth"]
 
@@ -246,6 +253,47 @@ def test_yolo_label_requires_selected_bandwidth(component_signal):
         match="estimated_occupied_bandwidth is missing",
     ):
         YOLOLabel()(component_signal)
+
+
+def test_yolo_label_can_use_family_index_from_grouping(parent_signal):
+    component = parent_signal.component_signals[0]
+    component["class_name"] = "bpsk"
+
+    GroupingLabel("family")(parent_signal)
+    canonical_label = YOLOLabel()(component).yolo_label
+    family_label = YOLOLabel(class_index_field="family_index")(component).yolo_label
+
+    assert family_label[0] == FAMILY_SHARED_LIST.index(CLASS_FAMILY_DICT["bpsk"])
+    assert family_label[1:] == pytest.approx(canonical_label[1:])
+
+
+def test_yolo_label_can_use_custom_group_index(parent_signal):
+    component = parent_signal.component_signals[0]
+    component["class_name"] = "bpsk"
+    grouping = GroupingLabel(
+        {
+            "labels": {"name": "kind", "index": "kind_index"},
+            "groups": [
+                {"name": "frequency", "values": ["2fsk"]},
+                {"name": "phase", "values": ["bpsk"]},
+            ],
+        }
+    )
+
+    grouping(parent_signal)
+    transformed = YOLOLabel(class_index_field="kind_index")(parent_signal)
+
+    assert transformed.component_signals[0].yolo_label == pytest.approx(
+        (1, 0.5, 0.4, 0.5, 0.1)
+    )
+
+
+def test_yolo_label_requires_selected_class_index_field(component_signal):
+    with pytest.raises(
+        ValueError,
+        match="key: family_index is missing from signal metadata",
+    ):
+        YOLOLabel(class_index_field="family_index")(component_signal)
 
 
 def test_grouping_label_uses_exact_value_rules(parent_signal):

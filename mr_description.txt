@@ -1,0 +1,14 @@
+Title: Allow YOLO labels to use configurable class-index metadata
+
+Summary
+
+- Add a class_index_field option to YOLOLabel, defaulting to class_index for backward compatibility.
+- Use the selected metadata field as the YOLO class ID without changing bounding-box coordinate calculations.
+- Raise a clear error when the selected metadata field is unavailable and validate the option at initialization.
+- Cover canonical class IDs, built-in family grouping, custom grouping, coordinate consistency, and invalid or missing fields.
+
+Testing
+
+- pytest -q tests/transforms/test_metadata_transforms.py -k 'yolo_label' (12 passed, 36 deselected)
+- pytest -q tests/transforms/test_metadata_transforms.py (48 passed)
+- git diff --check (passed)
