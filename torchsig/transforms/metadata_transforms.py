@@ -247,6 +247,7 @@ class YOLOLabel(MetadataTransform):
     Args:
         bandwidth_key: Signal metadata field used for the box height. Must be
             ``"estimated_occupied_bandwidth"`` or ``"bandwidth"``.
+        class_index_field: Signal metadata field used for the class ID.
         **kwargs: Additional keyword arguments passed to the parent class.
 
     Attributes:
@@ -257,24 +258,29 @@ class YOLOLabel(MetadataTransform):
     def __init__(
         self,
         bandwidth_key: str = "estimated_occupied_bandwidth",
+        class_index_field: str = "class_index",
         **kwargs,
     ) -> None:
         """Initialize the YOLOLabel transform.
 
         Args:
             bandwidth_key: Signal metadata field used for the box height.
+            class_index_field: Signal metadata field used for the class ID.
             **kwargs: Additional keyword arguments passed to the parent class.
 
         Raises:
-            ValueError: If ``bandwidth_key`` is not a supported field.
+            ValueError: If ``bandwidth_key`` is not a supported field or
+                ``class_index_field`` is not a non-empty string.
         """
         valid_bandwidth_keys = {"bandwidth", "estimated_occupied_bandwidth"}
         if bandwidth_key not in valid_bandwidth_keys:
             raise ValueError("bandwidth_key must be 'estimated_occupied_bandwidth' or 'bandwidth'")
+        if not isinstance(class_index_field, str) or not class_index_field:
+            raise ValueError("class_index_field must be a non-empty string")
 
         super().__init__(
             required_metadata=[
-                "class_index",
+                class_index_field,
                 "start",
                 bandwidth_key,
                 "center_freq",
@@ -283,6 +289,7 @@ class YOLOLabel(MetadataTransform):
             **kwargs,
         )
         self.bandwidth_key = bandwidth_key
+        self.class_index_field = class_index_field
         self.targets_metadata = ["yolo_label"]
 
     def __apply__(self, signal: Signal) -> Signal:
@@ -296,7 +303,12 @@ class YOLOLabel(MetadataTransform):
         """
         if not hasattr(signal, self.bandwidth_key):
             raise ValueError(f"key: {self.bandwidth_key} is missing from signal metadata, but is required by {self.__class__.__name__}.")
-        class_index = signal.class_index
+        if not hasattr(signal, self.class_index_field):
+            raise ValueError(
+                f"key: {self.class_index_field} is missing from signal metadata, "
+                f"but is required by {self.__class__.__name__}."
+            )
+        class_index = signal[self.class_index_field]
         # normalized to width of sample
         width = signal.duration
         # normalize the selected bandwidth with sample rate
