@@ -1,4 +1,4 @@
-"""Tests for fixed sampling-clock rate-offset behavior."""
+"""Tests for the drift-adjusted nominal sampling-position increment."""
 
 import numpy as np
 import pytest
@@ -12,15 +12,25 @@ IMPLEMENTATIONS = (
 )
 
 
+class ZeroRng:
+    """Return zero-valued draws while preserving each implementation's RNG calls."""
+
+    def normal(self, _loc, _scale, size=None):
+        """Return zeros matching the requested draw shape."""
+        if size is None:
+            return 0.0
+        return np.zeros(size)
+
+
 @pytest.mark.parametrize("implementation", IMPLEMENTATIONS)
-def test_signed_drift_changes_raw_output_length(implementation) -> None:
+def test_signed_drift_changes_nominal_output_length(implementation) -> None:
     kwargs = {
         "h": np.array([1.0], dtype=np.float32),
         "x": np.ones(100, dtype=np.complex64),
         "uprate": 1,
         "drate": 1.0,
         "jitter_ppm": 0.0,
-        "rng": np.random.default_rng(7),
+        "rng": ZeroRng(),
     }
 
     nominal = implementation(drift_ppm=0.0, **kwargs)
@@ -28,22 +38,3 @@ def test_signed_drift_changes_raw_output_length(implementation) -> None:
     slower = implementation(drift_ppm=-500_000.0, **kwargs)
 
     assert len(faster) < len(nominal) < len(slower)
-
-
-@pytest.mark.parametrize("implementation", IMPLEMENTATIONS)
-def test_fixed_drift_does_not_consume_random_values(implementation) -> None:
-    class ExplodingRng:
-        def normal(self, *_args, **_kwargs):
-            raise AssertionError("fixed drift must not consume random values")
-
-    output = implementation(
-        h=np.array([1.0], dtype=np.float32),
-        x=np.ones(16, dtype=np.complex64),
-        uprate=1,
-        drate=1.0,
-        jitter_ppm=0.0,
-        drift_ppm=10.0,
-        rng=ExplodingRng(),
-    )
-
-    assert output.dtype == np.complex64

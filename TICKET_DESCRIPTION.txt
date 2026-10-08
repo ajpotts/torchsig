@@ -1,27 +1,25 @@
-Title: Define drift as a fixed sampling-rate offset
+Title: Use the calculated sampling-position increment
 
 Problem
 
-`sampling_clock_impairments` calculates and validates a drift-adjusted
-`nominal_position_increment`, but never uses it. The resampling loop advances
-by the unadjusted `drate`, while `drift_ppm` is instead treated as accumulated
-Gaussian noise. As a result, signed fixed clock drift is not applied as the
-validated sampling-rate offset implies.
+`sampling_clock_impairments` calculates and validates
+`nominal_position_increment`, but the resampling loop advances by the
+unadjusted `drate`. Initial output storage is also sized with `drate`, so the
+calculated drift adjustment has no effect on the nominal sampling path.
 
 Scope
 
-- Convert `drift_ppm` to a signed nominal-position increment.
 - Advance NumPy and Numba nominal positions with that fixed increment.
 - Size initial output storage using the effective increment.
-- Stop consuming random values for drift-only calls.
+- Preserve the existing accumulated Gaussian drift and jitter behavior.
 
 Acceptance criteria
 
 - Positive drift produces fewer raw output samples than zero drift.
 - Negative drift produces more raw output samples than zero drift.
-- Drift-only processing does not consume random values.
-- NumPy and Numba implement the same signed-offset behavior.
+- Drift-only processing preserves its existing RNG behavior.
+- NumPy and Numba use the same nominal-position increment.
 
 Out of scope
 
-Independent jitter semantics and public transform documentation.
+Changes to the drift or jitter model and public transform documentation.

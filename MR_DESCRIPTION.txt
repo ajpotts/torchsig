@@ -1,20 +1,20 @@
-Title: Define drift as a fixed sampling-rate offset
+Title: Use the calculated sampling-position increment
 
 Target branch: 3.0.0-dev
 
 Summary
 
 This MR fixes the unused `nominal_position_increment` in both sampling-clock
-implementations. `drift_ppm` now applies a signed, fixed sampling-rate offset
-instead of accumulated random drift.
+implementations while preserving the existing accumulated Gaussian drift
+model.
 
 Changes
 
 - Advance nominal positions using the validated drift-adjusted increment.
 - Size initial output storage for positive and negative rate offsets.
-- Remove random-number consumption from drift-only processing.
-- Test positive, zero, and negative drift in NumPy and Numba.
+- Preserve existing jitter, drift, and random-number consumption behavior.
+- Test positive, zero, and negative nominal increments in NumPy and Numba.
 
 Verification
 
-`pytest -q tests/utils/test_sampling_clock_fixed_drift.py tests/utils/test_sampling_clock_validation.py tests/utils/test_dsp_numba.py`
+`pytest -q tests/utils/test_sampling_clock_nominal_increment.py tests/utils/test_sampling_clock_validation.py tests/utils/test_dsp_numba.py`
