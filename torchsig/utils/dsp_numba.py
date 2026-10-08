@@ -41,12 +41,13 @@ def sampling_clock_impairments_numba(  # noqa: PLR0917
     uprate,
     drate,
     jitter_ppm,
-    drift_ppm,
+    _drift_ppm,
     jitter_drift_pool,
     h_pfb_reversed,
     taps_per_phase,
     padded_len,
     max_input_idx,
+    nominal_position_increment,
     num_output_samples,
     initial_phase,
 ):
@@ -74,8 +75,6 @@ def sampling_clock_impairments_numba(  # noqa: PLR0917
     output_imag = np.zeros(num_output_samples, dtype=np.float32)
 
     output_idx = 0
-    clock_drift = 0.0
-
     while nominal_position <= max_sample_position:
         if output_idx >= num_output_samples or (output_idx * 2 + 1) >= len(jitter_drift_pool):
             raise RuntimeError(_OUTPUT_CAPACITY_ERROR)
@@ -103,13 +102,12 @@ def sampling_clock_impairments_numba(  # noqa: PLR0917
         output_imag[output_idx] = acc_im
         output_idx += 1
 
-        if jitter_ppm != 0.0 or drift_ppm != 0.0:
+        if jitter_ppm != 0.0:
             pool_index = (output_idx - 1) * 2
             clock_jitter = jitter_drift_pool[pool_index]
-            clock_drift += jitter_drift_pool[pool_index + 1]
-            position_offset += clock_jitter + clock_drift
+            position_offset += clock_jitter
 
-        nominal_position += drate
+        nominal_position += nominal_position_increment
 
     result = np.zeros(output_idx, dtype=np.complex64)
     for idx in range(output_idx):
@@ -162,17 +160,16 @@ def sampling_clock_impairments_numba_wrapper(  # noqa: PLR0917
     padded_len = len(x) + 2 * taps_per_phase - 1
     max_input_idx = padded_len - taps_per_phase
 
-    num_output_samples = int(np.ceil(padded_len * uprate / drate)) + 1
+    num_output_samples = int(np.ceil(padded_len * uprate / nominal_position_increment)) + 1
 
-    if jitter_ppm != 0.0 or drift_ppm != 0.0:
+    if jitter_ppm != 0.0:
         jitter_std = jitter_ppm * 1e-6
-        drift_std = drift_ppm * 1e-6
 
         pairs = rng.normal(0.0, 1.0, (num_output_samples, 2)).astype(np.float32)
 
         jitter_drift_pool = np.empty(num_output_samples * 2, dtype=np.float32)
         jitter_drift_pool[0::2] = pairs[:, 0] * jitter_std
-        jitter_drift_pool[1::2] = pairs[:, 1] * drift_std
+        jitter_drift_pool[1::2] = 0.0
     else:
         jitter_drift_pool = np.zeros(num_output_samples * 2, dtype=np.float32)
 
@@ -195,6 +192,7 @@ def sampling_clock_impairments_numba_wrapper(  # noqa: PLR0917
                 taps_per_phase,
                 padded_len,
                 max_input_idx,
+                nominal_position_increment,
                 num_output_samples,
                 initial_phase,
             )
@@ -204,11 +202,11 @@ def sampling_clock_impairments_numba_wrapper(  # noqa: PLR0917
 
         new_capacity = min(2 * num_output_samples, max_output_samples)
         additional_count = new_capacity - num_output_samples
-        if jitter_ppm != 0.0 or drift_ppm != 0.0:
+        if jitter_ppm != 0.0:
             pairs = rng.normal(0.0, 1.0, (additional_count, 2)).astype(np.float32)
             additional_pool = np.empty(additional_count * 2, dtype=np.float32)
             additional_pool[0::2] = pairs[:, 0] * jitter_std
-            additional_pool[1::2] = pairs[:, 1] * drift_std
+            additional_pool[1::2] = 0.0
         else:
             additional_pool = np.zeros(additional_count * 2, dtype=np.float32)
 

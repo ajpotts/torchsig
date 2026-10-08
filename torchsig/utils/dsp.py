@@ -870,15 +870,13 @@ def sampling_clock_impairments(  # noqa: PLR0917
     # impairments are accumulated separately and applied only to each read.
     nominal_position = uprate / drate + initial_phase * uprate
     position_offset = 0.0
-    num_output_samples = int(np.ceil(len(input_padded) * uprate / drate)) + 1
+    num_output_samples = int(np.ceil(len(input_padded) * uprate / nominal_position_increment)) + 1
     output_samples = np.zeros(num_output_samples, dtype=TorchSigComplexDataType)
     max_output_samples = num_output_samples * 16
     output_idx = 0
-    clock_drift = 0.0
 
-    # Generate random jitter and drift
+    # Generate random jitter
     jitter_std = jitter_ppm * 1e-6
-    drift_std = drift_ppm * 1e-6
 
     # Run the resampler
     max_input_idx = len(input_padded) - taps_per_phase
@@ -911,12 +909,13 @@ def sampling_clock_impairments(  # noqa: PLR0917
         output_samples[output_idx] = pfb_out
         output_idx += 1
 
-        if jitter_ppm != 0.0 or drift_ppm != 0.0:
+        if jitter_ppm != 0.0:
             clock_jitter = rng.normal(0.0, jitter_std)
-            clock_drift += rng.normal(0.0, drift_std)
-            position_offset += clock_jitter + clock_drift
+            # Preserve paired RNG consumption for NumPy/Numba parity.
+            rng.normal(0.0, 0.0)
+            position_offset += clock_jitter
 
-        nominal_position += drate
+        nominal_position += nominal_position_increment
 
     # Return properly sized output
     return output_samples[:output_idx] if output_idx > 0 else np.array([], dtype=TorchSigComplexDataType)
