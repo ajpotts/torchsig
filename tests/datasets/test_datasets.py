@@ -864,6 +864,73 @@ def test_apply_transforms_and_labels_multiple_targets_parallel_lists():
     ]
 
 
+def test_apply_transforms_and_labels_groups_family_with_detection():
+    sample = _parent_with_components(num_signals_max=2)
+    sample["sample_rate"] = 1_000.0
+    for component in sample.component_signals:
+        component["estimated_occupied_bandwidth"] = component.bandwidth
+
+    _, targets = apply_transforms_and_labels_to_signal(
+        sample,
+        [GroupingLabel("family"), YOLOLabel()],
+        [("family_name", "yolo_label")],
+    )
+
+    assert [target[0] for target in targets] == ["psk", "psk"]
+    assert [target[1][0] for target in targets] == [3, 4]
+
+
+def test_apply_transforms_and_labels_groups_custom_metadata_with_detection():
+    sample = _parent_with_components(num_signals_max=2)
+    for component, box in zip(
+        sample.component_signals,
+        [(3, 0.2, 0.4, 0.2, 0.1), (4, 0.65, 0.6, 0.3, 0.1)],
+        strict=True,
+    ):
+        component["yolo_label"] = box
+
+    grouping = GroupingLabel(
+        {
+            "labels": {"name": "kind", "index": "kind_index"},
+            "groups": [{"name": "phase", "regex": "psk$"}],
+        }
+    )
+    _, targets = apply_transforms_and_labels_to_signal(
+        sample,
+        [grouping],
+        [("kind", "kind_index", "yolo_label")],
+    )
+
+    assert targets == [
+        ("phase", 0, (3, 0.2, 0.4, 0.2, 0.1)),
+        ("phase", 0, (4, 0.65, 0.6, 0.3, 0.1)),
+    ]
+
+
+def test_grouped_target_only_includes_components_with_all_fields():
+    sample = _parent_with_components(num_signals_max=3)
+    complete, missing_box = sample.component_signals
+    missing_group = Signal(class_name="8psk", yolo_label=(5, 0.5, 0.5, 0.1, 0.1))
+    missing_group.add_parent(sample, register=False)
+    sample.component_signals.append(missing_group)
+    complete["family_name"] = "psk"
+    complete["yolo_label"] = (3, 0.2, 0.4, 0.2, 0.1)
+    missing_box["family_name"] = "psk"
+
+    assert apply_label_to_signal(sample, ("family_name", "yolo_label")) == [("psk", (3, 0.2, 0.4, 0.2, 0.1))]
+    assert apply_label_to_signal(sample, "family_name") == ["psk", "psk"]
+    assert apply_label_to_signal(sample, "yolo_label") == [
+        (3, 0.2, 0.4, 0.2, 0.1),
+        (5, 0.5, 0.5, 0.1, 0.1),
+    ]
+
+
+@pytest.mark.parametrize("target_label", [(), ("family_name", ""), ("family_name", 3)])
+def test_apply_label_to_signal_rejects_invalid_grouped_target(target_label):
+    with pytest.raises(ValueError, match="grouped target labels"):
+        apply_label_to_signal(_parent_with_components(), target_label)
+
+
 def test_apply_label_to_signal_class_index_from_class_name_fallback():
     sample = Signal(
         data=np.zeros(100, dtype=np.complex64),
