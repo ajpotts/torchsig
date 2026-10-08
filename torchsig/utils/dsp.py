@@ -870,7 +870,7 @@ def sampling_clock_impairments(  # noqa: PLR0917
     # impairments are accumulated separately and applied only to each read.
     nominal_position = uprate / drate + initial_phase * uprate
     position_offset = 0.0
-    num_output_samples = int(np.ceil(len(input_padded) * uprate / drate)) + 1
+    num_output_samples = int(np.ceil(len(input_padded) * uprate / nominal_position_increment)) + 1
     output_samples = np.zeros(num_output_samples, dtype=TorchSigComplexDataType)
     max_output_samples = num_output_samples * 16
     output_idx = 0
@@ -916,7 +916,7 @@ def sampling_clock_impairments(  # noqa: PLR0917
             clock_drift += rng.normal(0.0, drift_std)
             position_offset += clock_jitter + clock_drift
 
-        nominal_position += drate
+        nominal_position += nominal_position_increment
 
     # Return properly sized output
     return output_samples[:output_idx] if output_idx > 0 else np.array([], dtype=TorchSigComplexDataType)

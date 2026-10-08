@@ -47,6 +47,7 @@ def sampling_clock_impairments_numba(  # noqa: PLR0917
     taps_per_phase,
     padded_len,
     max_input_idx,
+    nominal_position_increment,
     num_output_samples,
     initial_phase,
 ):
@@ -109,7 +110,7 @@ def sampling_clock_impairments_numba(  # noqa: PLR0917
             clock_drift += jitter_drift_pool[pool_index + 1]
             position_offset += clock_jitter + clock_drift
 
-        nominal_position += drate
+        nominal_position += nominal_position_increment
 
     result = np.zeros(output_idx, dtype=np.complex64)
     for idx in range(output_idx):
@@ -162,7 +163,7 @@ def sampling_clock_impairments_numba_wrapper(  # noqa: PLR0917
     padded_len = len(x) + 2 * taps_per_phase - 1
     max_input_idx = padded_len - taps_per_phase
 
-    num_output_samples = int(np.ceil(padded_len * uprate / drate)) + 1
+    num_output_samples = int(np.ceil(padded_len * uprate / nominal_position_increment)) + 1
 
     if jitter_ppm != 0.0 or drift_ppm != 0.0:
         jitter_std = jitter_ppm * 1e-6
@@ -195,6 +196,7 @@ def sampling_clock_impairments_numba_wrapper(  # noqa: PLR0917
                 taps_per_phase,
                 padded_len,
                 max_input_idx,
+                nominal_position_increment,
                 num_output_samples,
                 initial_phase,
             )
