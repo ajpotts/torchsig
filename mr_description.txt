@@ -1,0 +1,15 @@
+Title: Preserve component associations in grouped dataset targets
+
+Summary
+
+- Allow tuple entries in target_labels to request an atomic group of metadata fields from each component signal.
+- Return grouped values only when every requested field is available on the same component, preventing mismatched parallel target arrays.
+- Support metadata from both built-in family grouping and arbitrary custom GroupingLabel configurations alongside detection annotations.
+- Preserve the existing behavior for string target labels.
+
+Testing
+
+- pytest -q tests/datasets/test_datasets.py -k 'apply_label_to_signal or apply_transforms_and_labels' (17 passed, 110 deselected)
+- pytest -q tests/datasets/test_datasets.py (125 passed, 2 skipped)
+- ruff check torchsig/datasets/datasets.py (passed)
+- git diff --check (passed)

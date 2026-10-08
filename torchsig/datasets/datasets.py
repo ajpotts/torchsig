@@ -71,11 +71,28 @@ class TorchSigDatasetConfig:
     dataset_metadata: dict[str, Any]
     file_writer_name: Literal["legacy", "packed", "homogeneous"] = "legacy"
     file_writer_kwargs: dict[str, Any] = field(default_factory=dict)
-    target_labels: list[str] = field(default_factory=lambda: ["class_index"])  # default classification use case
+    target_labels: list[str | tuple[str, ...]] = field(default_factory=lambda: ["class_index"])  # default classification use case
     experiment_config: ExperimentConfig = field(default_factory=ExperimentConfig)
 
 
-def apply_label_to_signal(sample: Signal, target_label: str) -> list:
+def _label_value(signal: Signal, target_label: str) -> tuple[bool, Any]:
+    """Return whether a target label is available and its value."""
+    if target_label == "class_index":
+        if hasattr(signal, "class_index"):
+            return True, int(signal.class_index)
+        if hasattr(signal, "class_name"):
+            class_names = signal.get_full_metadata()["class_names"]
+            return True, int(list(class_names).index(signal.class_name))
+    elif hasattr(signal, target_label):
+        return True, getattr(signal, target_label)
+
+    return False, None
+
+
+def apply_label_to_signal(
+    sample: Signal,
+    target_label: str | tuple[str, ...],
+) -> list:
     """Extract a target label from a signal and its component signals.
 
     Target labels are resolved through the public ``Signal`` interface rather
@@ -94,12 +111,25 @@ def apply_label_to_signal(sample: Signal, target_label: str) -> list:
     Args:
         sample: Signal from which to extract target labels.
         target_label: Name of the target label or ``Signal`` property to
-            extract.
+            extract. A tuple of names requests an atomic grouped target for
+            each signal that provides every named field. This preserves the
+            association between values from the same component signal.
 
     Returns:
         A list containing a sample-level value, one value for each component
         signal, or a single value for a signal without components.
     """
+    if isinstance(target_label, tuple):
+        if not target_label or not all(isinstance(label, str) and label for label in target_label):
+            raise ValueError("grouped target labels must be a non-empty tuple of non-empty strings")
+
+        values = []
+        for signal in sample.component_signals or [sample]:
+            grouped_value = tuple(_label_value(signal, label) for label in target_label)
+            if all(is_available for is_available, _ in grouped_value):
+                values.append(tuple(value for _, value in grouped_value))
+        return values
+
     is_sample_level_label = target_label in sample.metadata and not any(target_label in component.metadata for component in sample.component_signals)
     if is_sample_level_label:
         return [sample[target_label]]
@@ -109,25 +139,27 @@ def apply_label_to_signal(sample: Signal, target_label: str) -> list:
     signals = sample.component_signals or [sample]
 
     for signal in signals:
-        if target_label == "class_index":
-            if hasattr(signal, "class_index"):
-                values.append(int(signal.class_index))
-            elif hasattr(signal, "class_name"):
-                class_names = signal.get_full_metadata()["class_names"]
-                values.append(int(list(class_names).index(signal.class_name)))
-        elif hasattr(signal, target_label):
-            values.append(getattr(signal, target_label))
+        is_available, value = _label_value(signal, target_label)
+        if is_available:
+            values.append(value)
 
     return values
 
 
-def apply_transforms_and_labels_to_signal(sample: Signal, transforms: list[Transform | callable], target_labels: list) -> Signal | np.ndarray | tuple:
+def apply_transforms_and_labels_to_signal(
+    sample: Signal,
+    transforms: list[Transform | callable],
+    target_labels: list[str | tuple[str, ...]] | None,
+) -> Signal | np.ndarray | tuple:
     """Applies a series of transformations to a signal sample and retrieves specified label values.
 
     Args:
         sample: The signal sample to process.
         transforms: A list of function objects, each taking a Signal object and returning a transformed Signal object.
-        target_labels: Labels to be retrieved from the signal sample after transformations. If None, the transformed signal is returned. If an empty list, the signal data is returned.
+        target_labels: Labels to be retrieved from the signal sample after
+            transformations. A tuple entry groups multiple fields atomically
+            per component signal. If None, the transformed signal is returned.
+            If an empty list, the signal data is returned.
 
     Returns:
         - If target_labels is None, a Signal object with all applied transforms.
@@ -151,7 +183,7 @@ def apply_transforms_and_labels_to_signal(sample: Signal, transforms: list[Trans
     targets = {}
     for key in target_labels:
         values = apply_label_to_signal(sample, key)
-        is_sample_level_label = key in sample.metadata and not any(key in component.metadata for component in sample.component_signals)
+        is_sample_level_label = isinstance(key, str) and key in sample.metadata and not any(key in component.metadata for component in sample.component_signals)
         if len(values) == 1 and (is_sample_level_label or sample["num_signals_max"] == 1):
             values = values[0]
         targets[key] = values
