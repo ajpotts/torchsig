@@ -75,41 +75,43 @@ def sampling_clock_impairments_numba(  # noqa: PLR0917
     output_imag = np.zeros(num_output_samples, dtype=np.float32)
 
     output_idx = 0
+    iteration_idx = 0
     clock_drift = 0.0
 
     while nominal_position <= max_sample_position:
-        if output_idx >= num_output_samples or (output_idx * 2 + 1) >= len(jitter_drift_pool):
-            raise RuntimeError(_OUTPUT_CAPACITY_ERROR)
+        if jitter_ppm != 0.0 or drift_ppm != 0.0:
+            pool_index = iteration_idx * 2
+            if (pool_index + 1) >= len(jitter_drift_pool):
+                raise RuntimeError(_OUTPUT_CAPACITY_ERROR)
 
         sample_position = nominal_position + position_offset
-        if sample_position < 0.0:
-            sample_position = 0.0
-        elif sample_position > max_sample_position:
-            sample_position = max_sample_position
+        if 0.0 <= sample_position <= max_sample_position:
+            if output_idx >= num_output_samples:
+                raise RuntimeError(_OUTPUT_CAPACITY_ERROR)
 
-        input_idx = int(sample_position // uprate)
-        phase_position = sample_position - input_idx * uprate
-        phase = int(phase_position)
+            input_idx = int(sample_position // uprate)
+            phase_position = sample_position - input_idx * uprate
+            phase = int(phase_position)
 
-        acc_re = 0.0
-        acc_im = 0.0
+            acc_re = 0.0
+            acc_im = 0.0
 
-        for tap_idx in range(taps_per_phase):
-            coefficient = h_pfb_reversed[phase, tap_idx]
-            input_position = input_idx + tap_idx
-            acc_re += coefficient * input_padded_real[input_position]
-            acc_im += coefficient * input_padded_imag[input_position]
+            for tap_idx in range(taps_per_phase):
+                coefficient = h_pfb_reversed[phase, tap_idx]
+                input_position = input_idx + tap_idx
+                acc_re += coefficient * input_padded_real[input_position]
+                acc_im += coefficient * input_padded_imag[input_position]
 
-        output_real[output_idx] = acc_re
-        output_imag[output_idx] = acc_im
-        output_idx += 1
+            output_real[output_idx] = acc_re
+            output_imag[output_idx] = acc_im
+            output_idx += 1
 
         if jitter_ppm != 0.0 or drift_ppm != 0.0:
-            pool_index = (output_idx - 1) * 2
             clock_jitter = jitter_drift_pool[pool_index]
             clock_drift += jitter_drift_pool[pool_index + 1]
             position_offset += clock_jitter + clock_drift
 
+        iteration_idx += 1
         nominal_position += nominal_position_increment
 
     result = np.zeros(output_idx, dtype=np.complex64)
