@@ -1,0 +1,27 @@
+Title: Skip out-of-range impaired sample positions
+
+Problem
+
+Sampling-clock impairments silently clip sample positions to the valid input
+range. When an impairment remains outside that range, the resampler repeatedly
+reads the same boundary position and creates artificial constant-value output
+segments.
+
+Scope
+
+- Detect impaired sample positions outside the valid range.
+- Skip those positions instead of clipping them to a boundary.
+- Continue advancing the clock state so later positions can re-enter the valid
+  range.
+- Apply the behavior consistently in NumPy and Numba.
+
+Acceptance criteria
+
+- Out-of-range positions do not produce output samples.
+- Boundary samples are not repeated as a result of clipping.
+- Clock state continues advancing after a skipped position.
+- NumPy and Numba produce matching results.
+
+Out of scope
+
+Changes to the jitter or drift models, RNG distributions, or public APIs.

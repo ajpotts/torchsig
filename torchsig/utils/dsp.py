@@ -889,31 +889,28 @@ def sampling_clock_impairments(  # noqa: PLR0917
 
     # Run the resampler
     while nominal_position <= max_sample_position:
-        sample_position = np.clip(
-            nominal_position + position_offset,
-            0.0,
-            max_sample_position,
-        )
-        input_idx, phase_position = divmod(sample_position, uprate)
-        input_idx = int(input_idx)
+        sample_position = nominal_position + position_offset
+        if 0.0 <= sample_position <= max_sample_position:
+            input_idx, phase_position = divmod(sample_position, uprate)
+            input_idx = int(input_idx)
 
-        delay_slice = input_padded[input_idx : input_idx + taps_per_phase]
+            delay_slice = input_padded[input_idx : input_idx + taps_per_phase]
 
-        phase = int(phase_position)
-        h_phase = h_pfb[phase][:taps_per_phase]
+            phase = int(phase_position)
+            h_phase = h_pfb[phase][:taps_per_phase]
 
-        acc_re = np.sum(h_phase * delay_slice[::-1].real)
-        acc_im = np.sum(h_phase * delay_slice[::-1].imag)
-        pfb_out = acc_re + 1j * acc_im
+            acc_re = np.sum(h_phase * delay_slice[::-1].real)
+            acc_im = np.sum(h_phase * delay_slice[::-1].imag)
+            pfb_out = acc_re + 1j * acc_im
 
-        if output_idx >= len(output_samples):
-            if len(output_samples) >= max_output_samples:
-                raise RuntimeError("sampling clock output capacity exhausted")
-            new_size = min(2 * len(output_samples), max_output_samples)
-            output_samples.resize(new_size, refcheck=False)
+            if output_idx >= len(output_samples):
+                if len(output_samples) >= max_output_samples:
+                    raise RuntimeError("sampling clock output capacity exhausted")
+                new_size = min(2 * len(output_samples), max_output_samples)
+                output_samples.resize(new_size, refcheck=False)
 
-        output_samples[output_idx] = pfb_out
-        output_idx += 1
+            output_samples[output_idx] = pfb_out
+            output_idx += 1
 
         if jitter_ppm != 0.0 or drift_ppm != 0.0:
             clock_jitter = rng.normal(0.0, jitter_std)

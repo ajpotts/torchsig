@@ -1,0 +1,21 @@
+Title: Skip out-of-range impaired sample positions
+
+Target branch: 3.0.0-dev
+
+Summary
+
+This MR prevents sampling-clock impairments from creating artificial constant
+segments by skipping out-of-range impaired positions instead of clipping them
+to the nearest boundary.
+
+Changes
+
+- Emit samples only for positions within the valid resampling range.
+- Continue updating impairment and nominal clock state for skipped positions.
+- Track Numba RNG-pool consumption by loop iteration so skipped positions
+  consume their corresponding impairment values.
+- Add deterministic NumPy and Numba regression coverage.
+
+Verification
+
+`pytest -q tests/utils/test_sampling_clock_out_of_range.py tests/utils/test_dsp_numba.py`
