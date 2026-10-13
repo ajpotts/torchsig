@@ -1,0 +1,90 @@
+### Title
+Extract sampling-clock position generation and implement configurable jitter models
+
+### Description
+Separate sampling-clock position generation from polyphase interpolation so jitter and drift behavior can be tested independently of IQ signal processing.
+
+Introduce a reusable sampling-position generator that supports independent timing jitter, accumulated period jitter, and correlated AR(1) jitter.
+
+This refactor will also enable diagnostic tools to inspect the actual sampling positions used by the resampler, rather than independently simulating the jitter processes.
+
+### Proposed implementation
+
+Introduce a `SamplingPositions` dataclass containing:
+
+```python
+@dataclass(frozen=True)
+class SamplingPositions:
+    nominal_indices: np.ndarray
+    nominal: np.ndarray
+    actual: np.ndarray
+    uprate: int
+
+    @property
+    def timing_error(self) -> np.ndarray:
+        return (self.actual - self.nominal) / self.uprate
+```
+
+Introduce:
+
+```python
+def generate_sampling_positions(
+    num_input_samples: int,
+    taps_per_phase: int,
+    uprate: int,
+    drate: float,
+    jitter_ppm: float,
+    drift_ppm: float,
+    rng: np.random.Generator | None = None,
+    initial_phase: float = 0.0,
+    jitter_model: str = "independent",
+    jitter_alpha: float = 0.9,
+) -> SamplingPositions:
+```
+
+The generator should support:
+
+- **Independent:** Independent Gaussian absolute timing errors.
+- **Period:** Independent Gaussian sampling-period errors accumulated into absolute timing error.
+- **AR(1):** Stationary correlated Gaussian absolute timing errors with configurable autoregressive coefficient.
+
+Refactor `sampling_clock_impairments()` to call `generate_sampling_positions()` and pass `positions.actual` to `polyphase_resample_at_positions()`.
+
+The existing public function should continue returning only the impaired IQ array.
+
+### Requirements
+- Support `jitter_model="independent"`, `"period"`, and `"ar1"`.
+- Default to independent timing jitter.
+- Support configurable `jitter_alpha`, with `|alpha| < 1`.
+- Preserve the existing drift behavior initially; document its current mathematical interpretation.
+- Record nominal output indices so skipped positions do not cause misalignment.
+- Store nominal and actual positions in polyphase units, with convenient accessors for input-sample units.
+- Preserve deterministic behavior for fixed random seeds.
+- Apply existing valid-position bounds and output-capacity limits.
+- Keep the interpolation helper independent of clock-model details.
+- Maintain equivalent behavior between Python and Numba implementations.
+
+### Testing
+Add deterministic and statistical tests for:
+
+- Independent jitter mean, variance, and autocorrelation.
+- Period jitter increment variance and autocorrelation.
+- AR(1) variance and lag-one correlation.
+- Zero jitter and zero drift.
+- Reproducibility with fixed seeds.
+- Valid-position bounds and skipped samples.
+- Alignment using nominal output indices.
+- Python/Numba parity.
+
+Use multiple seeds or sufficiently large samples for statistical tests to avoid flaky assertions.
+
+### Acceptance criteria
+- `generate_sampling_positions()` can be tested independently of the resampler.
+- All three jitter models produce the expected timing statistics.
+- `sampling_clock_impairments()` continues returning only an IQ array.
+- The diagnostic script can use actual generated sampling positions.
+- Existing functionality remains supported, with any intentional change in the default jitter behavior documented.
+- Python and Numba implementations produce equivalent results under deterministic test conditions.
+
+### Dependencies
+Depends on the PR extracting `polyphase_resample_at_positions()`.
