@@ -174,6 +174,8 @@ def sampling_clock_impairments_numba_wrapper(  # noqa: PLR0917
     drift_ppm,
     rng,
     initial_phase=0.0,
+    jitter_model="independent",
+    jitter_alpha=0.9,
 ):
     """Wrapper for the numba-optimized sampling clock impairments function.
 
@@ -211,6 +213,8 @@ def sampling_clock_impairments_numba_wrapper(  # noqa: PLR0917
         drift_ppm=drift_ppm,
         rng=rng,
         initial_phase=initial_phase,
+        jitter_model=jitter_model,
+        jitter_alpha=jitter_alpha,
     )
 
     x_real = np.ascontiguousarray(x.real, dtype=np.float32)

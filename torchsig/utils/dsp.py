@@ -915,12 +915,16 @@ def generate_sampling_positions(
     drift_ppm: float,
     rng: np.random.Generator | None = None,
     initial_phase: float = 0.0,
+    jitter_model: str = "independent",
+    jitter_alpha: float = 0.9,
 ) -> SamplingPositions:
-    """Generate sampling positions using the historical clock model.
+    """Generate nominal and impaired polyphase sampling positions.
 
-    Jitter is accumulated as independent Gaussian position increments. Drift
-    changes the nominal period and is also modeled as a Gaussian period-error
-    random walk whose accumulated value is integrated into position offset.
+    Independent and AR(1) jitter are absolute timing errors; period jitter is
+    accumulated from independent sampling-period errors. Drift retains the
+    historical TorchSIG model: ``drift_ppm`` changes the nominal period and is
+    also the standard deviation of a Gaussian period-error random walk. The
+    accumulated random walk is integrated into absolute timing error.
 
     Positions outside the padded-input bounds are omitted, while
     ``nominal_indices`` records which nominal outputs remain.
@@ -939,6 +943,11 @@ def generate_sampling_positions(
         raise ValueError("drift_ppm must be finite")
     if not np.isfinite(initial_phase) or not 0.0 <= initial_phase < 1.0:
         raise ValueError("initial_phase must be finite and in the interval [0, 1)")
+    if jitter_model not in {"independent", "period", "ar1"}:
+        raise ValueError("jitter_model must be 'independent', 'period', or 'ar1'")
+    if not np.isfinite(jitter_alpha) or abs(jitter_alpha) >= 1.0:
+        raise ValueError("jitter_alpha must be finite and have absolute value less than 1")
+
     nominal_increment = drate * (1.0 + drift_ppm * 1e-6)
     if not np.isfinite(nominal_increment) or nominal_increment <= 0.0:
         raise ValueError("drift_ppm produces a nonfinite or nonpositive sampling-position increment")
@@ -953,30 +962,46 @@ def generate_sampling_positions(
 
     nominal_all = first_position + np.arange(count, dtype=np.float64) * nominal_increment
     generator = np.random.default_rng() if rng is None else rng
-    jitter_std = jitter_ppm * 1e-6
+    # Jitter is specified in input-sample periods and converted to the
+    # polyphase units used by the interpolator.
+    jitter_std = jitter_ppm * 1e-6 * uprate
     drift_std = drift_ppm * 1e-6
     if jitter_std == 0.0 and drift_std == 0.0:
         jitter_innovations = np.zeros(count, dtype=np.float64)
         drift_innovations = np.zeros(count, dtype=np.float64)
     elif isinstance(generator, np.random.Generator):
-        # Interleaving preserves the historical jitter/drift RNG order,
-        # including zero-scale draws when only one impairment is enabled.
-        innovations = generator.normal(0.0, 1.0, (count, 2))
-        jitter_innovations = innovations[:, 0] * jitter_std
-        drift_innovations = innovations[:, 1] * drift_std
+        if drift_std:
+            # Interleaving preserves the historical jitter/drift RNG order.
+            innovations = generator.normal(0.0, 1.0, (count, 2))
+            jitter_innovations = innovations[:, 0] * jitter_std
+            drift_innovations = innovations[:, 1] * drift_std
+        else:
+            jitter_innovations = generator.normal(0.0, jitter_std, count)
+            drift_innovations = np.zeros(count, dtype=np.float64)
     else:
         # Support generator-like test doubles that only implement scalar draws.
         jitter_innovations = np.empty(count, dtype=np.float64)
         drift_innovations = np.empty(count, dtype=np.float64)
         for idx in range(count):
             jitter_innovations[idx] = generator.normal(0.0, jitter_std)
-            drift_innovations[idx] = generator.normal(0.0, drift_std)
+            drift_innovations[idx] = generator.normal(0.0, drift_std) if drift_std else 0.0
 
-    position_offset = np.zeros(count, dtype=np.float64)
-    if count > 1:
-        clock_drift = np.cumsum(drift_innovations)
-        position_offset[1:] = np.cumsum(jitter_innovations + clock_drift)[:-1]
-    actual_all = nominal_all + position_offset
+    if jitter_model == "independent":
+        jitter_error = jitter_innovations
+    elif jitter_model == "period":
+        jitter_error = np.cumsum(jitter_innovations)
+    else:
+        jitter_error = np.empty(count, dtype=np.float64)
+        if count:
+            jitter_error[0] = jitter_innovations[0]
+        innovation_scale = np.sqrt(1.0 - jitter_alpha**2)
+        for idx in range(1, count):
+            jitter_error[idx] = jitter_alpha * jitter_error[idx - 1] + innovation_scale * jitter_innovations[idx]
+
+    drift_error = np.zeros(count, dtype=np.float64)
+    if count > 1 and drift_std:
+        drift_error[1:] = np.cumsum(np.cumsum(drift_innovations))[:-1]
+    actual_all = nominal_all + jitter_error + drift_error
 
     valid = (actual_all >= 0.0) & (actual_all <= max_position)
     return SamplingPositions(
@@ -996,6 +1021,8 @@ def sampling_clock_impairments(  # noqa: PLR0917
     drift_ppm: float,
     rng: np.random.Generator | None = None,
     initial_phase: float = 0.0,
+    jitter_model: str = "independent",
+    jitter_alpha: float = 0.9,
 ) -> np.ndarray:
     """Apply sampling-clock jitter and drift using polyphase filtering.
 
@@ -1013,6 +1040,9 @@ def sampling_clock_impairments(  # noqa: PLR0917
             ``np.random.default_rng()``.
         initial_phase: Initial sampling phase in input-sample periods.
             Must be in the half-open interval ``[0, 1)``.
+        jitter_model: Jitter process: ``"independent"``, ``"period"``, or
+            ``"ar1"``. Defaults to independent absolute timing jitter.
+        jitter_alpha: AR(1) coefficient, with absolute value less than one.
 
     Returns:
         Output signal with clock impairments.
@@ -1029,6 +1059,8 @@ def sampling_clock_impairments(  # noqa: PLR0917
         drift_ppm=drift_ppm,
         rng=rng,
         initial_phase=initial_phase,
+        jitter_model=jitter_model,
+        jitter_alpha=jitter_alpha,
     )
 
     return polyphase_resample_at_positions(

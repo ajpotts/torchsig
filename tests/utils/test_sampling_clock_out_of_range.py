@@ -13,7 +13,7 @@ IMPLEMENTATIONS = (
 
 
 class OffsetRng:
-    """Provide offsets that push one position out of range, then restore it."""
+    """Provide absolute offsets that push two positions out of range."""
 
     def __init__(self) -> None:
         self.values = iter((100.0, 0.0, -100.0, 0.0, 0.0, 0.0, 0.0, 0.0))
@@ -40,4 +40,4 @@ def test_out_of_range_position_is_skipped_instead_of_clipped(implementation) -> 
         rng=OffsetRng(),
     )
 
-    np.testing.assert_array_equal(output, np.array([2.0, 4.0, 0.0], dtype=np.complex64))
+    np.testing.assert_array_equal(output, np.array([3.0, 0.0], dtype=np.complex64))
