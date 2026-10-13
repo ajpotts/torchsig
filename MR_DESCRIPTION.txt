@@ -42,3 +42,16 @@ Added coverage for:
 - Python/Numba parity for every jitter model
 
 Focused result: `108 passed, 4 skipped`.
+
+## Performance
+
+An on-MR/off-MR benchmark comparison initially identified a regression caused by generating each sampling position in a Python loop. The common independent-jitter and drift paths were subsequently vectorized with NumPy.
+
+Targeted benchmark means after the optimization:
+
+| Benchmark | Off-MR baseline | Initial MR implementation | Optimized MR implementation |
+| --- | ---: | ---: | ---: |
+| Clock jitter | 252.1 µs | 715.9 µs | 234.8 µs |
+| Clock drift | 259.1 µs | 1,097.8 µs | 237.2 µs |
+
+The optimized implementation is approximately 7% faster for clock jitter and 8% faster for clock drift than the off-MR baseline in these runs. The targeted benchmark rerun completed with `2 passed`.

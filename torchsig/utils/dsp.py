@@ -961,33 +961,47 @@ def generate_sampling_positions(
         raise RuntimeError("sampling clock output capacity exhausted")
 
     nominal_all = first_position + np.arange(count, dtype=np.float64) * nominal_increment
-    actual_all = np.empty(count, dtype=np.float64)
     generator = np.random.default_rng() if rng is None else rng
     # Jitter is specified in input-sample periods and converted to the
     # polyphase units used by the interpolator.
     jitter_std = jitter_ppm * 1e-6 * uprate
     drift_std = drift_ppm * 1e-6
-    jitter_error = 0.0
-    drift_period_error = 0.0
-    drift_error = 0.0
-
-    for idx, nominal_position in enumerate(nominal_all):
-        if jitter_model == "independent":
-            jitter_error = generator.normal(0.0, jitter_std) if jitter_std or drift_std else 0.0
-        elif jitter_model == "period":
-            if jitter_std or drift_std:
-                jitter_error += generator.normal(0.0, jitter_std)
-        elif jitter_std or drift_std:
-            if idx == 0:
-                jitter_error = generator.normal(0.0, jitter_std)
-            else:
-                innovation_std = jitter_std * np.sqrt(1.0 - jitter_alpha**2)
-                jitter_error = jitter_alpha * jitter_error + generator.normal(0.0, innovation_std)
-
-        actual_all[idx] = nominal_position + jitter_error + drift_error
+    if jitter_std == 0.0 and drift_std == 0.0:
+        jitter_innovations = np.zeros(count, dtype=np.float64)
+        drift_innovations = np.zeros(count, dtype=np.float64)
+    elif isinstance(generator, np.random.Generator):
         if drift_std:
-            drift_period_error += generator.normal(0.0, drift_std)
-            drift_error += drift_period_error
+            # Interleaving preserves the historical jitter/drift RNG order.
+            innovations = generator.normal(0.0, 1.0, (count, 2))
+            jitter_innovations = innovations[:, 0] * jitter_std
+            drift_innovations = innovations[:, 1] * drift_std
+        else:
+            jitter_innovations = generator.normal(0.0, jitter_std, count)
+            drift_innovations = np.zeros(count, dtype=np.float64)
+    else:
+        # Support generator-like test doubles that only implement scalar draws.
+        jitter_innovations = np.empty(count, dtype=np.float64)
+        drift_innovations = np.empty(count, dtype=np.float64)
+        for idx in range(count):
+            jitter_innovations[idx] = generator.normal(0.0, jitter_std)
+            drift_innovations[idx] = generator.normal(0.0, drift_std) if drift_std else 0.0
+
+    if jitter_model == "independent":
+        jitter_error = jitter_innovations
+    elif jitter_model == "period":
+        jitter_error = np.cumsum(jitter_innovations)
+    else:
+        jitter_error = np.empty(count, dtype=np.float64)
+        if count:
+            jitter_error[0] = jitter_innovations[0]
+        innovation_scale = np.sqrt(1.0 - jitter_alpha**2)
+        for idx in range(1, count):
+            jitter_error[idx] = jitter_alpha * jitter_error[idx - 1] + innovation_scale * jitter_innovations[idx]
+
+    drift_error = np.zeros(count, dtype=np.float64)
+    if count > 1 and drift_std:
+        drift_error[1:] = np.cumsum(np.cumsum(drift_innovations))[:-1]
+    actual_all = nominal_all + jitter_error + drift_error
 
     valid = (actual_all >= 0.0) & (actual_all <= max_position)
     return SamplingPositions(
