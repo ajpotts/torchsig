@@ -818,6 +818,7 @@ def sampling_clock_impairments(  # noqa: PLR0917
     rng: np.random.Generator | None = None,
     initial_phase: float = 0.0,
     jitter_model: str = "independent",
+    jitter_alpha: float = 0.9,
 ) -> np.ndarray:
     """Implements sampling clock impairments (jitter and drift) using polyphase filtering.
 
@@ -839,7 +840,11 @@ def sampling_clock_impairments(  # noqa: PLR0917
         jitter_model: ``"independent"`` applies independent absolute timing
             errors to the sampling instants. ``"period"`` applies independent
             sample-period errors whose accumulated sum determines the timing
-            error. Defaults to ``"independent"``.
+            error. ``"ar1"`` applies stationary, correlated absolute timing
+            errors using a first-order autoregressive process. Defaults to
+            ``"independent"``.
+        jitter_alpha: Autoregressive coefficient for the ``"ar1"`` model.
+            Must be finite and have magnitude less than one. Defaults to 0.9.
 
     Returns:
         Output signal with clock impairments (1D array of complex numbers)
@@ -854,8 +859,10 @@ def sampling_clock_impairments(  # noqa: PLR0917
         raise ValueError("drift_ppm must be finite")
     if not np.isfinite(initial_phase) or not 0.0 <= initial_phase < 1.0:
         raise ValueError("initial_phase must be finite and in the interval [0, 1)")
-    if jitter_model not in {"independent", "period"}:
-        raise ValueError("jitter_model must be 'independent' or 'period'")
+    if jitter_model not in {"independent", "period", "ar1"}:
+        raise ValueError("jitter_model must be 'independent', 'period', or 'ar1'")
+    if not np.isfinite(jitter_alpha) or abs(jitter_alpha) >= 1.0:
+        raise ValueError("jitter_alpha must be finite and have magnitude less than one")
 
     nominal_position_increment = drate * (1.0 + drift_ppm * 1e-6)
     if not np.isfinite(nominal_position_increment) or nominal_position_increment <= 0.0:
@@ -889,7 +896,9 @@ def sampling_clock_impairments(  # noqa: PLR0917
     output_samples = np.zeros(num_output_samples, dtype=TorchSigComplexDataType)
     max_output_samples = num_output_samples * 16
     output_idx = 0
+    iteration_idx = 0
     clock_drift = 0.0
+    filtered_jitter = 0.0
 
     # Generate random jitter and drift
     # Timing offsets below are represented in polyphase units. A jitter value
@@ -901,7 +910,9 @@ def sampling_clock_impairments(  # noqa: PLR0917
     # Run the resampler
     while nominal_position <= max_sample_position:
         clock_jitter = rng.normal(0.0, jitter_std) if jitter_ppm != 0.0 or drift_ppm != 0.0 else 0.0
-        jitter_offset = clock_jitter if jitter_model == "independent" else 0.0
+        if jitter_model == "ar1":
+            filtered_jitter = clock_jitter if iteration_idx == 0 else jitter_alpha * filtered_jitter + np.sqrt(1.0 - jitter_alpha**2) * clock_jitter
+        jitter_offset = filtered_jitter if jitter_model == "ar1" else clock_jitter if jitter_model == "independent" else 0.0
         sample_position = nominal_position + position_offset + jitter_offset
         if 0.0 <= sample_position <= max_sample_position:
             input_idx, phase_position = divmod(sample_position, uprate)
@@ -931,6 +942,7 @@ def sampling_clock_impairments(  # noqa: PLR0917
                 position_offset += clock_jitter
             position_offset += clock_drift
 
+        iteration_idx += 1
         nominal_position += nominal_position_increment
 
     # Return properly sized output

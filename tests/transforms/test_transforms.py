@@ -510,6 +510,7 @@ def test_ClockDrift(signal: Signal, params: dict, is_error: bool) -> None:
     [
         (new_test_signal(), {"jitter_ppm": (0.1, 1.0), "jitter_model": "independent"}, False),
         (new_test_signal(), {"jitter_ppm": (1.0, 10.0), "jitter_model": "period"}, False),
+        (new_test_signal(), {"jitter_ppm": (1.0, 10.0), "jitter_model": "ar1"}, False),
         (new_test_signal(), {"jitter_ppm": (1.0, 10.0), "jitter_model": "unknown"}, True),
     ],
 )
@@ -544,6 +545,13 @@ def test_ClockJitter(signal: Signal, params: dict, is_error: bool) -> None:
 
         assert len(signal.data) == len(signal_test.data)
         assert signal.data.dtype == TorchSigComplexDataType
+
+
+@pytest.mark.parametrize("jitter_alpha", [-1.0, 1.0, np.inf, np.nan])
+def test_ClockJitter_rejects_invalid_ar1_coefficient(jitter_alpha: float) -> None:
+    """ClockJitter rejects unstable or nonfinite AR(1) coefficients."""
+    with pytest.raises(ValueError, match="jitter_alpha must be finite and have magnitude less than one"):
+        ClockJitter(jitter_model="ar1", jitter_alpha=jitter_alpha)
 
 
 @pytest.mark.parametrize(

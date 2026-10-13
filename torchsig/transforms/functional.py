@@ -295,13 +295,15 @@ def clock_jitter(
     jitter_ppm: float = 10,
     rng: np.random.Generator | None = None,
     initial_phase: float = 0.0,
-    jitter_model: Literal["independent", "period"] = "independent",
+    jitter_model: Literal["independent", "period", "ar1"] = "independent",
+    jitter_alpha: float = 0.9,
 ) -> np.ndarray:
     """Apply Gaussian sampling-clock jitter.
 
     By default, each sampling instant receives an independent absolute timing
     error. The ``"period"`` model instead accumulates independent errors in
-    successive sample periods.
+    successive sample periods, while ``"ar1"`` produces correlated but
+    stationary absolute timing errors.
 
     Args:
         data: Complex valued IQ data samples.
@@ -311,7 +313,10 @@ def clock_jitter(
         initial_phase: Initial sampling phase in input-sample periods. Must be
             in the half-open interval ``[0, 1)``. Defaults to 0.
         jitter_model: ``"independent"`` for independent absolute timing
-            jitter, or ``"period"`` for accumulated period jitter.
+            jitter, ``"period"`` for accumulated period jitter, or ``"ar1"``
+            for filtered absolute timing jitter.
+        jitter_alpha: Autoregressive coefficient for the ``"ar1"`` model.
+            Defaults to 0.9.
 
     Returns:
         Data with sampling-clock jitter applied.
@@ -342,6 +347,7 @@ def clock_jitter(
         rng=rng,
         initial_phase=initial_phase,
         jitter_model=jitter_model,
+        jitter_alpha=jitter_alpha,
     )
 
     return _preserve_sampling_clock_output(data_with_jitter, len(data))

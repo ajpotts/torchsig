@@ -38,7 +38,9 @@ def _kwargs() -> dict:
         ({"initial_phase": -0.1}, "initial_phase must be finite and in the interval"),
         ({"initial_phase": 1.0}, "initial_phase must be finite and in the interval"),
         ({"initial_phase": np.nan}, "initial_phase must be finite and in the interval"),
-        ({"jitter_model": "unknown"}, "jitter_model must be 'independent' or 'period'"),
+        ({"jitter_model": "unknown"}, "jitter_model must be 'independent', 'period', or 'ar1'"),
+        ({"jitter_alpha": 1.0}, "jitter_alpha must be finite and have magnitude less than one"),
+        ({"jitter_alpha": np.nan}, "jitter_alpha must be finite and have magnitude less than one"),
         (
             {"drift_ppm": -1_000_000.0},
             "drift_ppm produces a nonfinite or nonpositive sampling-position increment",
