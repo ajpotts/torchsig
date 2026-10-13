@@ -65,6 +65,7 @@ __all__ = [
 
 # floor applied to linear power spectrogram (1e-10 in power is -100 dB relative to strongest bin)
 _POWER_FLOOR_RATIO = 1e-10
+_MAX_SAMPLING_CLOCK_OUTPUT_SAMPLES = 10_000_000
 
 
 @lru_cache(maxsize=1)
@@ -808,6 +809,75 @@ def partition_polyphase(h: np.ndarray, up_rate: int, taps_per_phase: int) -> np.
     return h_pfb
 
 
+def polyphase_resample_at_positions(
+    h: np.ndarray,
+    x: np.ndarray,
+    uprate: int,
+    positions: np.ndarray,
+) -> np.ndarray:
+    """Resample a complex signal at specified polyphase positions.
+
+    Args:
+        h: Polyphase interpolation filter coefficients.
+        x: Input complex IQ samples.
+        uprate: Number of polyphase filter phases.
+        positions: One-dimensional array of sampling positions in
+            polyphase units. Positions must be finite and within the
+            valid padded-input range.
+
+    Returns:
+        Interpolated complex IQ samples, one per sampling position.
+    """
+    if not isinstance(uprate, (int, np.integer)) or uprate <= 0:
+        raise ValueError("uprate must be a positive integer")
+
+    positions = np.asarray(positions, dtype=np.float64)
+    if positions.ndim != 1:
+        raise ValueError("positions must be one-dimensional")
+    if not np.all(np.isfinite(positions)):
+        raise ValueError("positions must be finite")
+
+    taps_per_phase = int(np.ceil(len(h) / uprate))
+    h_pfb = partition_polyphase(h, uprate, taps_per_phase)
+
+    # Preserve the original zero-padding and dtype.
+    padded_len = len(x) + 2 * taps_per_phase - 1
+    input_padded = np.zeros(
+        padded_len,
+        dtype=TorchSigComplexDataType,
+    )
+    input_start = taps_per_phase - 1
+    input_end = input_start + len(x)
+    input_padded[input_start:input_end] = x
+
+    max_input_idx = len(input_padded) - taps_per_phase
+    max_sample_position = max_input_idx * uprate + (uprate - 1)
+
+    if np.any(positions < 0.0) or np.any(positions > max_sample_position):
+        raise ValueError("positions must be within the valid input range")
+
+    output = np.empty(
+        len(positions),
+        dtype=TorchSigComplexDataType,
+    )
+
+    for output_idx, sample_position in enumerate(positions):
+        input_idx, phase_position = divmod(sample_position, uprate)
+        input_idx = int(input_idx)
+
+        delay_slice = input_padded[input_idx : input_idx + taps_per_phase]
+
+        phase = int(phase_position)
+        h_phase = h_pfb[phase][:taps_per_phase]
+
+        acc_re = np.sum(h_phase * delay_slice[::-1].real)
+        acc_im = np.sum(h_phase * delay_slice[::-1].imag)
+
+        output[output_idx] = acc_re + 1j * acc_im
+
+    return output
+
+
 def sampling_clock_impairments(  # noqa: PLR0917
     h: np.ndarray,
     x: np.ndarray,
@@ -818,25 +888,25 @@ def sampling_clock_impairments(  # noqa: PLR0917
     rng: np.random.Generator | None = None,
     initial_phase: float = 0.0,
 ) -> np.ndarray:
-    """Implements sampling clock impairments (jitter and drift) using polyphase filtering.
+    """Apply sampling-clock jitter and drift using polyphase filtering.
 
-    This function applies clock jitter and drift to a signal by introducing random variations
-    in the sampling rate during resampling. It uses a polyphase filter bank approach for
-    efficient implementation.
+    This function generates sampling positions with clock impairments
+    and delegates interpolation to polyphase_resample_at_positions().
 
     Args:
-        h: Filter coefficients (1D array of floats)
-        x: Input signal (1D array of complex numbers)
-        uprate: Upsampling factor (integer)
-        drate: Downsampling factor (float)
-        jitter_ppm: Jitter in parts per million (float)
-        drift_ppm: Drift in parts per million (float)
-        rng: Random number generator. Defaults to ``np.random.default_rng()``.
-        initial_phase: Initial sampling phase in input-sample periods. Must be
-            in the half-open interval ``[0, 1)``. Defaults to 0.
+        h: Filter coefficients (1D array of floats).
+        x: Input signal (1D array of complex numbers).
+        uprate: Upsampling factor (positive integer).
+        drate: Downsampling factor (positive float).
+        jitter_ppm: Jitter in parts per million.
+        drift_ppm: Drift in parts per million.
+        rng: Random number generator. Defaults to
+            ``np.random.default_rng()``.
+        initial_phase: Initial sampling phase in input-sample periods.
+            Must be in the half-open interval ``[0, 1)``.
 
     Returns:
-        Output signal with clock impairments (1D array of complex numbers)
+        Output signal with clock impairments.
     """
     if not isinstance(uprate, (int, np.integer)) or uprate <= 0:
         raise ValueError("uprate must be a positive integer")
@@ -855,61 +925,53 @@ def sampling_clock_impairments(  # noqa: PLR0917
 
     rng = np.random.default_rng() if rng is None else rng
 
-    # Construct the polyphase filter bank.
     taps_per_phase = int(np.ceil(len(h) / uprate))
-    h_pfb = partition_polyphase(h, uprate, taps_per_phase)
 
-    # Zero-pad the input samples
+    # Match the original padded-input position bounds.
     padded_len = len(x) + 2 * taps_per_phase - 1
-    input_padded = np.zeros(padded_len, dtype=TorchSigComplexDataType)
-    input_start = taps_per_phase - 1
-    input_end = input_start + len(x)
-    input_padded[input_start:input_end] = x
+    max_input_idx = padded_len - taps_per_phase
+    max_sample_position = max_input_idx * uprate + (uprate - 1)
 
-    # Track the ideal sampling path in absolute polyphase units. Timing
-    # impairments are accumulated separately and applied only to each read.
     nominal_position = uprate / drate + initial_phase * uprate
     position_offset = 0.0
-    max_input_idx = len(input_padded) - taps_per_phase
-    max_sample_position = max_input_idx * uprate + (uprate - 1)
+
     if nominal_position > max_sample_position:
         num_output_samples = 0
     else:
-        num_output_samples = int(
-            np.floor((max_sample_position - nominal_position) / nominal_position_increment)
-        ) + 1
-    output_samples = np.zeros(num_output_samples, dtype=TorchSigComplexDataType)
-    max_output_samples = num_output_samples * 16
+        num_output_samples = int(np.floor((max_sample_position - nominal_position) / nominal_position_increment)) + 1
+
+    if num_output_samples > _MAX_SAMPLING_CLOCK_OUTPUT_SAMPLES:
+        raise RuntimeError("sampling clock output capacity exhausted")
+
+    max_output_samples = min(
+        num_output_samples * 16,
+        _MAX_SAMPLING_CLOCK_OUTPUT_SAMPLES,
+    )
+
+    # Preallocate positions instead of IQ output samples.
+    positions = np.empty(num_output_samples, dtype=np.float64)
     output_idx = 0
     clock_drift = 0.0
 
-    # Generate random jitter and drift
     jitter_std = jitter_ppm * 1e-6
     drift_std = drift_ppm * 1e-6
 
-    # Run the resampler
+    # Preserve the existing timing model and RNG consumption order.
     while nominal_position <= max_sample_position:
         sample_position = nominal_position + position_offset
+
         if 0.0 <= sample_position <= max_sample_position:
-            input_idx, phase_position = divmod(sample_position, uprate)
-            input_idx = int(input_idx)
-
-            delay_slice = input_padded[input_idx : input_idx + taps_per_phase]
-
-            phase = int(phase_position)
-            h_phase = h_pfb[phase][:taps_per_phase]
-
-            acc_re = np.sum(h_phase * delay_slice[::-1].real)
-            acc_im = np.sum(h_phase * delay_slice[::-1].imag)
-            pfb_out = acc_re + 1j * acc_im
-
-            if output_idx >= len(output_samples):
-                if len(output_samples) >= max_output_samples:
+            if output_idx >= len(positions):
+                if len(positions) >= max_output_samples:
                     raise RuntimeError("sampling clock output capacity exhausted")
-                new_size = min(2 * len(output_samples), max_output_samples)
-                output_samples.resize(new_size, refcheck=False)
 
-            output_samples[output_idx] = pfb_out
+                new_size = min(
+                    2 * len(positions),
+                    max_output_samples,
+                )
+                positions.resize(new_size, refcheck=False)
+
+            positions[output_idx] = sample_position
             output_idx += 1
 
         if jitter_ppm != 0.0 or drift_ppm != 0.0:
@@ -919,8 +981,12 @@ def sampling_clock_impairments(  # noqa: PLR0917
 
         nominal_position += nominal_position_increment
 
-    # Return properly sized output
-    return output_samples[:output_idx] if output_idx > 0 else np.array([], dtype=TorchSigComplexDataType)
+    return polyphase_resample_at_positions(
+        h=h,
+        x=x,
+        uprate=uprate,
+        positions=positions[:output_idx],
+    )
 
 
 def upsample(signal: np.ndarray, rate: int) -> np.ndarray:

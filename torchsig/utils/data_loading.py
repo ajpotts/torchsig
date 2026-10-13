@@ -145,9 +145,8 @@ class WorkerSeedingDataLoader(DataLoader, Seedable):
         Raises:
             ValueError: if `worker_init_fn` is provided.
         """
-        is_reconstructed_worker_init_fn = (
-            getattr(worker_init_fn, "__func__", None) is WorkerSeedingDataLoader.init_worker_seed
-            and isinstance(getattr(worker_init_fn, "__self__", None), WorkerSeedingDataLoader)
+        is_reconstructed_worker_init_fn = getattr(worker_init_fn, "__func__", None) is WorkerSeedingDataLoader.init_worker_seed and isinstance(
+            getattr(worker_init_fn, "__self__", None), WorkerSeedingDataLoader
         )
         if worker_init_fn is not None and not is_reconstructed_worker_init_fn:
             raise ValueError("No worker_init_fn should be given to WorkerSeedingDataLoader; it will set its own worker_init_fn.")

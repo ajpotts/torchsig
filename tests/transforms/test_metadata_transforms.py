@@ -283,9 +283,7 @@ def test_yolo_label_can_use_custom_group_index(parent_signal):
     grouping(parent_signal)
     transformed = YOLOLabel(class_index_field="kind_index")(parent_signal)
 
-    assert transformed.component_signals[0].yolo_label == pytest.approx(
-        (1, 0.5, 0.4, 0.5, 0.1)
-    )
+    assert transformed.component_signals[0].yolo_label == pytest.approx((1, 0.5, 0.4, 0.5, 0.1))
 
 
 def test_yolo_label_requires_selected_class_index_field(component_signal):

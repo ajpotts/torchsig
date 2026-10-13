@@ -304,10 +304,7 @@ class YOLOLabel(MetadataTransform):
         if not hasattr(signal, self.bandwidth_key):
             raise ValueError(f"key: {self.bandwidth_key} is missing from signal metadata, but is required by {self.__class__.__name__}.")
         if not hasattr(signal, self.class_index_field):
-            raise ValueError(
-                f"key: {self.class_index_field} is missing from signal metadata, "
-                f"but is required by {self.__class__.__name__}."
-            )
+            raise ValueError(f"key: {self.class_index_field} is missing from signal metadata, but is required by {self.__class__.__name__}.")
         class_index = signal[self.class_index_field]
         # normalized to width of sample
         width = signal.duration
