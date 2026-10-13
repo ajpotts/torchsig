@@ -1,0 +1,27 @@
+Title: Enforce an absolute sampling-clock output limit
+
+Problem
+
+The sampling-clock capacity limit is calculated as a multiple of the initial
+output estimate. It therefore grows with extreme parameter values and does not
+provide a meaningful absolute memory bound. A sufficiently small positive
+`drate` can cause an enormous output allocation before the existing capacity
+check is reached.
+
+Scope
+
+- Define an absolute maximum sampling-clock output length.
+- Reject estimates above that limit before allocating output or RNG buffers.
+- Cap buffer growth at the same absolute limit.
+- Apply the limit consistently in NumPy and Numba.
+
+Acceptance criteria
+
+- An output estimate above the absolute limit raises the existing sampling
+  clock capacity error before allocation.
+- Buffer growth cannot exceed the absolute limit.
+- NumPy and Numba enforce the same limit.
+
+Out of scope
+
+Changes to sampling-clock calculations, impairment behavior, or public APIs.

@@ -1,0 +1,20 @@
+Title: Enforce an absolute sampling-clock output limit
+
+Target branch: 3.0.0-dev
+
+Summary
+
+This MR prevents extreme sampling-clock parameters from causing unbounded
+initial output allocations by enforcing an absolute sample-count limit before
+memory is allocated.
+
+Changes
+
+- Add a 10,000,000-sample absolute output ceiling to NumPy and Numba.
+- Reject oversized estimates with the existing capacity-exhausted error.
+- Cap subsequent buffer growth at the same ceiling.
+- Add regression coverage proving the limit is checked before allocation.
+
+Verification
+
+`pytest -q tests/utils/test_sampling_clock_output_capacity.py tests/utils/test_dsp_numba.py`

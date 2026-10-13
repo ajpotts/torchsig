@@ -65,6 +65,7 @@ __all__ = [
 
 # floor applied to linear power spectrogram (1e-10 in power is -100 dB relative to strongest bin)
 _POWER_FLOOR_RATIO = 1e-10
+_MAX_SAMPLING_CLOCK_OUTPUT_SAMPLES = 10_000_000
 
 
 @lru_cache(maxsize=1)
@@ -878,8 +879,13 @@ def sampling_clock_impairments(  # noqa: PLR0917
         num_output_samples = int(
             np.floor((max_sample_position - nominal_position) / nominal_position_increment)
         ) + 1
+    if num_output_samples > _MAX_SAMPLING_CLOCK_OUTPUT_SAMPLES:
+        raise RuntimeError("sampling clock output capacity exhausted")
     output_samples = np.zeros(num_output_samples, dtype=TorchSigComplexDataType)
-    max_output_samples = num_output_samples * 16
+    max_output_samples = min(
+        num_output_samples * 16,
+        _MAX_SAMPLING_CLOCK_OUTPUT_SAMPLES,
+    )
     output_idx = 0
     clock_drift = 0.0
 

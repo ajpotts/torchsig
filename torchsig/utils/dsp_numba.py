@@ -17,6 +17,7 @@ from numba.types import complex64, float32
 
 _OUTPUT_CAPACITY_ERROR = "sampling clock output capacity exhausted"
 _MAX_OUTPUT_CAPACITY_MULTIPLIER = 16
+_MAX_OUTPUT_SAMPLES = 10_000_000
 
 
 @jit(nopython=True, cache=True)
@@ -172,6 +173,8 @@ def sampling_clock_impairments_numba_wrapper(  # noqa: PLR0917
         num_output_samples = int(
             np.floor((max_sample_position - nominal_position) / nominal_position_increment)
         ) + 1
+    if num_output_samples > _MAX_OUTPUT_SAMPLES:
+        raise RuntimeError(_OUTPUT_CAPACITY_ERROR)
 
     if jitter_ppm != 0.0 or drift_ppm != 0.0:
         jitter_std = jitter_ppm * 1e-6
@@ -188,7 +191,10 @@ def sampling_clock_impairments_numba_wrapper(  # noqa: PLR0917
     x_real = np.ascontiguousarray(x.real, dtype=np.float32)
     x_imag = np.ascontiguousarray(x.imag, dtype=np.float32)
 
-    max_output_samples = num_output_samples * _MAX_OUTPUT_CAPACITY_MULTIPLIER
+    max_output_samples = min(
+        num_output_samples * _MAX_OUTPUT_CAPACITY_MULTIPLIER,
+        _MAX_OUTPUT_SAMPLES,
+    )
 
     while True:
         try:
