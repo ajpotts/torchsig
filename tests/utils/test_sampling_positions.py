@@ -1,0 +1,107 @@
+"""Tests for sampling-clock position generation."""
+
+import numpy as np
+import pytest
+
+from torchsig.utils.dsp import generate_sampling_positions, sampling_clock_impairments
+from torchsig.utils.dsp_numba import sampling_clock_impairments_numba_wrapper
+
+
+def _positions(model: str, *, seed: int = 17, alpha: float = 0.75):
+    return generate_sampling_positions(
+        num_input_samples=200_000,
+        taps_per_phase=1,
+        uprate=8,
+        drate=8.0,
+        jitter_ppm=20_000.0,
+        drift_ppm=0.0,
+        rng=np.random.default_rng(seed),
+        jitter_model=model,
+        jitter_alpha=alpha,
+    )
+
+
+def test_independent_jitter_statistics() -> None:
+    error = _positions("independent").timing_error
+    assert abs(np.mean(error)) < 3e-4
+    assert np.var(error) == pytest.approx(0.02**2, rel=0.03)
+    assert np.corrcoef(error[:-1], error[1:])[0, 1] == pytest.approx(0.0, abs=0.02)
+
+
+def test_period_jitter_increment_statistics() -> None:
+    increments = np.diff(_positions("period").timing_error)
+    assert np.var(increments) == pytest.approx(0.02**2, rel=0.03)
+    assert np.corrcoef(increments[:-1], increments[1:])[0, 1] == pytest.approx(0.0, abs=0.02)
+
+
+def test_ar1_jitter_statistics() -> None:
+    error = _positions("ar1").timing_error
+    assert np.var(error) == pytest.approx(0.02**2, rel=0.04)
+    assert np.corrcoef(error[:-1], error[1:])[0, 1] == pytest.approx(0.75, abs=0.02)
+
+
+def test_zero_impairments_and_input_sample_accessors() -> None:
+    positions = generate_sampling_positions(8, 2, 4, 4.0, 0.0, 0.0, initial_phase=0.25)
+    np.testing.assert_array_equal(positions.actual, positions.nominal)
+    np.testing.assert_array_equal(positions.nominal_indices, np.arange(len(positions.nominal)))
+    np.testing.assert_array_equal(positions.nominal_input_samples, positions.nominal / 4)
+    np.testing.assert_array_equal(positions.actual_input_samples, positions.actual / 4)
+
+
+def test_positions_are_reproducible() -> None:
+    first = _positions("ar1", seed=123)
+    second = _positions("ar1", seed=123)
+    np.testing.assert_array_equal(first.actual, second.actual)
+
+
+def test_invalid_positions_are_skipped_without_losing_nominal_alignment() -> None:
+    class OffsetRng:
+        def __init__(self):
+            self.values = iter((0.0, -3.0, 0.0, 0.0))
+
+        def normal(self, _mean, scale):
+            return next(self.values) * scale
+
+    positions = generate_sampling_positions(4, 1, 1, 1.0, 1_000_000.0, 0.0, rng=OffsetRng())
+    np.testing.assert_array_equal(positions.nominal_indices, [0, 2, 3])
+    np.testing.assert_array_equal(positions.nominal, [1.0, 3.0, 4.0])
+    np.testing.assert_array_equal(positions.actual, [1.0, 3.0, 4.0])
+
+
+@pytest.mark.parametrize("model", ["independent", "period", "ar1"])
+def test_python_numba_parity_for_all_jitter_models(model: str) -> None:
+    kwargs = {
+        "h": np.array([1.0, 0.5, 0.25, 0.125], dtype=np.float32),
+        "x": np.arange(32, dtype=np.complex64),
+        "uprate": 4,
+        "drate": 4.0,
+        "jitter_ppm": 50_000.0,
+        "drift_ppm": 10.0,
+        "jitter_model": model,
+        "jitter_alpha": -0.4,
+    }
+    expected = sampling_clock_impairments(rng=np.random.default_rng(91), **kwargs)
+    actual = sampling_clock_impairments_numba_wrapper(rng=np.random.default_rng(91), **kwargs)
+    np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1e-6)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"jitter_model": "unknown"}, "jitter_model"),
+        ({"jitter_alpha": 1.0}, "jitter_alpha"),
+        ({"jitter_alpha": -1.0}, "jitter_alpha"),
+    ],
+)
+def test_jitter_model_validation(overrides, message: str) -> None:
+    kwargs = {
+        "num_input_samples": 8,
+        "taps_per_phase": 1,
+        "uprate": 2,
+        "drate": 2.0,
+        "jitter_ppm": 1.0,
+        "drift_ppm": 0.0,
+    }
+    kwargs.update(overrides)
+    with pytest.raises(ValueError, match=message):
+        generate_sampling_positions(**kwargs)

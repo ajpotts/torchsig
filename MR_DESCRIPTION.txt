@@ -1,0 +1,44 @@
+## Summary
+
+Extract sampling-clock position generation from polyphase interpolation and add configurable jitter models.
+
+## Changes
+
+- Add a reusable `SamplingPositions` dataclass containing:
+  - retained nominal output indices
+  - nominal positions
+  - actual impaired positions
+  - polyphase upsampling rate
+  - input-sample position and timing-error accessors
+- Add `generate_sampling_positions()` with support for:
+  - independent Gaussian absolute timing jitter
+  - accumulated Gaussian sampling-period jitter
+  - stationary AR(1) absolute timing jitter
+- Preserve and document the existing drift interpretation:
+  - `drift_ppm` adjusts the nominal sampling period
+  - a Gaussian period-error random walk is integrated into absolute timing error
+- Apply the existing padded-input position bounds and output-capacity limit.
+- Preserve nominal output alignment when impaired positions are skipped.
+- Refactor `sampling_clock_impairments()` to pass generated positions to `polyphase_resample_at_positions()`.
+- Update the Numba wrapper to use the shared clock model and a position-only Numba interpolation kernel.
+- Keep `sampling_clock_impairments()` returning only the impaired IQ array.
+
+## Behavioral note
+
+The default jitter model is now independent absolute timing jitter. Jitter values are interpreted in input-sample periods and converted to polyphase units before interpolation.
+
+## Testing
+
+Added coverage for:
+
+- independent jitter mean, variance, and lag-one correlation
+- period-jitter increment variance and correlation
+- AR(1) stationary variance and lag-one correlation
+- zero jitter and drift
+- fixed-seed reproducibility
+- invalid-position filtering and nominal-index alignment
+- jitter-model validation
+- output-capacity limits
+- Python/Numba parity for every jitter model
+
+Focused result: `108 passed, 4 skipped`.

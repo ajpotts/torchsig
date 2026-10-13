@@ -1,6 +1,7 @@
 """Digital Signal Processing (DSP) Utils"""
 
 from copy import copy
+from dataclasses import dataclass
 from functools import lru_cache
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
@@ -21,6 +22,7 @@ if TYPE_CHECKING:
     from torchsig.signals.signal_types import Signal
 
 __all__ = [
+    "SamplingPositions",
     "TorchSigComplexDataType",
     "TorchSigRealDataType",
     "bandwidth_from_lower_upper_freq",
@@ -33,6 +35,7 @@ __all__ = [
     "estimate_tone_bandwidth",
     "frequency_shift",
     "gaussian_taps",
+    "generate_sampling_positions",
     "interpolate_power_of_2_resampler",
     "is_even",
     "is_multiple_of_4",
@@ -66,6 +69,31 @@ __all__ = [
 # floor applied to linear power spectrogram (1e-10 in power is -100 dB relative to strongest bin)
 _POWER_FLOOR_RATIO = 1e-10
 _MAX_SAMPLING_CLOCK_OUTPUT_SAMPLES = 10_000_000
+
+
+@dataclass(frozen=True)
+class SamplingPositions:
+    """Nominal and impaired sampling positions in polyphase units."""
+
+    nominal_indices: np.ndarray
+    nominal: np.ndarray
+    actual: np.ndarray
+    uprate: int
+
+    @property
+    def timing_error(self) -> np.ndarray:
+        """Return actual-minus-nominal timing error in input-sample units."""
+        return (self.actual - self.nominal) / self.uprate
+
+    @property
+    def nominal_input_samples(self) -> np.ndarray:
+        """Return nominal positions in input-sample units."""
+        return self.nominal / self.uprate
+
+    @property
+    def actual_input_samples(self) -> np.ndarray:
+        """Return impaired positions in input-sample units."""
+        return self.actual / self.uprate
 
 
 @lru_cache(maxsize=1)
@@ -878,6 +906,98 @@ def polyphase_resample_at_positions(
     return output
 
 
+def generate_sampling_positions(
+    num_input_samples: int,
+    taps_per_phase: int,
+    uprate: int,
+    drate: float,
+    jitter_ppm: float,
+    drift_ppm: float,
+    rng: np.random.Generator | None = None,
+    initial_phase: float = 0.0,
+    jitter_model: str = "independent",
+    jitter_alpha: float = 0.9,
+) -> SamplingPositions:
+    """Generate nominal and impaired polyphase sampling positions.
+
+    Independent and AR(1) jitter are absolute timing errors; period jitter is
+    accumulated from independent sampling-period errors. Drift retains the
+    historical TorchSIG model: ``drift_ppm`` changes the nominal period and is
+    also the standard deviation of a Gaussian period-error random walk. The
+    accumulated random walk is integrated into absolute timing error.
+
+    Positions outside the padded-input bounds are omitted, while
+    ``nominal_indices`` records which nominal outputs remain.
+    """
+    if not isinstance(num_input_samples, (int, np.integer)) or num_input_samples < 0:
+        raise ValueError("num_input_samples must be a nonnegative integer")
+    if not isinstance(taps_per_phase, (int, np.integer)) or taps_per_phase <= 0:
+        raise ValueError("taps_per_phase must be a positive integer")
+    if not isinstance(uprate, (int, np.integer)) or uprate <= 0:
+        raise ValueError("uprate must be a positive integer")
+    if not np.isfinite(drate) or drate <= 0.0:
+        raise ValueError("drate must be finite and positive")
+    if not np.isfinite(jitter_ppm) or jitter_ppm < 0.0:
+        raise ValueError("jitter_ppm must be finite and nonnegative")
+    if not np.isfinite(drift_ppm):
+        raise ValueError("drift_ppm must be finite")
+    if not np.isfinite(initial_phase) or not 0.0 <= initial_phase < 1.0:
+        raise ValueError("initial_phase must be finite and in the interval [0, 1)")
+    if jitter_model not in {"independent", "period", "ar1"}:
+        raise ValueError("jitter_model must be 'independent', 'period', or 'ar1'")
+    if not np.isfinite(jitter_alpha) or abs(jitter_alpha) >= 1.0:
+        raise ValueError("jitter_alpha must be finite and have absolute value less than 1")
+
+    nominal_increment = drate * (1.0 + drift_ppm * 1e-6)
+    if not np.isfinite(nominal_increment) or nominal_increment <= 0.0:
+        raise ValueError("drift_ppm produces a nonfinite or nonpositive sampling-position increment")
+
+    padded_len = num_input_samples + 2 * taps_per_phase - 1
+    max_input_idx = padded_len - taps_per_phase
+    max_position = max_input_idx * uprate + (uprate - 1)
+    first_position = uprate / drate + initial_phase * uprate
+    count = 0 if first_position > max_position else int(np.floor((max_position - first_position) / nominal_increment)) + 1
+    if count > _MAX_SAMPLING_CLOCK_OUTPUT_SAMPLES:
+        raise RuntimeError("sampling clock output capacity exhausted")
+
+    nominal_all = first_position + np.arange(count, dtype=np.float64) * nominal_increment
+    actual_all = np.empty(count, dtype=np.float64)
+    generator = np.random.default_rng() if rng is None else rng
+    # Jitter is specified in input-sample periods and converted to the
+    # polyphase units used by the interpolator.
+    jitter_std = jitter_ppm * 1e-6 * uprate
+    drift_std = drift_ppm * 1e-6
+    jitter_error = 0.0
+    drift_period_error = 0.0
+    drift_error = 0.0
+
+    for idx, nominal_position in enumerate(nominal_all):
+        if jitter_model == "independent":
+            jitter_error = generator.normal(0.0, jitter_std) if jitter_std or drift_std else 0.0
+        elif jitter_model == "period":
+            if jitter_std or drift_std:
+                jitter_error += generator.normal(0.0, jitter_std)
+        elif jitter_std or drift_std:
+            if idx == 0:
+                jitter_error = generator.normal(0.0, jitter_std)
+            else:
+                innovation_std = jitter_std * np.sqrt(1.0 - jitter_alpha**2)
+                jitter_error = jitter_alpha * jitter_error + generator.normal(0.0, innovation_std)
+
+        actual_all[idx] = nominal_position + jitter_error + drift_error
+        if drift_std:
+            drift_period_error += generator.normal(0.0, drift_std)
+            drift_error += drift_period_error
+
+    valid = (actual_all >= 0.0) & (actual_all <= max_position)
+    return SamplingPositions(
+        nominal_indices=np.flatnonzero(valid),
+        nominal=nominal_all[valid],
+        actual=actual_all[valid],
+        uprate=int(uprate),
+    )
+
+
 def sampling_clock_impairments(  # noqa: PLR0917
     h: np.ndarray,
     x: np.ndarray,
@@ -887,6 +1007,8 @@ def sampling_clock_impairments(  # noqa: PLR0917
     drift_ppm: float,
     rng: np.random.Generator | None = None,
     initial_phase: float = 0.0,
+    jitter_model: str = "independent",
+    jitter_alpha: float = 0.9,
 ) -> np.ndarray:
     """Apply sampling-clock jitter and drift using polyphase filtering.
 
@@ -904,88 +1026,34 @@ def sampling_clock_impairments(  # noqa: PLR0917
             ``np.random.default_rng()``.
         initial_phase: Initial sampling phase in input-sample periods.
             Must be in the half-open interval ``[0, 1)``.
+        jitter_model: Jitter process: ``"independent"``, ``"period"``, or
+            ``"ar1"``. Defaults to independent absolute timing jitter.
+        jitter_alpha: AR(1) coefficient, with absolute value less than one.
 
     Returns:
         Output signal with clock impairments.
     """
     if not isinstance(uprate, (int, np.integer)) or uprate <= 0:
         raise ValueError("uprate must be a positive integer")
-    if not np.isfinite(drate) or drate <= 0.0:
-        raise ValueError("drate must be finite and positive")
-    if not np.isfinite(jitter_ppm) or jitter_ppm < 0.0:
-        raise ValueError("jitter_ppm must be finite and nonnegative")
-    if not np.isfinite(drift_ppm):
-        raise ValueError("drift_ppm must be finite")
-    if not np.isfinite(initial_phase) or not 0.0 <= initial_phase < 1.0:
-        raise ValueError("initial_phase must be finite and in the interval [0, 1)")
-
-    nominal_position_increment = drate * (1.0 + drift_ppm * 1e-6)
-    if not np.isfinite(nominal_position_increment) or nominal_position_increment <= 0.0:
-        raise ValueError("drift_ppm produces a nonfinite or nonpositive sampling-position increment")
-
-    rng = np.random.default_rng() if rng is None else rng
-
     taps_per_phase = int(np.ceil(len(h) / uprate))
-
-    # Match the original padded-input position bounds.
-    padded_len = len(x) + 2 * taps_per_phase - 1
-    max_input_idx = padded_len - taps_per_phase
-    max_sample_position = max_input_idx * uprate + (uprate - 1)
-
-    nominal_position = uprate / drate + initial_phase * uprate
-    position_offset = 0.0
-
-    if nominal_position > max_sample_position:
-        num_output_samples = 0
-    else:
-        num_output_samples = int(np.floor((max_sample_position - nominal_position) / nominal_position_increment)) + 1
-
-    if num_output_samples > _MAX_SAMPLING_CLOCK_OUTPUT_SAMPLES:
-        raise RuntimeError("sampling clock output capacity exhausted")
-
-    max_output_samples = min(
-        num_output_samples * 16,
-        _MAX_SAMPLING_CLOCK_OUTPUT_SAMPLES,
+    positions = generate_sampling_positions(
+        num_input_samples=len(x),
+        taps_per_phase=taps_per_phase,
+        uprate=uprate,
+        drate=drate,
+        jitter_ppm=jitter_ppm,
+        drift_ppm=drift_ppm,
+        rng=rng,
+        initial_phase=initial_phase,
+        jitter_model=jitter_model,
+        jitter_alpha=jitter_alpha,
     )
-
-    # Preallocate positions instead of IQ output samples.
-    positions = np.empty(num_output_samples, dtype=np.float64)
-    output_idx = 0
-    clock_drift = 0.0
-
-    jitter_std = jitter_ppm * 1e-6
-    drift_std = drift_ppm * 1e-6
-
-    # Preserve the existing timing model and RNG consumption order.
-    while nominal_position <= max_sample_position:
-        sample_position = nominal_position + position_offset
-
-        if 0.0 <= sample_position <= max_sample_position:
-            if output_idx >= len(positions):
-                if len(positions) >= max_output_samples:
-                    raise RuntimeError("sampling clock output capacity exhausted")
-
-                new_size = min(
-                    2 * len(positions),
-                    max_output_samples,
-                )
-                positions.resize(new_size, refcheck=False)
-
-            positions[output_idx] = sample_position
-            output_idx += 1
-
-        if jitter_ppm != 0.0 or drift_ppm != 0.0:
-            clock_jitter = rng.normal(0.0, jitter_std)
-            clock_drift += rng.normal(0.0, drift_std)
-            position_offset += clock_jitter + clock_drift
-
-        nominal_position += nominal_position_increment
 
     return polyphase_resample_at_positions(
         h=h,
         x=x,
         uprate=uprate,
-        positions=positions[:output_idx],
+        positions=positions.actual,
     )
 
 
