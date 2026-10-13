@@ -24,3 +24,5 @@ This is Part 1 of the sampling-clock work. It only separates clock-position gene
 - Fixed-seed reproducibility
 - Python/Numba parity
 - Existing sampling-clock validation and output-capacity coverage
+
+The standalone `scripts/verify_sampling_clock_refactor_equivalence.py` script also runs varied deterministic signal, filter, rate, phase, jitter, and drift examples against an embedded pre-refactor reference and asserts identical IQ output.
