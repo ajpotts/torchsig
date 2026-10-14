@@ -1,52 +1,23 @@
 ## Summary
 
-Add configurable independent, period, and AR(1) jitter models to the corrected sampling-position generator.
+Expose configurable sampling-clock jitter models through the public functional and transform APIs.
 
 ## Dependency and merge order
 
-This branch targets `414-clean-up-clock-resampler-fallback` and is merge-order step 8. See `tickets/drift_and_jitter/MERGE_ORDER.md`.
+This branch targets `414-configurable-jitter-models` and is merge-order step 9. See `tickets/drift_and_jitter/MERGE_ORDER.md`.
 
 ## Changes
 
-- Add `jitter_model` configuration with support for:
-  - `independent`: independent Gaussian absolute timing errors
-  - `period`: independent Gaussian sampling-period errors accumulated into absolute timing error
-  - `ar1`: stationary correlated Gaussian absolute timing errors
-- Add configurable `jitter_alpha` for AR(1), requiring `|alpha| < 1`.
-- Make independent absolute timing jitter the default model.
-- Express jitter in input-sample periods and convert it to polyphase units for interpolation.
-- Retain the drift behavior documented and extracted in Part 1.
-- Pass the jitter configuration through both Python and Numba sampling-clock implementations.
-- Expose `jitter_model` and `jitter_alpha` through the public `clock_jitter()`
-  functional and `ClockJitter` transform class.
-
-## Behavioral note
-
-Part 1 deliberately preserves the historical accumulated-jitter behavior. This part intentionally changes the default to independent absolute timing jitter. Callers can select `period` when accumulated sampling-period error is desired.
+- Add `jitter_model` and `jitter_alpha` to `clock_jitter()`.
+- Add the same configuration to `ClockJitter`.
+- Validate model names and AR(1) alpha in the transform constructor.
+- Preserve independent jitter as the public default.
+- Pass configuration through to both Python and Numba-backed clock engines.
 
 ## Testing
 
-Added deterministic and statistical coverage for:
-
-- independent jitter mean, variance, and lag-one correlation
-- period-jitter increment variance and correlation
-- AR(1) stationary variance and lag-one correlation
-- zero jitter and drift
-- fixed-seed reproducibility
-- invalid-position filtering and nominal-index alignment
-- jitter-model and `jitter_alpha` validation
-- functional and transform-class configuration pass-through
-- Python/Numba parity for every jitter model
-
-Focused result: `108 passed, 4 skipped`.
-
-## Performance
-
-An on-branch/off-branch comparison initially found a regression from per-position Python generation. The common independent-jitter and drift paths were vectorized with NumPy.
-
-| Benchmark | Off-branch baseline | Initial Part 2 | Optimized Part 2 |
-| --- | ---: | ---: | ---: |
-| Clock jitter | 252.1 µs | 715.9 µs | 234.8 µs |
-| Clock drift | 259.1 µs | 1,097.8 µs | 237.2 µs |
-
-The optimized implementation was approximately 7% faster for clock jitter and 8% faster for clock drift than the off-branch baseline in these runs. The targeted benchmark rerun completed with `2 passed`.
+- Default public configuration
+- Functional pass-through for independent, period, and AR(1) models
+- Transform-class pass-through
+- Invalid model and alpha validation
+- Existing sampling-clock statistical and parity suites
