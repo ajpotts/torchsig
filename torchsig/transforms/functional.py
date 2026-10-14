@@ -263,15 +263,15 @@ def clock_drift(
     rng: np.random.Generator | None = None,
     initial_phase: float = 0.0,
 ) -> np.ndarray:
-    """Clock drift from a Local Oscillator (LO), modeled as accumulated gaussian random noise impacting the
-    sampling rate.
+    """Apply sampling-clock rate offset and accumulated period drift.
 
     The interpolation filter supports signals with full two-sided occupied
     bandwidth up to approximately 0.7 times the sample rate (edges at ±0.35).
 
-    The drift applies a randomness to the sampling rate, and by accumulating the gaussian RV
-    over time it will slightly increase or decrease the sampling rate of the data, and thereby changing the
-    number of samples by a very small number.
+    Positive ``drift_ppm`` advances the input sampling position faster and
+    raises the apparent normalized frequency of a tone. This models ADC sample
+    timing independently of carrier local-oscillator error. Signal metadata
+    remains nominal after the transform.
 
     Args:
         data: Complex valued IQ data samples.
@@ -281,7 +281,7 @@ def clock_drift(
             in the half-open interval ``[0, 1)``. Defaults to 0.
 
     Returns:
-        Data with LO drift applied.
+        Data with sampling-clock drift applied.
     """
     rng = rng or np.random.default_rng()
 
@@ -320,15 +320,13 @@ def clock_jitter(
     rng: np.random.Generator | None = None,
     initial_phase: float = 0.0,
 ) -> np.ndarray:
-    """Clock jitter from a Local Oscillator (LO), modeled as gaussian random noise impacting the
-    sampling phase.
+    """Apply Gaussian sampling-clock timing jitter.
 
     The interpolation filter supports signals with full two-sided occupied
     bandwidth up to approximately 0.7 times the sample rate (edges at ±0.35).
 
-    The jitter applies a randomness to the sampling phase, applying a slight
-    increment or decrement to the sampling phase and therefore potentially changing the number of
-    samples by a very small number.
+    This models ADC sample timing independently of carrier local-oscillator
+    error. Signal metadata remains nominal after the transform.
 
     Args:
         data: Complex valued IQ data samples.
@@ -338,7 +336,7 @@ def clock_jitter(
             in the half-open interval ``[0, 1)``. Defaults to 0.
 
     Returns:
-        Data with LO drift applied.
+        Data with sampling-clock jitter applied.
     """
     rng = rng or np.random.default_rng()
 
