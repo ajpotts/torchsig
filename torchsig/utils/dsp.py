@@ -892,16 +892,23 @@ def polyphase_resample_at_positions(
     for output_idx, sample_position in enumerate(positions):
         input_idx, phase_position = divmod(sample_position, uprate)
         input_idx = int(input_idx)
+        phase = int(phase_position)
+        fraction = phase_position - phase
 
         delay_slice = input_padded[input_idx : input_idx + taps_per_phase]
+        first = np.sum(h_pfb[phase] * delay_slice[::-1])
+        if fraction == 0.0:
+            output[output_idx] = first
+            continue
 
-        phase = int(phase_position)
-        h_phase = h_pfb[phase][:taps_per_phase]
-
-        acc_re = np.sum(h_phase * delay_slice[::-1].real)
-        acc_im = np.sum(h_phase * delay_slice[::-1].imag)
-
-        output[output_idx] = acc_re + 1j * acc_im
+        next_phase = phase + 1
+        next_input_idx = input_idx
+        if next_phase == uprate:
+            next_phase = 0
+            next_input_idx += 1
+        next_delay_slice = input_padded[next_input_idx : next_input_idx + taps_per_phase]
+        second = np.sum(h_pfb[next_phase] * next_delay_slice[::-1])
+        output[output_idx] = first + fraction * (second - first)
 
     return output
 

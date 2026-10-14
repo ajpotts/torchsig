@@ -1,28 +1,20 @@
 ## Summary
 
-Extract sampling-clock position generation from polyphase interpolation without changing the public clock-impairment API or timing model.
+Interpolate the fractional remainder of polyphase sampling positions instead of truncating it.
+
+## Dependency and merge order
+
+This branch targets `414-sampling-positions-refactor` and is merge-order step 2. See `tickets/drift_and_jitter/MERGE_ORDER.md`.
 
 ## Changes
 
-- Add a reusable `SamplingPositions` dataclass containing retained nominal indices, nominal and actual polyphase positions, and input-sample accessors.
-- Add `generate_sampling_positions()` using the existing accumulated jitter and drift behavior.
-- Preserve the current drift interpretation and document it explicitly.
-- Preserve valid-position filtering, output-capacity limits, RNG ordering, and nominal-index alignment when positions are skipped.
-- Refactor `sampling_clock_impairments()` to pass generated positions to `polyphase_resample_at_positions()`.
-- Update the Numba wrapper to use the shared position generator and a position-only Numba interpolation kernel.
-- Continue returning only the impaired IQ array from `sampling_clock_impairments()`.
-
-## Scope
-
-This is Part 1 of the sampling-clock work. It only separates clock-position generation from interpolation. Configurable independent, period, and AR(1) jitter models are intentionally deferred to Part 2.
+- Linearly interpolate adjacent polyphase branch outputs.
+- Carry interpolation across the final phase into the next input sample.
+- Implement equivalent Python and Numba behavior.
+- Add direct fractional-position and phase-boundary tests.
 
 ## Testing
 
-- Zero-impairment positions and input-sample accessors
-- Historical jitter accumulation behavior
-- Bounds, skipped positions, and nominal-index alignment
-- Fixed-seed reproducibility
-- Python/Numba parity
-- Existing sampling-clock validation and output-capacity coverage
-
-The standalone `scripts/verify_sampling_clock_refactor_equivalence.py` script also runs varied deterministic signal, filter, rate, phase, jitter, and drift examples against an embedded pre-refactor reference and asserts identical IQ output.
+- Polyphase interpolation tests
+- Sampling-clock Python/Numba parity tests
+- Low-ppm jitter distinguishability checks

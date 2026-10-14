@@ -49,7 +49,9 @@ def polyphase_resample_at_positions_numba(x_real, x_imag, uprate, positions, h_p
     result = np.empty(len(positions), dtype=np.complex64)
     for output_idx, sample_position in enumerate(positions):
         input_idx = int(sample_position // uprate)
-        phase = int(sample_position - input_idx * uprate)
+        phase_position = sample_position - input_idx * uprate
+        phase = int(phase_position)
+        fraction = phase_position - phase
         acc_re = 0.0
         acc_im = 0.0
         for tap_idx in range(taps_per_phase):
@@ -57,6 +59,21 @@ def polyphase_resample_at_positions_numba(x_real, x_imag, uprate, positions, h_p
             input_position = input_idx + tap_idx
             acc_re += coefficient * input_padded_real[input_position]
             acc_im += coefficient * input_padded_imag[input_position]
+        if fraction != 0.0:
+            next_phase = phase + 1
+            next_input_idx = input_idx
+            if next_phase == uprate:
+                next_phase = 0
+                next_input_idx += 1
+            next_re = 0.0
+            next_im = 0.0
+            for tap_idx in range(taps_per_phase):
+                coefficient = h_pfb_reversed[next_phase, tap_idx]
+                input_position = next_input_idx + tap_idx
+                next_re += coefficient * input_padded_real[input_position]
+                next_im += coefficient * input_padded_imag[input_position]
+            acc_re += fraction * (next_re - acc_re)
+            acc_im += fraction * (next_im - acc_im)
         result[output_idx] = acc_re + 1j * acc_im
     return result
 
