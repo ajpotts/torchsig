@@ -1,20 +1,20 @@
 ## Summary
 
-Replace symmetric zero padding of short sampling-clock output with alignment-aware edge extension.
+Define and test the occupied-bandwidth contract of the sampling-clock interpolation filter.
 
 ## Dependency and merge order
 
-This branch targets `414-align-zero-impairment-output` and is merge-order step 4. See `tickets/drift_and_jitter/MERGE_ORDER.md`.
+This branch targets `414-replace-symmetric-clock-output-padding` and is merge-order step 5. See `tickets/drift_and_jitter/MERGE_ORDER.md`.
 
 ## Changes
 
-- Extend the first or last valid sample when aligned output falls outside the generated range.
-- Use edge extension instead of inserting zeros for legacy length-only normalization.
-- Preserve complex64 dtype and return zeros only when the resampler produced no samples.
-- Add short-output and aligned-tail boundary tests.
+- Define a maximum full two-sided occupied bandwidth of 0.7 times sample rate.
+- Document the corresponding ±0.35 passband edges on both clock functionals.
+- Add response tests requiring less than 0.05 dB edge loss and at least 80 dB rejection by 0.7 cycles per input sample.
+- Make the bandwidth constant available to diagnostics and callers.
 
 ## Testing
 
-- Zero, one, and multiple missing-output boundary cases
-- Sampling-clock output length and dtype tests
-- Existing clock transform tests
+- Prototype passband-edge response
+- Image-region rejection
+- Full-bandwidth versus one-sided-edge convention

@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from torchsig.signals.signal_types import Signal
 
 __all__ = [
+    "SAMPLING_CLOCK_MAX_OCCUPIED_BANDWIDTH",
     "SamplingPositions",
     "TorchSigComplexDataType",
     "TorchSigRealDataType",
@@ -69,6 +70,10 @@ __all__ = [
 # floor applied to linear power spectrogram (1e-10 in power is -100 dB relative to strongest bin)
 _POWER_FLOOR_RATIO = 1e-10
 _MAX_SAMPLING_CLOCK_OUTPUT_SAMPLES = 10_000_000
+
+# Full two-sided occupied bandwidth as a fraction of sample rate. The
+# sampling-clock prototype is flat to about 0.03 dB through these ±0.35 edges.
+SAMPLING_CLOCK_MAX_OCCUPIED_BANDWIDTH = 0.7
 
 
 @dataclass(frozen=True)

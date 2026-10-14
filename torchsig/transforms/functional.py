@@ -266,6 +266,9 @@ def clock_drift(
     """Clock drift from a Local Oscillator (LO), modeled as accumulated gaussian random noise impacting the
     sampling rate.
 
+    The interpolation filter supports signals with full two-sided occupied
+    bandwidth up to approximately 0.7 times the sample rate (edges at ±0.35).
+
     The drift applies a randomness to the sampling rate, and by accumulating the gaussian RV
     over time it will slightly increase or decrease the sampling rate of the data, and thereby changing the
     number of samples by a very small number.
@@ -319,6 +322,9 @@ def clock_jitter(
 ) -> np.ndarray:
     """Clock jitter from a Local Oscillator (LO), modeled as gaussian random noise impacting the
     sampling phase.
+
+    The interpolation filter supports signals with full two-sided occupied
+    bandwidth up to approximately 0.7 times the sample rate (edges at ±0.35).
 
     The jitter applies a randomness to the sampling phase, applying a slight
     increment or decrement to the sampling phase and therefore potentially changing the number of
