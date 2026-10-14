@@ -1,0 +1,29 @@
+Title: Clean up and benchmark the Python clock-resampler fallback
+
+Summary
+
+The pure-Python fallback still builds the polyphase bank with nested Python
+loops and interpolates output positions one sample at a time. This is slow at
+dataset scale when Numba is unavailable. The clock wrappers also retain small
+cleanup issues such as `copy(uprate)` for an immutable integer.
+
+The Numba import now correctly catches `ImportError` rather than every
+exception, and parity tests exist, but fallback performance and maintenance
+can be improved further.
+
+Proposed change
+
+Vectorize polyphase partitioning where practical, evaluate batched
+position-based interpolation, and remove redundant wrapper operations. Keep
+the interpolation helper independent of jitter-model details.
+
+Acceptance criteria
+
+- Remove redundant integer copies and other dead wrapper operations.
+- Add a benchmark that directly compares Python and Numba clock-resampler
+  paths for representative lengths and phase counts.
+- Improve Python fallback runtime without changing complex64 output behavior.
+- Preserve valid-position bounds, output-capacity handling, and deterministic
+  RNG behavior.
+- Existing Python/Numba parity tests continue to pass.
+- No new runtime dependency is introduced solely for this optimization.

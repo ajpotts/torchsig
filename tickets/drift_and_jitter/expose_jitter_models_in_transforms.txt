@@ -1,0 +1,27 @@
+Title: Expose configurable jitter models through public clock transforms
+
+Summary
+
+The sampling-position generator supports independent absolute jitter,
+accumulated period jitter, and correlated AR(1) jitter on the configurable
+jitter-model branch. The public `clock_jitter` functional and `ClockJitter`
+transform do not expose `jitter_model` or `jitter_alpha`, so users of the normal
+transform API cannot select the new models.
+
+Proposed change
+
+Add validated jitter-model configuration to the functional API and transform
+class, and pass it through to both Python and Numba sampling-clock paths.
+Preserve the established default and document the compatibility implications
+of each model.
+
+Acceptance criteria
+
+- `clock_jitter` and `ClockJitter` expose independent, period, and AR(1)
+  options with consistent names and defaults.
+- AR(1) configuration validates finite `jitter_alpha` with `|alpha| < 1`.
+- Transform seeding remains reproducible for every model.
+- Functional, class-based, Python, and Numba paths produce equivalent results.
+- Public docstrings describe whether jitter is absolute or accumulated for
+  each option.
+- Existing callers that omit the new arguments retain the documented default.
