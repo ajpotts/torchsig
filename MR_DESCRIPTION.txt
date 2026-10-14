@@ -14,6 +14,24 @@ This branch targets `414-correct-clock-transform-documentation` and is merge-ord
 - Remove redundant integer copies from clock wrappers.
 - Add direct Python/Numba benchmarks and vectorization regression tests.
 
+## Performance
+
+The optional pure-Python `clock_jitter()` benchmark was run on the previous
+commit and this branch with:
+
+```text
+python -m pytest benchmarks/optional/benchmark_clock_jitter_python.py \
+  --benchmark-only --benchmark-min-rounds=1 --benchmark-max-time=0.2 -q
+```
+
+| Case | Previous mean | This branch mean | Speedup |
+| --- | ---: | ---: | ---: |
+| Integer positions | 25.2126 ms | 1.4940 ms | 16.9x |
+| Interpolated positions | 37.8729 ms | 1.5556 ms | 24.3x |
+
+On this system, vectorization reduced the additional cost of interpolated
+positions from about 50% over integer positions to about 4%.
+
 ## Testing
 
 - Polyphase known-value and fractional-position tests
