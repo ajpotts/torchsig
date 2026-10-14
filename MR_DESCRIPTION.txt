@@ -17,6 +17,8 @@ This branch targets `414-clean-up-clock-resampler-fallback` and is merge-order s
 - Express jitter in input-sample periods and convert it to polyphase units for interpolation.
 - Retain the drift behavior documented and extracted in Part 1.
 - Pass the jitter configuration through both Python and Numba sampling-clock implementations.
+- Expose `jitter_model` and `jitter_alpha` through the public `clock_jitter()`
+  functional and `ClockJitter` transform class.
 
 ## Behavioral note
 
@@ -33,6 +35,7 @@ Added deterministic and statistical coverage for:
 - fixed-seed reproducibility
 - invalid-position filtering and nominal-index alignment
 - jitter-model and `jitter_alpha` validation
+- functional and transform-class configuration pass-through
 - Python/Numba parity for every jitter model
 
 Focused result: `108 passed, 4 skipped`.

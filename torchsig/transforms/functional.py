@@ -319,6 +319,8 @@ def clock_jitter(
     jitter_ppm: float = 10,
     rng: np.random.Generator | None = None,
     initial_phase: float = 0.0,
+    jitter_model: Literal["independent", "period", "ar1"] = "independent",
+    jitter_alpha: float = 0.9,
 ) -> np.ndarray:
     """Apply Gaussian sampling-clock timing jitter.
 
@@ -334,6 +336,12 @@ def clock_jitter(
         rng: Random number generator. Defaults to np.random.default_rng(seed=None).
         initial_phase: Initial sampling phase in input-sample periods. Must be
             in the half-open interval ``[0, 1)``. Defaults to 0.
+        jitter_model: Jitter process. ``"independent"`` produces absolute
+            timing errors, ``"period"`` accumulates sampling-period errors,
+            and ``"ar1"`` produces correlated absolute timing errors.
+            Defaults to ``"independent"``.
+        jitter_alpha: Autoregressive coefficient for ``"ar1"`` jitter. Must
+            be finite with absolute value less than one. Defaults to 0.9.
 
     Returns:
         Data with sampling-clock jitter applied.
@@ -363,6 +371,8 @@ def clock_jitter(
         drift_ppm=0,
         rng=rng,
         initial_phase=initial_phase,
+        jitter_model=jitter_model,
+        jitter_alpha=jitter_alpha,
     )
 
     filter_delay = (len(pfb_prototype_filter) - 1) / (2 * uprate)
