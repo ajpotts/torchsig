@@ -1,20 +1,20 @@
 ## Summary
 
-Interpolate the fractional remainder of polyphase sampling positions instead of truncating it.
+Align sampling-clock output using the prototype filter group delay so zero impairment does not introduce a fractional timing shift.
 
 ## Dependency and merge order
 
-This branch targets `414-sampling-positions-refactor` and is merge-order step 2. See `tickets/drift_and_jitter/MERGE_ORDER.md`.
+This branch targets `414-interpolate-subphase-sampling-positions` and is merge-order step 3. See `tickets/drift_and_jitter/MERGE_ORDER.md`.
 
 ## Changes
 
-- Linearly interpolate adjacent polyphase branch outputs.
-- Carry interpolation across the final phase into the next input sample.
-- Implement equivalent Python and Numba behavior.
-- Add direct fractional-position and phase-boundary tests.
+- Add fractional start-position support to sampling-clock output preservation.
+- Derive alignment from the prototype filter group delay.
+- Apply the same alignment to clock drift and jitter wrappers.
+- Add fractional alignment and zero-drift tone-phase tests.
 
 ## Testing
 
-- Polyphase interpolation tests
-- Sampling-clock Python/Numba parity tests
-- Low-ppm jitter distinguishability checks
+- Sampling-clock output length and dtype tests
+- Zero-impairment phase-alignment test
+- Existing clock transform tests

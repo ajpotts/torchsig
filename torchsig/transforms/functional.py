@@ -77,9 +77,25 @@ __all__ = [
 ]
 
 
-def _preserve_sampling_clock_output(data: np.ndarray, length: int) -> np.ndarray:
-    """Center-crop or zero-pad sampling-clock output to complex64 ``length``."""
+def _preserve_sampling_clock_output(
+    data: np.ndarray,
+    length: int,
+    start_position: float | None = None,
+) -> np.ndarray:
+    """Align sampling-clock output and return complex64 ``length`` samples."""
     output = np.asarray(data, dtype=TorchSigComplexDataType)
+    if start_position is not None:
+        positions = start_position + np.arange(length, dtype=np.float64)
+        lower = np.floor(positions).astype(np.int64)
+        fraction = positions - lower
+        aligned = np.zeros(length, dtype=TorchSigComplexDataType)
+        exact = (fraction == 0.0) & (lower >= 0) & (lower < len(output))
+        aligned[exact] = output[lower[exact]]
+        interpolated = (fraction != 0.0) & (lower >= 0) & (lower + 1 < len(output))
+        first = output[lower[interpolated]]
+        aligned[interpolated] = first + fraction[interpolated] * (output[lower[interpolated] + 1] - first)
+        return aligned
+
     length_delta = len(output) - length
 
     if length_delta > 0:
@@ -287,7 +303,8 @@ def clock_drift(
         initial_phase=initial_phase,
     )
 
-    return _preserve_sampling_clock_output(data_with_drift, len(data))
+    filter_delay = (len(pfb_prototype_filter) - 1) / (2 * uprate)
+    return _preserve_sampling_clock_output(data_with_drift, len(data), start_position=filter_delay)
 
 
 def clock_jitter(
@@ -340,7 +357,8 @@ def clock_jitter(
         initial_phase=initial_phase,
     )
 
-    return _preserve_sampling_clock_output(data_with_jitter, len(data))
+    filter_delay = (len(pfb_prototype_filter) - 1) / (2 * uprate)
+    return _preserve_sampling_clock_output(data_with_jitter, len(data), start_position=filter_delay)
 
 
 def cochannel_interference(
