@@ -1,20 +1,20 @@
 ## Summary
 
-Align sampling-clock output using the prototype filter group delay so zero impairment does not introduce a fractional timing shift.
+Replace symmetric zero padding of short sampling-clock output with alignment-aware edge extension.
 
 ## Dependency and merge order
 
-This branch targets `414-interpolate-subphase-sampling-positions` and is merge-order step 3. See `tickets/drift_and_jitter/MERGE_ORDER.md`.
+This branch targets `414-align-zero-impairment-output` and is merge-order step 4. See `tickets/drift_and_jitter/MERGE_ORDER.md`.
 
 ## Changes
 
-- Add fractional start-position support to sampling-clock output preservation.
-- Derive alignment from the prototype filter group delay.
-- Apply the same alignment to clock drift and jitter wrappers.
-- Add fractional alignment and zero-drift tone-phase tests.
+- Extend the first or last valid sample when aligned output falls outside the generated range.
+- Use edge extension instead of inserting zeros for legacy length-only normalization.
+- Preserve complex64 dtype and return zeros only when the resampler produced no samples.
+- Add short-output and aligned-tail boundary tests.
 
 ## Testing
 
+- Zero, one, and multiple missing-output boundary cases
 - Sampling-clock output length and dtype tests
-- Zero-impairment phase-alignment test
 - Existing clock transform tests

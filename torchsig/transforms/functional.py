@@ -85,10 +85,14 @@ def _preserve_sampling_clock_output(
     """Align sampling-clock output and return complex64 ``length`` samples."""
     output = np.asarray(data, dtype=TorchSigComplexDataType)
     if start_position is not None:
+        if len(output) == 0:
+            return np.zeros(length, dtype=TorchSigComplexDataType)
         positions = start_position + np.arange(length, dtype=np.float64)
         lower = np.floor(positions).astype(np.int64)
         fraction = positions - lower
         aligned = np.zeros(length, dtype=TorchSigComplexDataType)
+        aligned[positions < 0.0] = output[0]
+        aligned[positions > len(output) - 1] = output[-1]
         exact = (fraction == 0.0) & (lower >= 0) & (lower < len(output))
         aligned[exact] = output[lower[exact]]
         interpolated = (fraction != 0.0) & (lower >= 0) & (lower + 1 < len(output))
@@ -105,7 +109,7 @@ def _preserve_sampling_clock_output(
         pad_count = -length_delta
         pad_front = (pad_count + 1) // 2
         pad_back = pad_count // 2
-        output = np.pad(output, (pad_front, pad_back))
+        output = np.pad(output, (pad_front, pad_back), mode="edge") if len(output) else np.zeros(length, dtype=TorchSigComplexDataType)
 
     return output.astype(TorchSigComplexDataType, copy=False)
 

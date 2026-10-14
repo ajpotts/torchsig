@@ -86,6 +86,22 @@ def test_preserve_sampling_clock_output_uses_fractional_alignment_position() -> 
     np.testing.assert_array_equal(output, np.array([3.0, 5.0], dtype=np.complex64))
 
 
+def test_preserve_sampling_clock_output_extends_edges_when_output_is_short() -> None:
+    data = np.array([1.0, 2.0], dtype=np.complex64)
+
+    output = _preserve_sampling_clock_output(data, length=4)
+
+    np.testing.assert_array_equal(output, np.array([1.0, 1.0, 2.0, 2.0], dtype=np.complex64))
+
+
+def test_preserve_sampling_clock_output_extends_aligned_tail() -> None:
+    data = np.array([1.0, 2.0, 3.0], dtype=np.complex64)
+
+    output = _preserve_sampling_clock_output(data, length=4, start_position=1.0)
+
+    np.testing.assert_array_equal(output, np.array([2.0, 3.0, 3.0, 3.0], dtype=np.complex64))
+
+
 def test_clock_drift_zero_impairment_is_phase_aligned() -> None:
     time = np.arange(1024)
     data = np.exp(2j * np.pi * 0.05 * time).astype(np.complex64)
