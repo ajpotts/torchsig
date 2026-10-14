@@ -828,18 +828,11 @@ def partition_polyphase(h: np.ndarray, up_rate: int, taps_per_phase: int) -> np.
     Returns:
         2D array representing the polyphase filter bank
     """
-    h_pfb = np.zeros((up_rate, taps_per_phase), dtype=TorchSigRealDataType)
-
-    for phase in range(up_rate):
-        tap_idx = phase
-        for idx in range(taps_per_phase):
-            if tap_idx < len(h):
-                h_pfb[phase, idx] = h[tap_idx] * up_rate
-            else:
-                h_pfb[phase, idx] = 0.0
-            tap_idx += up_rate
-
-    return h_pfb
+    total_taps = up_rate * taps_per_phase
+    padded_taps = np.zeros(total_taps, dtype=TorchSigRealDataType)
+    copied_taps = min(len(h), total_taps)
+    padded_taps[:copied_taps] = h[:copied_taps]
+    return np.ascontiguousarray(padded_taps.reshape(taps_per_phase, up_rate).T * up_rate)
 
 
 def polyphase_resample_at_positions(
@@ -889,33 +882,28 @@ def polyphase_resample_at_positions(
     if np.any(positions < 0.0) or np.any(positions > max_sample_position):
         raise ValueError("positions must be within the valid input range")
 
-    output = np.empty(
-        len(positions),
-        dtype=TorchSigComplexDataType,
-    )
+    if len(positions) == 0:
+        return np.empty(0, dtype=TorchSigComplexDataType)
 
-    for output_idx, sample_position in enumerate(positions):
-        input_idx, phase_position = divmod(sample_position, uprate)
-        input_idx = int(input_idx)
-        phase = int(phase_position)
-        fraction = phase_position - phase
+    input_indices = np.floor_divide(positions, uprate).astype(np.int64)
+    phase_positions = positions - input_indices * uprate
+    phases = np.floor(phase_positions).astype(np.int64)
+    fractions = phase_positions - phases
+    windows = np.lib.stride_tricks.sliding_window_view(input_padded, taps_per_phase)
+    delayed = windows[input_indices, ::-1]
+    first = np.sum(h_pfb[phases] * delayed, axis=1)
 
-        delay_slice = input_padded[input_idx : input_idx + taps_per_phase]
-        first = np.sum(h_pfb[phase] * delay_slice[::-1])
-        if fraction == 0.0:
-            output[output_idx] = first
-            continue
-
-        next_phase = phase + 1
-        next_input_idx = input_idx
-        if next_phase == uprate:
-            next_phase = 0
-            next_input_idx += 1
-        next_delay_slice = input_padded[next_input_idx : next_input_idx + taps_per_phase]
-        second = np.sum(h_pfb[next_phase] * next_delay_slice[::-1])
-        output[output_idx] = first + fraction * (second - first)
-
-    return output
+    next_phases = phases + 1
+    carry = next_phases == uprate
+    next_phases[carry] = 0
+    next_input_indices = input_indices + carry
+    # A carried position beyond the final window can only have zero fraction,
+    # so clipping is safe and avoids materializing an unused invalid window.
+    next_input_indices = np.minimum(next_input_indices, max_input_idx)
+    next_delayed = windows[next_input_indices, ::-1]
+    second = np.sum(h_pfb[next_phases] * next_delayed, axis=1)
+    output = first + fractions * (second - first)
+    return output.astype(TorchSigComplexDataType, copy=False)
 
 
 def generate_sampling_positions(

@@ -1,21 +1,22 @@
 ## Summary
 
-Correct sampling-clock terminology and document timing, sign, metadata, and bandwidth semantics.
+Vectorize the Python clock-resampler fallback and add direct Python/Numba performance coverage.
 
 ## Dependency and merge order
 
-This branch targets `414-define-clock-resampler-bandwidth-contract` and is merge-order step 6. See `tickets/drift_and_jitter/MERGE_ORDER.md`.
+This branch targets `414-correct-clock-transform-documentation` and is merge-order step 7. See `tickets/drift_and_jitter/MERGE_ORDER.md`.
 
 ## Changes
 
-- Replace incorrect local-oscillator wording with ADC sampling-clock terminology.
-- Document the positive drift sign convention.
-- State that sampling-clock and carrier-LO impairments are independent models.
-- State that signal frequency and sample-rate metadata remain nominal.
-- Reference the supported occupied-bandwidth contract.
-- Align functional and transform-class descriptions.
+- Vectorize polyphase filter-bank partitioning.
+- Batch interpolation windows and phases in the Python position resampler.
+- Preserve sub-phase interpolation and complex64 output.
+- Remove redundant integer copies from clock wrappers.
+- Add direct Python/Numba benchmarks and vectorization regression tests.
 
 ## Testing
 
-- Documentation/source lint checks
-- Existing clock functional and transform tests
+- Polyphase known-value and fractional-position tests
+- Python/Numba parity tests
+- Large position-batch fallback test
+- Direct Python and Numba sampling-clock benchmarks

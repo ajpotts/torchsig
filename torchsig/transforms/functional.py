@@ -290,7 +290,7 @@ def clock_drift(
 
     # define up/down rates
     uprate = 5000
-    downrate = copy(uprate)
+    downrate = uprate
 
     # build the prototype filter
     pfb_prototype_filter = prototype_polyphase_filter(num_branches=uprate)
@@ -345,7 +345,7 @@ def clock_jitter(
 
     # define up/down rates
     uprate = 5000
-    downrate = copy(uprate)
+    downrate = uprate
 
     # build the prototype filter
     pfb_prototype_filter = prototype_polyphase_filter(num_branches=uprate)
