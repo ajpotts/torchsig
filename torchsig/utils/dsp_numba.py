@@ -176,6 +176,10 @@ def sampling_clock_impairments_numba_wrapper(  # noqa: PLR0917
     initial_phase=0.0,
     jitter_model="independent",
     jitter_alpha=0.9,
+    drift_model="constant",
+    drift_rate_ppm_per_sec=0.0,
+    drift_noise_ppm_per_sqrt_sec=0.0,
+    sample_rate_hz=1.0,
 ):
     """Wrapper for the numba-optimized sampling clock impairments function.
 
@@ -189,7 +193,7 @@ def sampling_clock_impairments_numba_wrapper(  # noqa: PLR0917
         raise ValueError("initial_phase must be finite and in the interval [0, 1)")
     taps_per_phase = int(np.ceil(len(h) / uprate))
 
-    nominal_increment = drate * (1.0 + drift_ppm * 1e-6)
+    nominal_increment = drate
     if np.isfinite(nominal_increment) and nominal_increment > 0.0:
         padded_len = len(x) + 2 * taps_per_phase - 1
         max_position = (padded_len - taps_per_phase) * uprate + (uprate - 1)
@@ -215,6 +219,10 @@ def sampling_clock_impairments_numba_wrapper(  # noqa: PLR0917
         initial_phase=initial_phase,
         jitter_model=jitter_model,
         jitter_alpha=jitter_alpha,
+        drift_model=drift_model,
+        drift_rate_ppm_per_sec=drift_rate_ppm_per_sec,
+        drift_noise_ppm_per_sqrt_sec=drift_noise_ppm_per_sqrt_sec,
+        sample_rate_hz=sample_rate_hz,
     )
 
     x_real = np.ascontiguousarray(x.real, dtype=np.float32)
