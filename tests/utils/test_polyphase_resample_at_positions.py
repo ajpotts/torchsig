@@ -36,6 +36,28 @@ def test_polyphase_resample_at_positions_empty():
     assert output.dtype == np.dtype(np.complex64)
 
 
+def test_polyphase_resample_at_positions_interpolates_subphase_remainder():
+    output = polyphase_resample_at_positions(
+        h=np.array([1.0, 2.0], dtype=np.float32),
+        x=np.array([1.0, 2.0], dtype=np.complex64),
+        uprate=2,
+        positions=np.array([0.5, 1.5]),
+    )
+
+    np.testing.assert_array_equal(output, np.array([3.0, 4.0], dtype=np.complex64))
+
+
+def test_polyphase_resample_at_positions_interpolates_across_last_phase():
+    output = polyphase_resample_at_positions(
+        h=np.array([1.0, 2.0], dtype=np.float32),
+        x=np.array([1.0, 2.0], dtype=np.complex64),
+        uprate=2,
+        positions=np.array([1.75]),
+    )
+
+    np.testing.assert_array_equal(output, np.array([4.0], dtype=np.complex64))
+
+
 @pytest.mark.parametrize(
     "positions",
     [

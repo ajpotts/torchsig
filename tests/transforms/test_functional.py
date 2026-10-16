@@ -20,6 +20,7 @@ from torchsig.transforms.functional import (
     carrier_frequency_drift,
     carrier_phase_noise,
     channel_swap,
+    clock_drift,
     clock_jitter,
     coarse_gain_change,
     cochannel_interference,
@@ -75,6 +76,40 @@ def test_preserve_sampling_clock_output_crops_one_extra_sample() -> None:
     output = _preserve_sampling_clock_output(data, length=4)
 
     np.testing.assert_array_equal(output, data[1:])
+
+
+def test_preserve_sampling_clock_output_uses_fractional_alignment_position() -> None:
+    data = np.array([0.0, 2.0, 4.0, 6.0], dtype=np.complex64)
+
+    output = _preserve_sampling_clock_output(data, length=2, start_position=1.5)
+
+    np.testing.assert_array_equal(output, np.array([3.0, 5.0], dtype=np.complex64))
+
+
+def test_preserve_sampling_clock_output_extends_edges_when_output_is_short() -> None:
+    data = np.array([1.0, 2.0], dtype=np.complex64)
+
+    output = _preserve_sampling_clock_output(data, length=4)
+
+    np.testing.assert_array_equal(output, np.array([1.0, 1.0, 2.0, 2.0], dtype=np.complex64))
+
+
+def test_preserve_sampling_clock_output_extends_aligned_tail() -> None:
+    data = np.array([1.0, 2.0, 3.0], dtype=np.complex64)
+
+    output = _preserve_sampling_clock_output(data, length=4, start_position=1.0)
+
+    np.testing.assert_array_equal(output, np.array([2.0, 3.0, 3.0, 3.0], dtype=np.complex64))
+
+
+def test_clock_drift_zero_impairment_is_phase_aligned() -> None:
+    time = np.arange(1024)
+    data = np.exp(2j * np.pi * 0.05 * time).astype(np.complex64)
+
+    output = clock_drift(data, drift_ppm=0.0, rng=np.random.default_rng(7))
+
+    phase_error = np.angle(np.vdot(data[32:-32], output[32:-32]))
+    assert phase_error == pytest.approx(0.0, abs=1e-3)
 
 
 @pytest.mark.parametrize("data, expected, is_error", [(0, ValueError, True), (TEST_DATA.copy(), True, False)])

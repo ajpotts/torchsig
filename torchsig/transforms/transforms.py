@@ -641,7 +641,11 @@ class ChannelSwap(SignalTransform):
 
 
 class ClockDrift(SignalTransform):
-    """Simulates a clock drift effect, which applies a random error to the sampling rate."""
+    """Apply ADC sampling-rate offset and accumulated period drift.
+
+    This timing impairment is independent of carrier local-oscillator error;
+    signal frequency and sample-rate metadata remain nominal.
+    """
 
     def __init__(
         self,
@@ -691,7 +695,11 @@ class ClockDrift(SignalTransform):
 
 
 class ClockJitter(SignalTransform):
-    """Simulates a clock jitter effect, which applies a random error to the sampling phase."""
+    """Apply Gaussian ADC sampling-time error.
+
+    This timing impairment is independent of carrier local-oscillator error;
+    signal frequency and sample-rate metadata remain nominal.
+    """
 
     def __init__(
         self,

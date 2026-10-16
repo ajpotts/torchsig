@@ -77,9 +77,29 @@ __all__ = [
 ]
 
 
-def _preserve_sampling_clock_output(data: np.ndarray, length: int) -> np.ndarray:
-    """Center-crop or zero-pad sampling-clock output to complex64 ``length``."""
+def _preserve_sampling_clock_output(
+    data: np.ndarray,
+    length: int,
+    start_position: float | None = None,
+) -> np.ndarray:
+    """Align sampling-clock output and return complex64 ``length`` samples."""
     output = np.asarray(data, dtype=TorchSigComplexDataType)
+    if start_position is not None:
+        if len(output) == 0:
+            return np.zeros(length, dtype=TorchSigComplexDataType)
+        positions = start_position + np.arange(length, dtype=np.float64)
+        lower = np.floor(positions).astype(np.int64)
+        fraction = positions - lower
+        aligned = np.zeros(length, dtype=TorchSigComplexDataType)
+        aligned[positions < 0.0] = output[0]
+        aligned[positions > len(output) - 1] = output[-1]
+        exact = (fraction == 0.0) & (lower >= 0) & (lower < len(output))
+        aligned[exact] = output[lower[exact]]
+        interpolated = (fraction != 0.0) & (lower >= 0) & (lower + 1 < len(output))
+        first = output[lower[interpolated]]
+        aligned[interpolated] = first + fraction[interpolated] * (output[lower[interpolated] + 1] - first)
+        return aligned
+
     length_delta = len(output) - length
 
     if length_delta > 0:
@@ -89,7 +109,7 @@ def _preserve_sampling_clock_output(data: np.ndarray, length: int) -> np.ndarray
         pad_count = -length_delta
         pad_front = (pad_count + 1) // 2
         pad_back = pad_count // 2
-        output = np.pad(output, (pad_front, pad_back))
+        output = np.pad(output, (pad_front, pad_back), mode="edge") if len(output) else np.zeros(length, dtype=TorchSigComplexDataType)
 
     return output.astype(TorchSigComplexDataType, copy=False)
 
@@ -243,12 +263,15 @@ def clock_drift(
     rng: np.random.Generator | None = None,
     initial_phase: float = 0.0,
 ) -> np.ndarray:
-    """Clock drift from a Local Oscillator (LO), modeled as accumulated gaussian random noise impacting the
-    sampling rate.
+    """Apply sampling-clock rate offset and accumulated period drift.
 
-    The drift applies a randomness to the sampling rate, and by accumulating the gaussian RV
-    over time it will slightly increase or decrease the sampling rate of the data, and thereby changing the
-    number of samples by a very small number.
+    The interpolation filter supports signals with full two-sided occupied
+    bandwidth up to approximately 0.7 times the sample rate (edges at ±0.35).
+
+    Positive ``drift_ppm`` advances the input sampling position faster and
+    raises the apparent normalized frequency of a tone. This models ADC sample
+    timing independently of carrier local-oscillator error. Signal metadata
+    remains nominal after the transform.
 
     Args:
         data: Complex valued IQ data samples.
@@ -258,7 +281,7 @@ def clock_drift(
             in the half-open interval ``[0, 1)``. Defaults to 0.
 
     Returns:
-        Data with LO drift applied.
+        Data with sampling-clock drift applied.
     """
     rng = rng or np.random.default_rng()
 
@@ -267,7 +290,7 @@ def clock_drift(
 
     # define up/down rates
     uprate = 5000
-    downrate = copy(uprate)
+    downrate = uprate
 
     # build the prototype filter
     pfb_prototype_filter = prototype_polyphase_filter(num_branches=uprate)
@@ -287,7 +310,8 @@ def clock_drift(
         initial_phase=initial_phase,
     )
 
-    return _preserve_sampling_clock_output(data_with_drift, len(data))
+    filter_delay = (len(pfb_prototype_filter) - 1) / (2 * uprate)
+    return _preserve_sampling_clock_output(data_with_drift, len(data), start_position=filter_delay)
 
 
 def clock_jitter(
@@ -296,12 +320,13 @@ def clock_jitter(
     rng: np.random.Generator | None = None,
     initial_phase: float = 0.0,
 ) -> np.ndarray:
-    """Clock jitter from a Local Oscillator (LO), modeled as gaussian random noise impacting the
-    sampling phase.
+    """Apply Gaussian sampling-clock timing jitter.
 
-    The jitter applies a randomness to the sampling phase, applying a slight
-    increment or decrement to the sampling phase and therefore potentially changing the number of
-    samples by a very small number.
+    The interpolation filter supports signals with full two-sided occupied
+    bandwidth up to approximately 0.7 times the sample rate (edges at ±0.35).
+
+    This models ADC sample timing independently of carrier local-oscillator
+    error. Signal metadata remains nominal after the transform.
 
     Args:
         data: Complex valued IQ data samples.
@@ -311,7 +336,7 @@ def clock_jitter(
             in the half-open interval ``[0, 1)``. Defaults to 0.
 
     Returns:
-        Data with LO drift applied.
+        Data with sampling-clock jitter applied.
     """
     rng = rng or np.random.default_rng()
 
@@ -320,7 +345,7 @@ def clock_jitter(
 
     # define up/down rates
     uprate = 5000
-    downrate = copy(uprate)
+    downrate = uprate
 
     # build the prototype filter
     pfb_prototype_filter = prototype_polyphase_filter(num_branches=uprate)
@@ -340,7 +365,8 @@ def clock_jitter(
         initial_phase=initial_phase,
     )
 
-    return _preserve_sampling_clock_output(data_with_jitter, len(data))
+    filter_delay = (len(pfb_prototype_filter) - 1) / (2 * uprate)
+    return _preserve_sampling_clock_output(data_with_jitter, len(data), start_position=filter_delay)
 
 
 def cochannel_interference(
