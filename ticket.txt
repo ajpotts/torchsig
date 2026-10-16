@@ -1,0 +1,152 @@
+# Add configurable sampling-clock drift models
+
+## Summary
+
+Extend TorchSIG's sampling-clock impairment implementation to support three drift models: **constant frequency offset, linear frequency drift, and random-walk frequency drift**.
+
+The existing implementation combines a deterministic sampling-period offset with stochastic random-walk frequency drift, both controlled by `drift_ppm`. Separate these effects, introduce physically meaningful parameters, and make constant frequency offset the default.
+
+This work follows the sampling-clock refactor and jitter-model MR.
+
+## Current behavior
+
+In `generate_sampling_positions()`, drift is implemented as:
+
+```python
+nominal_increment = drate * (1.0 + drift_ppm * 1e-6)
+drift_std = drift_ppm * 1e-6
+
+drift_error = np.zeros(count, dtype=np.float64)
+if count > 1 and drift_std:
+    drift_error[1:] = np.cumsum(
+        np.cumsum(drift_innovations)
+    )[:-1]
+```
+
+The implementation has several limitations:
+
+- `drift_ppm` simultaneously controls deterministic frequency offset and stochastic frequency wander.
+- Stochastic drift innovations are not scaled by `drate`, making their relative magnitude dependent on the resampling ratio.
+- Negative drift values are permitted by validation but produce invalid Gaussian standard deviations.
+- Users cannot select a deterministic-only drift model.
+- Stochastic drift strength is defined per output sample rather than in physical time units, so its behavior depends on the sampling rate.
+
+The double cumulative sum itself correctly implements integrated random-walk frequency noise and should be preserved for that model.
+
+## Proposed drift models
+
+### 1. Constant frequency offset (`constant`) — default
+
+Model a fixed fractional sampling-period error:
+
+\[
+y_n=\delta
+\]
+
+\[
+p_n=p_0+nD(1+\delta)
+\]
+
+where \(D\) is the nominal polyphase-position increment and \(\delta\) is the signed period offset in fractional units.
+
+This models a sampling clock that consistently runs faster or slower than nominal.
+
+### 2. Linear frequency drift (`linear`)
+
+Model a sampling-period error that changes linearly with elapsed time:
+
+\[
+y(t)=\delta+\beta t
+\]
+
+The sampling positions accumulate the changing period error.
+
+This approximates gradual oscillator frequency changes due to temperature or aging.
+
+Specify the drift rate in physical units, such as ppm/second, rather than ppm/output sample.
+
+### 3. Random-walk frequency drift (`random_walk`)
+
+Model stochastic changes in fractional sampling-period error:
+
+\[
+y_{n+1}=y_n+\eta_n
+\]
+
+\[
+p_{n+1}=p_n+D(1+y_n)
+\]
+
+where \(\eta_n\) is a zero-mean Gaussian innovation.
+
+The resulting timing error is an integrated random walk, consistent with the stochastic process in the existing implementation.
+
+Specify the innovation strength using a documented physical-time convention, with variance scaled appropriately for the output sampling interval.
+
+## Proposed API
+
+Extend `generate_sampling_positions()` and `sampling_clock_impairments()` with parameters along these lines:
+
+```python
+drift_model: str = "constant"
+drift_ppm: float = 0.0
+drift_rate_ppm_per_sec: float = 0.0
+drift_noise_ppm_per_sqrt_sec: float = 0.0
+```
+
+Parameter definitions:
+
+- `drift_model`: Selects `constant`, `linear`, or `random_walk`.
+- `drift_ppm`: Signed initial sampling-period offset, in ppm.
+- `drift_rate_ppm_per_sec`: Deterministic change in period offset per second.
+- `drift_noise_ppm_per_sqrt_sec`: Random-walk frequency-error innovation strength.
+
+The final API should allow a constant offset to coexist with linear or stochastic drift.
+
+Retain the existing `jitter_model` options (`independent`, `period`, `ar1`) independently of the selected drift model.
+
+## Implementation requirements
+
+- Separate deterministic clock offset from stochastic drift.
+- Use a consistent coordinate system and convert fractional period errors into polyphase-position units using the nominal sampling increment.
+- Use elapsed physical time when calculating linear drift and random-walk innovation variance.
+- Define and document whether ppm parameters refer to sampling-period error or sampling-frequency error, including the sign convention.
+- Preserve correct alignment of nominal and impaired positions, including boundary filtering and `nominal_indices`.
+- Preserve seeded reproducibility and avoid unnecessary RNG draws when stochastic drift is disabled.
+- Review backward compatibility with existing `drift_ppm` usage and document any behavioral changes.
+- Update relevant transform/configuration interfaces so users can select drift models without modifying DSP internals.
+
+## Testing
+
+Add deterministic and statistical tests covering:
+
+- Zero drift produces nominal sampling positions.
+- Constant drift produces the expected linear timing displacement.
+- Positive and negative constant offsets behave correctly.
+- Linear drift produces the expected quadratic timing displacement under the documented discrete-time convention.
+- Random-walk frequency innovations have the expected variance.
+- Integrated random-walk timing-error variance grows asymptotically as \(n^3\).
+- Stochastic drift scaling is consistent across different sampling rates and resampling ratios.
+- Jitter and drift can be enabled independently or simultaneously.
+- Seeded RNG behavior is reproducible.
+- Large drift values and out-of-bounds positions are handled safely.
+
+Add diagnostic plots comparing sampling-position errors, frequency/period-error trajectories, autocorrelation, and cumulative mean-squared timing error for all three models.
+
+## Acceptance criteria
+
+- [ ] All three drift models are implemented and selectable.
+- [ ] Constant frequency offset is the default drift model.
+- [ ] Deterministic offset and stochastic drift strength are independently configurable.
+- [ ] Drift parameters have documented physical units and sign conventions.
+- [ ] Random-walk drift retains the mathematically correct integrated-random-walk behavior.
+- [ ] Drift behavior is consistent across resampling ratios and physical sampling rates.
+- [ ] Existing jitter models continue to work with each drift model.
+- [ ] Unit and statistical tests pass.
+- [ ] Documentation and configuration examples are updated.
+- [ ] Backward compatibility and any changes to seeded outputs are documented.
+
+## Out of scope
+
+AR(1) frequency drift, flicker frequency noise, and detailed oscillator phase-noise models are deferred to future work.
+
