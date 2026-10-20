@@ -262,8 +262,12 @@ def clock_drift(
     drift_ppm: float = 10,
     rng: np.random.Generator | None = None,
     initial_phase: float = 0.0,
+    drift_model: str = "constant",
+    drift_rate_ppm_per_sec: float = 0.0,
+    drift_noise_ppm_per_sqrt_sec: float = 0.0,
+    sample_rate_hz: float = 1.0,
 ) -> np.ndarray:
-    """Apply sampling-clock rate offset and accumulated period drift.
+    """Apply a configurable sampling-clock period-error model.
 
     The interpolation filter supports signals with full two-sided occupied
     bandwidth up to approximately 0.7 times the sample rate (edges at ±0.35).
@@ -275,10 +279,16 @@ def clock_drift(
 
     Args:
         data: Complex valued IQ data samples.
-        drift_ppm: Clock drift in parts per million (ppm). Default 10.
+        drift_ppm: Signed initial sampling-period error in ppm. Positive values
+            advance input positions faster. Defaults to 10.
         rng: Random number generator. Defaults to np.random.default_rng(seed=None).
         initial_phase: Initial sampling phase in input-sample periods. Must be
             in the half-open interval ``[0, 1)``. Defaults to 0.
+        drift_model: ``"constant"``, ``"linear"``, or ``"random_walk"``.
+        drift_rate_ppm_per_sec: Linear period-error change in ppm/second.
+        drift_noise_ppm_per_sqrt_sec: Random-walk innovation strength in
+            ppm/sqrt(second).
+        sample_rate_hz: Physical sample rate used to scale elapsed time.
 
     Returns:
         Data with sampling-clock drift applied.
@@ -308,6 +318,10 @@ def clock_drift(
         drift_ppm=drift_ppm,
         rng=rng,
         initial_phase=initial_phase,
+        drift_model=drift_model,
+        drift_rate_ppm_per_sec=drift_rate_ppm_per_sec,
+        drift_noise_ppm_per_sqrt_sec=drift_noise_ppm_per_sqrt_sec,
+        sample_rate_hz=sample_rate_hz,
     )
 
     filter_delay = (len(pfb_prototype_filter) - 1) / (2 * uprate)
@@ -783,7 +797,9 @@ def iq_imbalance(
 
     Args:
         data: IQ data.
-        amplitude_imbalance: IQ amplitude imbalance in dB.
+        amplitude_imbalance: Relative voltage imbalance between the I and Q
+            channels in dB. Positive values amplify I relative to Q; negative
+            values amplify Q relative to I.
         phase_imbalance: IQ phase imbalance in radians [-pi, pi].
         dc_offset_db: Relative power of additive DC offset in dB.
         dc_offset_phase_rads: Phase of additive DC offset in radians.
@@ -792,8 +808,12 @@ def iq_imbalance(
     Returns:
         IQ data with IQ Imbalance applied.
     """
-    # amplitude imbalance
-    data = 10 ** (amplitude_imbalance / 10.0) * np.real(data) + 1j * 10 ** (amplitude_imbalance / 10.0) * np.imag(data)
+    # Split the requested voltage imbalance symmetrically between I and Q so
+    # their relative gain is exactly ``amplitude_imbalance`` dB without adding
+    # an unnecessary common gain to both channels.
+    i_gain = 10 ** (amplitude_imbalance / 40.0)
+    q_gain = 10 ** (-amplitude_imbalance / 40.0)
+    data = i_gain * np.real(data) + 1j * q_gain * np.imag(data)
 
     # phase imbalance
     data = np.exp(-1j * phase_imbalance / 2.0) * np.real(data) + np.exp(1j * (np.pi / 2.0 + phase_imbalance / 2.0)) * np.imag(data)

@@ -917,14 +917,20 @@ def generate_sampling_positions(
     initial_phase: float = 0.0,
     jitter_model: str = "independent",
     jitter_alpha: float = 0.9,
+    drift_model: str = "constant",
+    drift_rate_ppm_per_sec: float = 0.0,
+    drift_noise_ppm_per_sqrt_sec: float = 0.0,
+    sample_rate_hz: float = 1.0,
 ) -> SamplingPositions:
     """Generate nominal and impaired polyphase sampling positions.
 
     Independent and AR(1) jitter are absolute timing errors; period jitter is
-    accumulated from independent sampling-period errors. Drift retains the
-    historical TorchSIG model: ``drift_ppm`` changes the nominal period and is
-    also the standard deviation of a Gaussian period-error random walk. The
-    accumulated random walk is integrated into absolute timing error.
+    accumulated from independent sampling-period errors. Drift ppm values are
+    fractional *sampling-period* errors: positive values advance input
+    positions faster (a slower sampling clock). ``drift_ppm`` is the signed
+    initial error. Linear drift is measured in ppm/second and random-walk
+    innovations in ppm/sqrt(second), using one output-sample period as the
+    physical-time step.
 
     Positions outside the padded-input bounds are omitted, while
     ``nominal_indices`` records which nominal outputs remain.
@@ -941,6 +947,14 @@ def generate_sampling_positions(
         raise ValueError("jitter_ppm must be finite and nonnegative")
     if not np.isfinite(drift_ppm):
         raise ValueError("drift_ppm must be finite")
+    if drift_model not in {"constant", "linear", "random_walk"}:
+        raise ValueError("drift_model must be 'constant', 'linear', or 'random_walk'")
+    if not np.isfinite(drift_rate_ppm_per_sec):
+        raise ValueError("drift_rate_ppm_per_sec must be finite")
+    if not np.isfinite(drift_noise_ppm_per_sqrt_sec) or drift_noise_ppm_per_sqrt_sec < 0.0:
+        raise ValueError("drift_noise_ppm_per_sqrt_sec must be finite and nonnegative")
+    if not np.isfinite(sample_rate_hz) or sample_rate_hz <= 0.0:
+        raise ValueError("sample_rate_hz must be finite and positive")
     if not np.isfinite(initial_phase) or not 0.0 <= initial_phase < 1.0:
         raise ValueError("initial_phase must be finite and in the interval [0, 1)")
     if jitter_model not in {"independent", "period", "ar1"}:
@@ -948,30 +962,30 @@ def generate_sampling_positions(
     if not np.isfinite(jitter_alpha) or abs(jitter_alpha) >= 1.0:
         raise ValueError("jitter_alpha must be finite and have absolute value less than 1")
 
-    nominal_increment = drate * (1.0 + drift_ppm * 1e-6)
-    if not np.isfinite(nominal_increment) or nominal_increment <= 0.0:
+    if 1.0 + drift_ppm * 1e-6 <= 0.0:
         raise ValueError("drift_ppm produces a nonfinite or nonpositive sampling-position increment")
 
     padded_len = num_input_samples + 2 * taps_per_phase - 1
     max_input_idx = padded_len - taps_per_phase
     max_position = max_input_idx * uprate + (uprate - 1)
     first_position = uprate / drate + initial_phase * uprate
-    count = 0 if first_position > max_position else int(np.floor((max_position - first_position) / nominal_increment)) + 1
+    count_increment = drate * (1.0 + drift_ppm * 1e-6) if drift_model == "constant" else drate
+    count = 0 if first_position > max_position else int(np.floor((max_position - first_position) / count_increment)) + 1
     if count > _MAX_SAMPLING_CLOCK_OUTPUT_SAMPLES:
         raise RuntimeError("sampling clock output capacity exhausted")
 
-    nominal_all = first_position + np.arange(count, dtype=np.float64) * nominal_increment
+    nominal_all = first_position + np.arange(count, dtype=np.float64) * drate
     generator = np.random.default_rng() if rng is None else rng
     # Jitter is specified in input-sample periods and converted to the
     # polyphase units used by the interpolator.
     jitter_std = jitter_ppm * 1e-6 * uprate
-    drift_std = drift_ppm * 1e-6
-    if jitter_std == 0.0 and drift_std == 0.0:
+    drift_std = drift_noise_ppm_per_sqrt_sec * 1e-6 / np.sqrt(sample_rate_hz)
+    stochastic_drift = drift_model == "random_walk" and drift_std != 0.0
+    if jitter_std == 0.0 and not stochastic_drift:
         jitter_innovations = np.zeros(count, dtype=np.float64)
         drift_innovations = np.zeros(count, dtype=np.float64)
     elif isinstance(generator, np.random.Generator):
-        if drift_std:
-            # Interleaving preserves the historical jitter/drift RNG order.
+        if stochastic_drift:
             innovations = generator.normal(0.0, 1.0, (count, 2))
             jitter_innovations = innovations[:, 0] * jitter_std
             drift_innovations = innovations[:, 1] * drift_std
@@ -984,7 +998,7 @@ def generate_sampling_positions(
         drift_innovations = np.empty(count, dtype=np.float64)
         for idx in range(count):
             jitter_innovations[idx] = generator.normal(0.0, jitter_std)
-            drift_innovations[idx] = generator.normal(0.0, drift_std) if drift_std else 0.0
+            drift_innovations[idx] = generator.normal(0.0, drift_std) if stochastic_drift else 0.0
 
     if jitter_model == "independent":
         jitter_error = jitter_innovations
@@ -998,9 +1012,16 @@ def generate_sampling_positions(
         for idx in range(1, count):
             jitter_error[idx] = jitter_alpha * jitter_error[idx - 1] + innovation_scale * jitter_innovations[idx]
 
+    elapsed_steps = np.arange(count, dtype=np.float64)
+    period_error = np.full(count, drift_ppm * 1e-6, dtype=np.float64)
+    if drift_model == "linear":
+        period_error += drift_rate_ppm_per_sec * 1e-6 * elapsed_steps / sample_rate_hz
+    elif drift_model == "random_walk" and count > 1:
+        period_error[1:] += np.cumsum(drift_innovations[:-1])
+
     drift_error = np.zeros(count, dtype=np.float64)
-    if count > 1 and drift_std:
-        drift_error[1:] = np.cumsum(np.cumsum(drift_innovations))[:-1]
+    if count > 1:
+        drift_error[1:] = drate * np.cumsum(period_error[:-1])
     actual_all = nominal_all + jitter_error + drift_error
 
     valid = (actual_all >= 0.0) & (actual_all <= max_position)
@@ -1023,6 +1044,10 @@ def sampling_clock_impairments(  # noqa: PLR0917
     initial_phase: float = 0.0,
     jitter_model: str = "independent",
     jitter_alpha: float = 0.9,
+    drift_model: str = "constant",
+    drift_rate_ppm_per_sec: float = 0.0,
+    drift_noise_ppm_per_sqrt_sec: float = 0.0,
+    sample_rate_hz: float = 1.0,
 ) -> np.ndarray:
     """Apply sampling-clock jitter and drift using polyphase filtering.
 
@@ -1035,7 +1060,7 @@ def sampling_clock_impairments(  # noqa: PLR0917
         uprate: Upsampling factor (positive integer).
         drate: Downsampling factor (positive float).
         jitter_ppm: Jitter in parts per million.
-        drift_ppm: Drift in parts per million.
+        drift_ppm: Signed initial sampling-period error in parts per million.
         rng: Random number generator. Defaults to
             ``np.random.default_rng()``.
         initial_phase: Initial sampling phase in input-sample periods.
@@ -1043,6 +1068,11 @@ def sampling_clock_impairments(  # noqa: PLR0917
         jitter_model: Jitter process: ``"independent"``, ``"period"``, or
             ``"ar1"``. Defaults to independent absolute timing jitter.
         jitter_alpha: AR(1) coefficient, with absolute value less than one.
+        drift_model: ``"constant"``, ``"linear"``, or ``"random_walk"``.
+        drift_rate_ppm_per_sec: Linear period-error change in ppm/second.
+        drift_noise_ppm_per_sqrt_sec: Random-walk period-error innovation
+            strength in ppm/sqrt(second).
+        sample_rate_hz: Physical output sampling rate used for drift time scaling.
 
     Returns:
         Output signal with clock impairments.
@@ -1061,6 +1091,10 @@ def sampling_clock_impairments(  # noqa: PLR0917
         initial_phase=initial_phase,
         jitter_model=jitter_model,
         jitter_alpha=jitter_alpha,
+        drift_model=drift_model,
+        drift_rate_ppm_per_sec=drift_rate_ppm_per_sec,
+        drift_noise_ppm_per_sqrt_sec=drift_noise_ppm_per_sqrt_sec,
+        sample_rate_hz=sample_rate_hz,
     )
 
     return polyphase_resample_at_positions(
