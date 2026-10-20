@@ -50,7 +50,34 @@ __all__ = [
     "Spurs",
     "TimeReversal",
     "TimeVaryingNoise",
+    "reconstruct_spectrogram_support_vectors",
 ]
+
+
+def reconstruct_spectrogram_support_vectors(
+    signal: Signal,
+) -> tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]:
+    """Reconstruct the frequency and time coordinates for a spectrogram.
+
+    Args:
+        signal: A two-dimensional spectrogram signal containing the compact
+            support-vector metadata written by :class:`Spectrogram`.
+
+    Returns:
+        A tuple containing the frequency and time coordinate arrays,
+        respectively.
+
+    Raises:
+        ValueError: If ``signal.data`` is not a two-dimensional spectrogram.
+    """
+    expected_num_dimensions = 2
+    if signal.data.ndim != expected_num_dimensions:
+        raise ValueError(f"spectrogram data must be two dimensional, got shape {signal.data.shape}.")
+
+    num_frequency_bins, num_time_bins = signal.data.shape
+    frequency = signal.spectrogram_frequency_start + np.arange(num_frequency_bins) * signal.spectrogram_frequency_step
+    time = signal.spectrogram_time_start + np.arange(num_time_bins) * signal.spectrogram_time_step
+    return frequency.astype(TorchSigRealDataType), time.astype(TorchSigRealDataType)
 
 
 def transform_crash_logger(transform_func, data, **kwargs):
@@ -1875,10 +1902,11 @@ class Spectrogram(SignalTransform):
 
     This transform computes the spectrogram by applying the Short-Time Fourier Transform (STFT)
     to the input IQ data. The output array has shape ``(frequency, time)``.
-    ``spectrogram_frequency`` stores the descending baseband-frequency support
-    and ``spectrogram_time`` stores the time-bin centers. Coordinates use hertz
-    and seconds when a sample rate is available, otherwise cycles per sample
-    and samples.
+    Compact origin-and-step metadata describes the descending baseband-frequency
+    support and time-bin centers. Use
+    :func:`reconstruct_spectrogram_support_vectors` to materialize their arrays.
+    Coordinates use hertz and seconds when a sample rate is available,
+    otherwise cycles per sample and samples.
 
     Attributes:
         fft_size: The FFT size (number of bins) in the spectrogram.
@@ -1929,19 +1957,24 @@ class Spectrogram(SignalTransform):
             self.fft_size,
             self.fft_stride,
         )
-        num_time_bins = signal.data.shape[1]
-        time_support = np.arange(num_time_bins) * self.fft_stride + self.fft_size / 2
-        frequency_spacing = 1.0
         if sample_rate is None:
+            time_start = self.fft_size / 2
+            time_step = self.fft_stride
+            frequency_start = 0.5 - 1 / self.fft_size
+            frequency_step = -1 / self.fft_size
             time_units = "samples"
             frequency_units = "cycles/sample"
         else:
-            time_support = time_support / sample_rate
-            frequency_spacing = 1 / sample_rate
+            time_start = self.fft_size / (2 * sample_rate)
+            time_step = self.fft_stride / sample_rate
+            frequency_start = sample_rate / 2 - sample_rate / self.fft_size
+            frequency_step = -sample_rate / self.fft_size
             time_units = "seconds"
             frequency_units = "Hz"
-        signal["spectrogram_time"] = time_support.astype(TorchSigRealDataType)
-        signal["spectrogram_frequency"] = np.flip(np.fft.fftshift(np.fft.fftfreq(self.fft_size, d=frequency_spacing))).astype(TorchSigRealDataType)
+        signal["spectrogram_time_start"] = time_start
+        signal["spectrogram_time_step"] = time_step
+        signal["spectrogram_frequency_start"] = frequency_start
+        signal["spectrogram_frequency_step"] = frequency_step
         signal["spectrogram_time_units"] = time_units
         signal["spectrogram_frequency_units"] = frequency_units
 

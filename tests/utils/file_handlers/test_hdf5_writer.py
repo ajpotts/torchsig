@@ -4,7 +4,7 @@ import h5py
 import numpy as np
 
 from torchsig.signals.signal_types import Signal
-from torchsig.transforms.transforms import Spectrogram
+from torchsig.transforms.transforms import Spectrogram, reconstruct_spectrogram_support_vectors
 from torchsig.utils.abstractions import HierarchicalMetadataObject
 from torchsig.utils.file_handlers.hdf5 import HDF5Writer
 
@@ -76,16 +76,21 @@ def test_standard_hdf5_writer_refreshes_parent_keys_between_sessions(tmp_path) -
     assert vars(parent)["_hdf5_key"] != vars(second_signal)["_hdf5_key"]
 
 
-def test_standard_hdf5_writer_persists_spectrogram_support_vectors(tmp_path) -> None:
-    """Physical spectrogram axes must survive an HDF5 round trip."""
+def test_standard_hdf5_writer_persists_compact_spectrogram_support(tmp_path) -> None:
+    """Spectrogram support must be stored as scalar affine coordinates."""
     signal = Spectrogram(fft_size=4, fft_stride=2)(Signal(data=np.ones(16, dtype=np.complex64), sample_rate=8.0))
+    frequency, time = reconstruct_spectrogram_support_vectors(signal)
 
     with HDF5Writer(tmp_path, max_batches_in_memory=1) as writer:
         writer.write(0, [signal])
 
     with h5py.File(tmp_path / "data.h5", "r") as handle:
         metadata = handle["metadata"]["0"]
-        np.testing.assert_array_equal(metadata["spectrogram_frequency"][()], signal.spectrogram_frequency)
-        np.testing.assert_array_equal(metadata["spectrogram_time"][()], signal.spectrogram_time)
+        assert "spectrogram_frequency" not in metadata
+        assert "spectrogram_time" not in metadata
+        assert metadata["spectrogram_frequency_start"][()] == frequency[0]
+        assert metadata["spectrogram_frequency_step"][()] == frequency[1] - frequency[0]
+        assert metadata["spectrogram_time_start"][()] == time[0]
+        assert metadata["spectrogram_time_step"][()] == time[1] - time[0]
         assert metadata["spectrogram_frequency_units"].asstr()[()] == "Hz"
         assert metadata["spectrogram_time_units"].asstr()[()] == "seconds"
