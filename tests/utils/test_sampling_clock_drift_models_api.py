@@ -32,6 +32,21 @@ def test_clock_drift_functional_propagates_model(monkeypatch, drift_model: str) 
     assert captured["sample_rate_hz"] == 4.0
 
 
+def test_clock_drift_functional_uses_constant_defaults(monkeypatch) -> None:
+    captured = {}
+
+    def fake_sampling_clock_impairments(**kwargs):
+        captured.update(kwargs)
+        return kwargs["x"]
+
+    monkeypatch.setattr(F, "_sampling_clock_impairments", fake_sampling_clock_impairments)
+    F.clock_drift(np.ones(8, dtype=np.complex64))
+    assert captured["drift_model"] == "constant"
+    assert captured["drift_rate_ppm_per_sec"] == 0.0
+    assert captured["drift_noise_ppm_per_sqrt_sec"] == 0.0
+    assert captured["sample_rate_hz"] == 1.0
+
+
 def test_clock_drift_transform_propagates_model(monkeypatch) -> None:
     captured = {}
 
@@ -51,6 +66,14 @@ def test_clock_drift_transform_propagates_model(monkeypatch) -> None:
     assert captured["drift_model"] == "random_walk"
     assert captured["drift_noise_ppm_per_sqrt_sec"] == 3.0
     assert captured["sample_rate_hz"] == 4.0
+
+
+def test_clock_drift_transform_uses_constant_defaults() -> None:
+    transform = ClockDrift(drift_ppm=2.0, seed=7)
+    assert transform.drift_model == "constant"
+    assert transform.drift_rate_distribution() == 0.0
+    assert transform.drift_noise_distribution() == 0.0
+    assert transform.sample_rate_hz == 1.0
 
 
 @pytest.mark.parametrize(

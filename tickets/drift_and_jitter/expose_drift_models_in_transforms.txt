@@ -1,0 +1,67 @@
+Title: Expose configurable drift models through public clock transforms
+
+Summary
+
+The sampling-position generator supports constant, linear, and random-walk
+sampling-clock drift, but users of the public `clock_drift` functional and
+`ClockDrift` transform also need a supported way to select and configure those
+models.
+
+Proposed change
+
+Expose the drift model and its physical-time parameters through both public
+clock-drift interfaces and pass them unchanged to the sampling-clock engine.
+Preserve deterministic constant drift as the default.
+
+Public parameters
+
+- `drift_model`: `constant`, `linear`, or `random_walk`.
+- `drift_ppm`: signed initial sampling-period error in ppm.
+- `drift_rate_ppm_per_sec`: deterministic period-error rate for linear drift.
+- `drift_noise_ppm_per_sqrt_sec`: innovation strength for random-walk drift.
+- `sample_rate_hz`: physical sample rate used for time scaling.
+
+The class-based transform should accept either scalar values or two-value
+ranges for the initial offset, linear rate, and noise strength. Range draws
+must use the transform's seeded random generator.
+
+Validation
+
+- Reject unknown drift-model names.
+- Require finite initial offset and linear-rate values.
+- Require initial offsets greater than -1000000 ppm.
+- Require finite, nonnegative random-walk noise strength.
+- Require a finite, positive physical sample rate.
+- Continue validating initial sampling phase independently.
+
+Documentation
+
+- Describe each public parameter and its physical units.
+- State that ppm values represent sampling-period error.
+- Document that positive period error advances input positions faster.
+- State that constant drift is the default and that time-varying parameters
+  default to zero.
+
+Testing
+
+- Verify the functional API passes every model and parameter to the clock
+  engine.
+- Verify the functional API's default configuration is constant drift with
+  zero linear rate and zero random-walk noise.
+- Verify the transform draws configured scalar or range values and passes them
+  to the functional API.
+- Verify transform seeding remains reproducible.
+- Verify invalid model names and numeric values raise `ValueError`.
+- Run existing functional, transform, sampling-position, and Python/Numba
+  parity tests.
+
+Acceptance criteria
+
+- `clock_drift` and `ClockDrift` expose all three drift models with consistent
+  names and defaults.
+- All physical-time model parameters are available through both APIs.
+- `ClockDrift` supports seeded distributions for configurable numeric values.
+- Public docstrings document units, sign convention, and defaults.
+- Existing callers that omit the new arguments receive deterministic constant
+  drift.
+- Focused and regression tests pass.

@@ -660,7 +660,9 @@ class ClockDrift(SignalTransform):
         """Initialize the ClockDrift transform.
 
         Args:
-            drift_ppm: Drift in parts per million (ppm). Default (1,10).
+            drift_ppm: Signed initial sampling-period error in ppm, or a range
+                from which to draw it. Positive values advance input positions
+                faster. Defaults to (1, 10).
             initial_phase: Initial sampling phase in input-sample periods, or
                 a range from which to draw it. Values must be in the half-open
                 interval ``[0, 1)``. Defaults to 0.
