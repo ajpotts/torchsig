@@ -1,0 +1,101 @@
+Title: Add configurable sampling-clock drift models
+
+Summary
+
+The sampling-clock implementation currently couples a deterministic sampling-
+period offset and stochastic random-walk drift to the same `drift_ppm`
+parameter. This prevents users from selecting a deterministic-only clock
+offset, a linear clock trend, or independently configured stochastic drift.
+
+Add constant, linear, and random-walk sampling-clock drift models. Separate
+the initial period offset from deterministic drift rate and stochastic
+innovation strength, and scale time-varying behavior using physical time.
+
+Proposed change
+
+Extend sampling-position generation and the public clock-drift APIs with:
+
+- `drift_model`: `constant`, `linear`, or `random_walk`.
+- `drift_ppm`: signed initial sampling-period error in ppm.
+- `drift_rate_ppm_per_sec`: deterministic period-error change for the linear
+  model.
+- `drift_noise_ppm_per_sqrt_sec`: random-walk innovation strength.
+- `sample_rate_hz`: physical sample rate used to convert time-based parameters
+  to per-sample changes.
+
+Use constant drift as the default. Positive period error advances the input
+sampling position faster. Allow the initial constant offset to coexist with
+the linear and random-walk models.
+
+Implementation requirements
+
+- Generate constant drift as a fixed fractional sampling-period error,
+  producing linear accumulated timing displacement.
+- Generate linear drift from a period error that changes in ppm per second,
+  producing quadratic accumulated timing displacement.
+- Generate random-walk drift from independent Gaussian period-error
+  innovations specified in ppm per square-root second.
+- Convert all period errors into polyphase-position units using the nominal
+  sampling increment.
+- Pass model configuration consistently through `generate_sampling_positions`,
+  `sampling_clock_impairments`, the Numba wrapper, `clock_drift`, and
+  `ClockDrift`.
+- Preserve all independently configured jitter models.
+- Avoid random-number-generator draws when stochastic drift is disabled.
+- Validate model names, finite parameter values, nonnegative noise strength,
+  positive sample rate, and an initial period offset greater than -1000000 ppm.
+- Preserve complex NumPy dtypes and nominal-index alignment.
+
+Compatibility
+
+Previously, `drift_ppm` controlled both deterministic offset and random-walk
+noise. After this change it controls only the signed initial offset. Callers
+that require stochastic drift must select `random_walk` and set
+`drift_noise_ppm_per_sqrt_sec` explicitly. Seeded stochastic trajectories must
+remain reproducible under the new configuration.
+
+Testing
+
+- Verify zero drift reproduces nominal sampling positions.
+- Verify positive and negative constant offsets produce the expected linear
+  timing error.
+- Verify linear drift produces the expected discrete quadratic timing error.
+- Verify random-walk innovation variance matches its configured physical-time
+  scaling.
+- Verify integrated random-walk timing-error variance grows cubically with
+  sample index.
+- Verify behavior across sample rates and resampling ratios.
+- Verify deterministic models do not consume random draws.
+- Verify seeded random-walk runs are reproducible.
+- Verify Python and Numba-backed paths agree for all drift models.
+- Verify functional and class-based APIs propagate every model parameter.
+- Cover invalid models and invalid numeric parameters.
+
+Diagnostics and documentation
+
+- Document parameter units and the sampling-period sign convention in public
+  docstrings.
+- Provide an executable diagnostic script that plots constant, linear, and
+  random-walk trajectories.
+- Plot random-walk innovation and endpoint distributions and compare empirical
+  statistics with their theoretical values.
+- Include the compatibility change in the merge-request description.
+
+Acceptance criteria
+
+- All three drift models are selectable through both functional and transform
+  APIs.
+- Constant deterministic drift is the default.
+- Initial offset, linear rate, and stochastic innovation strength are
+  independently configurable.
+- Linear and random-walk parameters use documented physical-time units.
+- Random-walk drift implements an integrated frequency-error random walk.
+- Existing jitter models work independently and in combination with drift.
+- Python and accelerated paths produce equivalent outputs.
+- Deterministic, statistical, validation, and API tests pass.
+- The diagnostic script runs noninteractively and produces its expected plots.
+
+Out of scope
+
+AR(1) frequency drift, flicker-frequency noise, oscillator-specific phase-noise
+models, and metadata changes are deferred to future work.
