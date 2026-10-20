@@ -1,65 +1,52 @@
-# Expose configurable drift models through public clock transforms
+# Add statistical tests for sampling-clock jitter and drift models
 
 ## Summary
 
-- Expose `constant`, `linear`, and `random_walk` drift selection through
-  `clock_drift()` and `ClockDrift`.
-- Add public configuration for signed initial period offset, linear drift rate,
-  random-walk innovation strength, and physical sample rate.
-- Support seeded scalar or range draws for configurable `ClockDrift` numeric
-  parameters.
-- Validate model names, parameter bounds, finite values, and sample rate in the
-  class-based transform.
-- Preserve deterministic constant drift as the public default.
+- Add theory-based statistical unit tests for independent, period, and AR(1)
+  sampling-clock jitter.
+- Validate random-walk drift innovation variance, period-error variance, and
+  integrated timing-error variance across seeded ensembles.
+- Verify random-walk scaling at a fixed physical duration across sample rates.
+- Confirm constant and linear drift are deterministic across RNG seeds.
+- Use fixed seeds and uncertainty-based tolerances without adding dependencies.
 
-## Public API
+## Statistical coverage
 
-```python
-clock_drift(
-    data,
-    drift_ppm=10,
-    drift_model="constant",
-    drift_rate_ppm_per_sec=0.0,
-    drift_noise_ppm_per_sqrt_sec=0.0,
-    sample_rate_hz=1.0,
-)
-```
+The jitter tests verify:
 
-`ClockDrift` exposes the same options. Its offset, rate, and noise parameters
-may be fixed scalars or two-value ranges sampled reproducibly from the
-transform seed.
+- zero mean and configured variance for independent absolute jitter;
+- white, configured-variance increments for period jitter;
+- stationary variance and positive or negative lag-one correlation for AR(1)
+  jitter.
 
-The ppm values describe sampling-period error. Positive values advance input
-sampling positions faster. Linear rates use ppm/second, while random-walk
-innovation strength uses ppm/sqrt(second).
+The drift tests verify:
 
-## Compatibility
+- Gaussian random-walk innovation statistics;
+- linear growth of period-error variance;
+- the cubic integrated-random-walk timing-error variance law;
+- physical-time scaling across sample rates;
+- deterministic constant and linear trajectories.
 
-Callers that omit the new arguments use the `constant` model. Linear rate and
-random-walk noise both default to zero, so merely upgrading does not enable a
-new stochastic process.
+## Test design
+
+Tests call `generate_sampling_positions()` directly. Long seeded trajectories
+are used for stationary jitter estimates, while a moderate seeded ensemble is
+used for random-walk endpoint distributions. Variance tolerances are derived
+from the ensemble estimator's sampling uncertainty.
+
+No production code or dependencies are changed.
 
 ## Testing
 
-- Public functional pass-through for constant, linear, and random-walk models.
-- Functional and class-based default configuration.
-- Class-based parameter distribution and pass-through behavior.
-- Invalid model, offset, rate, noise, and sample-rate validation.
-- Sampling-position and Python/Numba parity regression coverage.
-
-Commands run:
-
 ```bash
-pytest -q tests/utils/test_sampling_clock_drift_models_api.py \
-  tests/transforms/test_functional.py tests/transforms/test_transforms.py
+pytest -q tests/utils/test_sampling_clock_model_statistics.py \
+  tests/utils/test_sampling_positions.py
 ```
 
-Result: 209 passed.
+Result: 27 passed.
 
 ```bash
-ruff check --ignore RUF100 torchsig/transforms/functional.py \
-  torchsig/transforms/transforms.py \
-  tests/utils/test_sampling_clock_drift_models_api.py
+ruff check tests/utils/test_sampling_clock_model_statistics.py
 ```
 
 Result: all checks passed. `git diff --check` also passed.

@@ -1,0 +1,55 @@
+Title: Add statistics-based unit tests for sampling-clock jitter and drift models
+
+Summary
+
+The configurable sampling-clock models need deterministic statistical tests
+that verify their stochastic-process definitions, not only API propagation and
+single-example behavior. Add theory-based tests for every jitter option and
+for random-walk drift, plus deterministic checks for constant and linear
+drift.
+
+Proposed change
+
+Add a focused test module that generates sampling positions directly and
+compares empirical moments and correlations with the documented mathematical
+models. Use fixed seeds, sufficiently large samples or ensembles, and
+tolerances derived from sampling uncertainty.
+
+Jitter coverage
+
+- Independent jitter has zero mean, configured variance, and negligible
+  lag-one correlation.
+- Period jitter increments have zero mean, configured variance, and negligible
+  lag-one correlation.
+- AR(1) jitter retains the configured stationary variance and matches positive
+  and negative configured lag-one correlation coefficients.
+
+Drift coverage
+
+- Constant and linear drift are deterministic across random-generator seeds.
+- Random-walk period-error innovations have zero mean and the configured
+  physical-time variance.
+- Random-walk period-error variance grows linearly with sample index.
+- Integrated random-walk timing-error variance follows the expected cubic
+  growth law.
+- Random-walk period-error statistics at a fixed physical duration are
+  consistent across sample rates.
+
+Test quality requirements
+
+- Use pytest and NumPy only; do not add dependencies.
+- Use fixed seeds and deterministic assertions.
+- Base tolerances on ensemble size or long-run estimator accuracy.
+- Keep the focused module fast enough for normal unit-test execution.
+- Avoid weakening existing assertions or replacing existing coverage.
+- Exercise the production `generate_sampling_positions` implementation.
+
+Acceptance criteria
+
+- Every jitter model has an explicit statistical unit test.
+- Random-walk drift innovation, period-error, and timing-error statistics are
+  validated against theory.
+- Constant and linear drift are confirmed to be non-stochastic.
+- Physical sample-rate scaling is covered.
+- The new focused test module passes repeatedly with fixed seeds.
+- Existing sampling-position tests continue to pass.
