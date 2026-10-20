@@ -641,7 +641,7 @@ class ChannelSwap(SignalTransform):
 
 
 class ClockDrift(SignalTransform):
-    """Apply ADC sampling-rate offset and accumulated period drift.
+    """Apply a selectable ADC sampling-period drift model.
 
     This timing impairment is independent of carrier local-oscillator error;
     signal frequency and sample-rate metadata remain nominal.
@@ -649,8 +649,12 @@ class ClockDrift(SignalTransform):
 
     def __init__(
         self,
-        drift_ppm: tuple[float, float] = (1, 10),
+        drift_ppm: float | tuple[float, float] = (1, 10),
         initial_phase: float | tuple[float, float] = 0.0,
+        drift_model: Literal["constant", "linear", "random_walk"] = "constant",
+        drift_rate_ppm_per_sec: float | tuple[float, float] = 0.0,
+        drift_noise_ppm_per_sqrt_sec: float | tuple[float, float] = 0.0,
+        sample_rate_hz: float = 1.0,
         **kwargs,
     ):
         """Initialize the ClockDrift transform.
@@ -660,6 +664,11 @@ class ClockDrift(SignalTransform):
             initial_phase: Initial sampling phase in input-sample periods, or
                 a range from which to draw it. Values must be in the half-open
                 interval ``[0, 1)``. Defaults to 0.
+            drift_model: ``"constant"``, ``"linear"``, or ``"random_walk"``.
+            drift_rate_ppm_per_sec: Linear period-error rate in ppm/second.
+            drift_noise_ppm_per_sqrt_sec: Random-walk innovation strength in
+                ppm/sqrt(second).
+            sample_rate_hz: Physical output sample rate used for drift scaling.
             **kwargs: Additional keyword arguments passed to the parent class.
         """
         super().__init__(required_metadata=[], data_dtype=TorchSigComplexDataType, **kwargs)
@@ -668,7 +677,31 @@ class ClockDrift(SignalTransform):
             raise ValueError("initial_phase must be finite and in the interval [0, 1)")
         self.drift_ppm = drift_ppm
         self.initial_phase = initial_phase
-        self.drift_ppm_distribution = self.get_distribution(self.drift_ppm, "log10")
+        if drift_model not in {"constant", "linear", "random_walk"}:
+            raise ValueError("drift_model must be 'constant', 'linear', or 'random_walk'")
+        if not np.isfinite(sample_rate_hz) or sample_rate_hz <= 0.0:
+            raise ValueError("sample_rate_hz must be finite and positive")
+        drift_values = np.asarray(drift_ppm, dtype=float)
+        rate_values = np.asarray(drift_rate_ppm_per_sec, dtype=float)
+        noise_values = np.asarray(drift_noise_ppm_per_sqrt_sec, dtype=float)
+        minimum_drift_ppm = -1_000_000.0
+        if np.any(~np.isfinite(drift_values)) or np.any(drift_values <= minimum_drift_ppm):
+            raise ValueError("drift_ppm must be finite and greater than -1000000")
+        if np.any(~np.isfinite(rate_values)):
+            raise ValueError("drift_rate_ppm_per_sec must be finite")
+        if np.any(~np.isfinite(noise_values)) or np.any(noise_values < 0.0):
+            raise ValueError("drift_noise_ppm_per_sqrt_sec must be finite and nonnegative")
+        self.drift_model = drift_model
+        self.drift_rate_ppm_per_sec = drift_rate_ppm_per_sec
+        self.drift_noise_ppm_per_sqrt_sec = drift_noise_ppm_per_sqrt_sec
+        self.sample_rate_hz = sample_rate_hz
+        drift_params = drift_ppm if isinstance(drift_ppm, tuple) else [drift_ppm]
+        drift_scaling = "log10" if isinstance(drift_ppm, tuple) and np.all(drift_values > 0.0) else "linear"
+        self.drift_ppm_distribution = self.get_distribution(drift_params, drift_scaling)
+        rate_params = drift_rate_ppm_per_sec if isinstance(drift_rate_ppm_per_sec, tuple) else [drift_rate_ppm_per_sec]
+        noise_params = drift_noise_ppm_per_sqrt_sec if isinstance(drift_noise_ppm_per_sqrt_sec, tuple) else [drift_noise_ppm_per_sqrt_sec]
+        self.drift_rate_distribution = self.get_distribution(rate_params)
+        self.drift_noise_distribution = self.get_distribution(noise_params)
         initial_phase_distribution_params = initial_phase if isinstance(initial_phase, tuple) else [initial_phase]
         self.initial_phase_distribution = self.get_distribution(initial_phase_distribution_params)
 
@@ -683,12 +716,18 @@ class ClockDrift(SignalTransform):
         """
         drift_ppm = self.drift_ppm_distribution()
         initial_phase = self.initial_phase_distribution()
+        drift_rate_ppm_per_sec = self.drift_rate_distribution()
+        drift_noise_ppm_per_sqrt_sec = self.drift_noise_distribution()
 
         signal.data = F.clock_drift(
             data=signal.data,
             drift_ppm=drift_ppm,
             rng=self.random_generator,
             initial_phase=initial_phase,
+            drift_model=self.drift_model,
+            drift_rate_ppm_per_sec=drift_rate_ppm_per_sec,
+            drift_noise_ppm_per_sqrt_sec=drift_noise_ppm_per_sqrt_sec,
+            sample_rate_hz=self.sample_rate_hz,
         )
 
         return signal

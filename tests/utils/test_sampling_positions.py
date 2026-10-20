@@ -48,6 +48,47 @@ def test_zero_impairments_and_input_sample_accessors() -> None:
     np.testing.assert_array_equal(positions.actual_input_samples, positions.actual / 4)
 
 
+@pytest.mark.parametrize("drift_ppm", [-250_000.0, 250_000.0])
+def test_constant_drift_has_linear_timing_error(drift_ppm: float) -> None:
+    positions = generate_sampling_positions(100, 1, 4, 2.0, 0.0, drift_ppm)
+    expected = positions.nominal_indices * 2.0 / 4.0 * drift_ppm * 1e-6
+    np.testing.assert_allclose(positions.timing_error, expected, atol=1e-14)
+
+
+def test_linear_drift_has_quadratic_timing_error() -> None:
+    positions = generate_sampling_positions(
+        100,
+        1,
+        4,
+        2.0,
+        0.0,
+        100.0,
+        drift_model="linear",
+        drift_rate_ppm_per_sec=20.0,
+        sample_rate_hz=10.0,
+    )
+    n = positions.nominal_indices.astype(np.float64)
+    expected = 2.0 / 4.0 * (100e-6 * n + 20e-6 / 10.0 * n * (n - 1.0) / 2.0)
+    np.testing.assert_allclose(positions.timing_error, expected, atol=1e-14)
+
+
+def test_random_walk_drift_is_reproducible() -> None:
+    kwargs = {
+        "num_input_samples": 1_000,
+        "taps_per_phase": 1,
+        "uprate": 8,
+        "drate": 8.0,
+        "jitter_ppm": 0.0,
+        "drift_ppm": 0.0,
+        "drift_model": "random_walk",
+        "drift_noise_ppm_per_sqrt_sec": 100.0,
+        "sample_rate_hz": 1_000.0,
+    }
+    first = generate_sampling_positions(rng=np.random.default_rng(91), **kwargs)
+    second = generate_sampling_positions(rng=np.random.default_rng(91), **kwargs)
+    np.testing.assert_array_equal(first.actual, second.actual)
+
+
 def test_positions_are_reproducible() -> None:
     first = _positions("ar1", seed=123)
     second = _positions("ar1", seed=123)
@@ -91,6 +132,10 @@ def test_python_numba_parity_for_all_jitter_models(model: str) -> None:
         ({"jitter_model": "unknown"}, "jitter_model"),
         ({"jitter_alpha": 1.0}, "jitter_alpha"),
         ({"jitter_alpha": -1.0}, "jitter_alpha"),
+        ({"drift_model": "unknown"}, "drift_model"),
+        ({"drift_rate_ppm_per_sec": np.nan}, "drift_rate"),
+        ({"drift_noise_ppm_per_sqrt_sec": -1.0}, "drift_noise"),
+        ({"sample_rate_hz": 0.0}, "sample_rate_hz"),
     ],
 )
 def test_jitter_model_validation(overrides, message: str) -> None:
