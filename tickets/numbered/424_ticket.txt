@@ -1,0 +1,42 @@
+Improve OFDM Windowing for Spectral Suppression and Signal Fidelity
+
+Summary
+The current OFDM windowing implementation restores the historical TorchSig 0.6.1 win_start behavior. This is intentional and should remain the scope of the existing MR.
+As a follow-up, investigate improvements to OFDM windowing that provide better out-of-band spectral suppression while preserving signal fidelity and compatibility with OFDM demodulation.
+Motivation
+The restored implementation appends a cyclic suffix, applies complementary halves of a Blackman window to the cyclic prefix and suffix, and overlap-adds adjacent symbols.
+Although this smooths symbol transitions, several aspects deserve further investigation:
+
+
+        
+      Overlap-add normalization: The two Blackman window halves do not sum to exactly one, potentially introducing amplitude variation in overlap regions.
+
+        
+      Spectral performance: The current regression tests validate waveform construction but do not quantify out-of-band emission reduction.
+
+        
+      Cyclic-prefix protection: Windowing modifies samples within the cyclic prefix, potentially reducing the effective guard interval available for multipath protection.
+
+        
+      Boundary handling: The first cyclic prefix is tapered while the final cyclic suffix is discarded, producing asymmetric treatment of the beginning and end of a generated waveform.
+
+Proposed Work
+
+
+        
+      Evaluate the existing Blackman windowing implementation against alternative window functions and overlap-add strategies, including windows satisfying the constant-overlap-add (COLA) condition.
+
+        
+      Quantify spectral leakage and adjacent-channel power for windowed and unwindowed OFDM signals.
+
+        
+      Evaluate amplitude continuity and power variation at symbol boundaries.
+
+        
+      Investigate the effect of windowing on OFDM demodulation performance, particularly under multipath conditions.
+
+        
+      Review initial and final symbol boundary handling.
+
+        
+      Determine whether window type and transition length should be configurable, while retaining the historical behavior as a compatibility option.

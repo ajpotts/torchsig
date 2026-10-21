@@ -1,0 +1,131 @@
+GroupingLabel.to_dict
+
+Summary
+Add public APIs to GroupingLabel for:
+
+
+        
+      Serializing the grouping configuration with to_dict().
+
+        
+      Retrieving the ordered list of configured group names.
+
+Motivation
+GroupingLabel can be constructed from built-in configurations, YAML files, and mappings, but downstream code currently needs to inspect internal structures such as:
+grouping.groups
+for common operations including:
+
+
+        
+      determining which groups are available;
+
+        
+      validating a requested group;
+
+        
+      populating CLI choices;
+
+        
+      iterating over configured groups;
+
+        
+      saving the grouping definition in experiment metadata;
+
+        
+      reconstructing the grouping later.
+
+For example, downstream code currently does:
+family_list = [ group["name"] for group in family_grouping.groups ]
+These use cases should not require knowledge of the internal representation of GroupingLabel.
+Proposed API
+group_list
+Expose the ordered group names directly:
+`grouping = GroupingLabel("family")
+grouping.group_list
+["ask", "fsk", "ofdm", "pam", "psk", "qam", ...]`
+The returned list should preserve the ordering used by GroupingLabel, since group order determines group indices.
+This allows downstream code to use:
+`if family not in grouping.group_list:
+...
+family_index = grouping.group_list.index(family)`
+without inspecting grouping.groups.
+to_dict()
+Add:
+grouping.to_dict()
+returning the complete grouping configuration as a plain Python dictionary.
+The returned mapping should use the same schema accepted by the mapping-based GroupingLabel constructor so that configurations can round-trip:
+`original = GroupingLabel("family")
+config = original.to_dict()
+restored = GroupingLabel(config)`
+For the same source value:
+original.match(value) == restored.match(value)
+should hold.
+Requirements
+group_list should:
+
+
+        
+      return group names in configured/index order;
+
+        
+      work for built-in, YAML-based, and mapping-based groupings;
+
+        
+      not require callers to inspect GroupingLabel.groups;
+
+        
+      not allow callers to mutate the internal grouping state.
+
+to_dict() should:
+
+
+        
+      return only standard Python data structures suitable for YAML/JSON serialization;
+
+        
+      preserve group ordering;
+
+        
+      preserve value ordering within groups;
+
+        
+      include the source metadata field;
+
+        
+      include configured output label names/indices;
+
+        
+      include all configured groups and values;
+
+        
+      return a defensive copy;
+
+        
+      use the same schema accepted by GroupingLabel when constructed from a mapping.
+
+Acceptance Criteria
+
+
+        
+      GroupingLabel exposes an ordered public group-name list.
+
+        
+      Group ordering agrees with the indices returned by match().
+
+        
+      GroupingLabel exposes to_dict().
+
+        
+      GroupingLabel(grouping.to_dict()) reconstructs an equivalent grouping.
+
+        
+      The serialized result is YAML- and JSON-serializable.
+
+        
+      Mutating returned data does not mutate the original GroupingLabel.
+
+        
+      Built-in, YAML-based, and mapping-based configurations are covered by tests.
+
+        
+      Tests verify group-list ordering and serialization round trips.

@@ -1,0 +1,54 @@
+
+Add public query API to GroupingLabel
+
+Summary
+Add a public API to GroupingLabel for querying configured group names and the values belonging to individual groups.
+Motivation
+Downstream applications currently need to inspect the internal groups representation directly to determine available groups or select the signal classes belonging to a group:
+`family_to_classes = {
+group["name"]: list(group["values"])
+for group in grouping.groups
+}
+family_names = [
+group["name"]
+for group in grouping.groups
+]`
+This couples callers to the internal representation of GroupingLabel and duplicates common lookup logic.
+A public query API would make GroupingLabel more useful for dataset construction, CLI validation, and grouped sampling.
+Proposed API
+For example:
+grouping.group_names grouping.values_for("ofdm") grouping.all_values
+Exact naming is open for discussion.
+Example usage:
+`grouping = GroupingLabel("family")
+print(grouping.group_names)
+classes = grouping.values_for("ofdm")
+dataset = TorchSigIterableDataset(
+signal_generators=classes,
+)`
+Acceptance Criteria
+
+
+        
+      Provide a public way to retrieve ordered group names.
+
+        
+      Provide a public way to retrieve the values belonging to a named group.
+
+        
+      Provide a public way to retrieve all values represented by the grouping.
+
+        
+      Preserve the configured group/value ordering where applicable.
+
+        
+      Unknown group names raise a clear error.
+
+        
+      Behavior works for built-in, YAML-based, and mapping-based grouping configurations.
+
+        
+      Callers do not need to inspect GroupingLabel.groups directly for common lookup operations.
+
+        
+      Add unit tests for built-in and custom groupings.

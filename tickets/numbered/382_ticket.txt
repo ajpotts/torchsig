@@ -1,0 +1,18 @@
+generate_dataset_from_config.py fails with num_workers > 0
+
+Description
+generate_dataset_from_config.py fails when dataset generation is run with num_workers > 0.
+The DataLoader workers encounter a serialization error when returning generated samples to the parent process:
+TypeError: cannot pickle 'mappingproxy' object
+The failure occurs with both the legacy and packed file writers, indicating that it is in the dataset/DataLoader multiprocessing path rather than the file writer implementation.
+Reproduction
+python scripts/generate_dataset_from_config.py \ --root /tmp/torchsig-test \ --config narrowband_clean_train_all.yaml \ --overwrite \ --batch-size 16 \ --num-workers 2 \ --file-writer legacy
+The equivalent generation succeeds with --num-workers 0.
+Expected behavior
+Dataset generation should support multiple DataLoader workers, or explicitly reject/disable num_workers > 0 if generated Signal objects cannot currently be safely serialized between worker processes.
+Observed behavior
+Worker processes fail while serializing generated data through the multiprocessing queue:
+TypeError: cannot pickle 'mappingproxy' object
+The main process then waits for worker output until interrupted.
+Notes
+Reproduced with both HDF5Writer and PackedHDF5Writer, so this does not appear to be specific to a storage backend.

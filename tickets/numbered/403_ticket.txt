@@ -1,0 +1,62 @@
+Add a CLI around TorchSigDataModule.from_config()
+
+Summary
+Provide a command-line interface for materializing static TorchSig datasets using the existing TorchSigDataModule.from_config() generation workflow.
+Motivation
+TorchSig already contains the high-level logic needed to create a dataset from TorchSigDatasetConfig, including metadata defaults, impairments, deterministic loading, static dataset creation, and file handlers.
+Downstream projects still need custom Python scripts primarily to expose this functionality from the command line.
+Proposed Change
+Add a thin CLI around the existing DataModule generation API.
+For example:
+torchsig-generate \ --config wideband.yaml \ --output datasets/train \ --dataset-length 100000
+The CLI should expose useful generation overrides such as:
+
+
+        
+      dataset length
+
+        
+      output directory
+
+        
+      batch size
+
+        
+      creation worker count
+
+        
+      file handler
+
+        
+      overwrite behavior
+
+        
+      signal generators
+
+        
+      sampling grouping
+
+CLI options should delegate to the existing DataModule implementation rather than introducing a separate generation pipeline.
+Acceptance Criteria
+
+
+        
+      A TorchSigDatasetConfig YAML can be materialized without writing a Python generation script.
+
+        
+      Uses TorchSigDataModule.from_config() or the common underlying generation implementation.
+
+        
+      Supports common dataset-generation overrides.
+
+        
+      Supports available static dataset writer backends.
+
+        
+      Supports signal-generator and grouping options once available in the DataModule.
+
+        
+      CLI options override configuration where applicable.
+
+        
+      Includes a small end-to-end smoke test.

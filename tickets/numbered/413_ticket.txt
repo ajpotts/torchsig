@@ -1,0 +1,70 @@
+
+Fix outdated function signatures in transform benchmarks
+
+Description
+Four benchmarks in benchmarks/benchmark_transforms_functional.py fail with TypeError because their positional arguments no longer match the corresponding transform function signatures.
+These failures occur during pytest-benchmark calibration and are reproducible in both the baseline and refactored runs. They are unrelated to the sampling-clock interpolation refactor.
+Failing benchmarks
+
+
+
+Benchmark
+Error
+
+
+
+
+test_benchmark_adjacent_channel_interference
+Function accepts 1 positional argument; benchmark passes 8
+
+
+test_benchmark_cochannel_interference
+Function accepts 1 positional argument; benchmark passes 6
+
+
+test_benchmark_iq_imbalance
+Function accepts 5 positional arguments; benchmark passes 6
+
+
+test_benchmark_time_varying_noise
+Function accepts 5 positional arguments; benchmark passes 6
+
+
+
+Proposed changes
+
+
+        
+      Inspect the current signatures of all four transform functions.
+
+        
+      Update the benchmark calls to use the current APIs, including any configuration objects or keyword arguments required.
+
+        
+      Preserve the original benchmark parameters and workload wherever possible.
+
+        
+      Verify that each benchmark measures the intended transform operation rather than only object construction or setup.
+
+        
+      Check the remaining transform benchmarks for other outdated API usage.
+
+Acceptance criteria
+
+
+        
+      All four previously failing benchmarks pass.
+
+        
+      Benchmarks use the current public transform APIs.
+
+        
+      Benchmark inputs and parameters remain representative of the original workloads.
+
+        
+      No production transform signatures are changed solely to accommodate outdated benchmarks.
+
+        
+      The full benchmark suite completes without failures.
+
+

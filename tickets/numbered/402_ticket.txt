@@ -1,0 +1,35 @@
+Support configurable metadata/grouping transforms in DataModules
+
+Summary
+Allow TorchSig DataModules to configure metadata transforms such as GroupingLabel in addition to automatically generated transforms such as YOLOLabel.
+Motivation
+TorchSigDataModule.from_config() currently constructs representation-specific transforms internally. For spectrogram output it can automatically add Spectrogram and YOLOLabel.
+Datasets that require additional derived metadata, such as:
+GroupingLabel("family")
+currently require downstream code to manually reconstruct the dataset-generation pipeline or pass runtime transform objects through application-specific code.
+A standard mechanism is needed for adding metadata transforms while preserving the existing DataModule workflow.
+Proposed Change
+Support configurable metadata transforms when constructing a DataModule.
+This should support use cases such as:
+class_name ↓ GroupingLabel ↓ family_name / family_index ↓ target labels
+The design should remain generic rather than adding family-specific behavior.
+Acceptance Criteria
+
+
+        
+      DataModules support additional metadata transforms during dataset generation.
+
+        
+      GroupingLabel can be used to generate family_name / family_index.
+
+        
+      Custom grouping configurations are supported.
+
+        
+      Generated metadata can be requested through target_labels.
+
+        
+      Existing automatic Spectrogram / YOLOLabel behavior remains backward compatible.
+
+        
+      Transform ordering is deterministic and documented.

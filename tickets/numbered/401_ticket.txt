@@ -1,0 +1,36 @@
+Add grouping and signal-generator configuration to TorchSigDataModule
+
+Summary
+Extend TorchSigDataModule to support configuring signal generators and GroupingLabel-based sampling when generating static datasets.
+Motivation
+TorchSigDataModule already provides the high-level dataset-generation pipeline:
+TorchSigDatasetConfig ↓ TorchSigIterableDataset ↓ WorkerSeedingDataLoader ↓ DatasetCreator ↓ StaticTorchSigDataset
+However, prepare_data() currently constructs TorchSigIterableDataset without exposing signal_generators or sampling_grouping.
+This requires downstream projects to recreate the dataset-generation pipeline when they need to restrict the generated modulation classes or balance sampling across a grouping such as modulation family.
+Proposed Change
+Allow TorchSigDataModule / from_config() to accept:
+signal_generators=... sampling_grouping=...
+and forward them to TorchSigIterableDataset.
+For example:
+TorchSigDataModule.from_config( cfg, root=output_dir, signal_generators=enabled_classes, sampling_grouping=GroupingLabel("family"), )
+Both built-in and custom GroupingLabel configurations should be supported.
+Acceptance Criteria
+
+
+        
+      TorchSigDataModule supports selecting signal generators.
+
+        
+      TorchSigDataModule supports GroupingLabel-based sampling.
+
+        
+      Values are forwarded to TorchSigIterableDataset.
+
+        
+      Existing behavior remains unchanged when these arguments are omitted.
+
+        
+      Supports built-in grouping names, YAML configurations, mappings, and GroupingLabel instances consistent with TorchSigIterableDataset.
+
+        
+      Includes tests for ungrouped and grouped sampling.

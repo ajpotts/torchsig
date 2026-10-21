@@ -1,0 +1,53 @@
+Support explicit per-generator dataset sizes
+
+Summary
+Add support for specifying the desired number of generated dataset examples per enabled signal generator.
+Motivation
+Downstream generation scripts currently approximate an "examples per class" configuration by calculating:
+dataset_length = ( len(signal_generators) * examples_per_class )
+This determines the total dataset size but does not itself guarantee that every signal generator occurs the requested number of times.
+The option name examples_per_class therefore suggests a stronger sampling guarantee than the generation pipeline currently provides.
+A first-class TorchSig mechanism would make balanced benchmark and evaluation dataset generation easier and less error-prone.
+Proposed Change
+Support an explicit generation mode such as:
+samples_per_generator=8
+or equivalent configuration.
+For example:
+TorchSigDataModule.from_config( cfg, root=output_dir, signal_generators=classes, samples_per_generator=8, )
+TorchSig would derive the required dataset size and sampling behavior.
+The feature should compose cleanly with explicit signal-generator selection and grouping-based workflows.
+Considerations
+The implementation should clearly define the behavior for wideband examples containing multiple signals.
+If exact per-generator counts cannot be meaningfully guaranteed for multi-signal datasets, the API should either:
+
+
+        
+      restrict this mode to applicable dataset configurations, or
+
+        
+      clearly distinguish balanced sampling probability from exact generated counts.
+
+The public API should not imply an exact guarantee unless TorchSig actually provides one.
+Acceptance Criteria
+
+
+        
+      Provide a supported way to request a per-generator sample count where the dataset semantics permit it.
+
+        
+      Derive the appropriate total dataset length rather than requiring callers to calculate it.
+
+        
+      Define whether counts are exact or statistical.
+
+        
+      Validate incompatible configurations rather than silently violating the requested counts.
+
+        
+      Work with an explicitly selected subset of signal generators.
+
+        
+      Remain deterministic for a fixed seed.
+
+        
+      Add tests demonstrating the resulting generator distribution.
