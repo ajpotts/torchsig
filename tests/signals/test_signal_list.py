@@ -1,6 +1,6 @@
 from dataclasses import fields
 
-from torchsig.signals.signal_lists import CLASS_FAMILY_DICT, TorchSigSignalLists
+from torchsig.signals.signal_lists import CLASS_FAMILY_DICT, OFDM_NUM_SUBCARRIER_VALUES, TorchSigSignalLists
 from torchsig.utils.signal_building import lookup_signal_generator_by_string
 
 CONTROL_FRAME_GENERATORS = {"80211a_ack", "80211a_cts", "80211a_rts"}
@@ -39,6 +39,15 @@ def test_torchsig_signal_lists_groups_expected_signal_families():
     assert all(any(key in name for key in ["ask", "qam", "psk", "ook"]) for name in signal_lists.constellation_signals)
     assert all("am-" in name for name in signal_lists.am_signals)
     assert all("lfm-" in name for name in signal_lists.lfm_signals)
+
+
+def test_torchsig_signal_lists_includes_full_ofdm_subcarrier_range():
+    signal_lists = TorchSigSignalLists()
+
+    assert len(signal_lists.ofdm_signals) == len(OFDM_NUM_SUBCARRIER_VALUES)
+    assert signal_lists.ofdm_signals[0] == "ofdm-4"
+    assert signal_lists.ofdm_signals[-1] == "ofdm-8192"
+    assert "ofdm-4097" in signal_lists.ofdm_signals
 
 
 def test_torchsig_signal_lists_assigns_every_known_signal_to_exactly_one_group():

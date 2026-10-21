@@ -1,0 +1,2 @@
+Currently supports a handful of subcarriers: 64, 72, 128, 180, 256, 300, 512, 600, 900, 1024, 1200, 2048
+Want to be able to support a broader number, potentially every number from say 4 subcarriers up to 8192 (really small to really large)
