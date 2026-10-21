@@ -1,0 +1,34 @@
+Fix ambiguous NumPy array truth-value error in HDF5 metadata writer
+
+
+Description
+When saving a Signal using torchsig.utils.writer, specifically the HDF5Handler, the writer raises a ValueError if a metadata value is a NumPy array containing multiple elements.
+The error occurs because the writer uses a direct equality comparison against None:
+if not metadata_obj[k] == None:
+For NumPy arrays, == None performs an element-wise comparison, producing a Boolean array rather than a single Boolean value. Attempting to evaluate that array in an if statement raises a ValueError.
+Steps to Reproduce
+
+
+        
+      Create a Signal containing a NumPy array in its metadata.
+
+        
+      Attempt to save the signal using HDF5Writer.
+
+        
+      Observe the ValueError.
+
+`import numpy as np
+from torchsig.signals.signal import Signal
+from torchsig.utils.writer import HDF5Writer
+Create a signal with array-valued metadata
+data = np.random.randn(100).astype(np.complex64)
+sig = Signal(data=data)
+sig["custom_mask"] = np.array([0.1, 0.2, 0.3])
+Attempt to save the signal
+writer = HDF5Writer(root="test_output")
+with writer as w:
+w.write(0, sig)`
+Traceback
+`File ".../torchsig/utils/file_handlers/hdf5.py", line 81,
+in populate_hdf5_group_with_metadata
