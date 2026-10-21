@@ -257,6 +257,11 @@ class PrototypeViewportDataset(TorchSigIterableDataset):
                     "bandwidth": frequency_upper - frequency_lower,
                 }
             )
+            if "estimated_occupied_bandwidth" in local_metadata:
+                local_metadata["estimated_occupied_bandwidth"] = min(
+                    local_metadata["estimated_occupied_bandwidth"],
+                    frequency_upper - frequency_lower,
+                )
             component_data = np.empty(0, dtype=np.complex64)
             if self.include_component_data:
                 component_offset = int(time_lower - component.start_in_samples)

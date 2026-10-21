@@ -28,6 +28,7 @@ def _canvas() -> Signal:
         duration_in_samples=8,
         center_freq=2,
         bandwidth=2,
+        estimated_occupied_bandwidth=2,
     )
     data = np.zeros(16, dtype=np.complex64)
     data[2:10] = component.data
@@ -102,6 +103,7 @@ def test_dataset_returns_cropped_viewport() -> None:
     assert component.data.shape == (0,)
     assert component.data.dtype == np.complex64
     assert component.center_freq == pytest.approx(0)
+    assert component.estimated_occupied_bandwidth == pytest.approx(2)
 
 
 def test_component_iq_processing_can_be_enabled() -> None:
