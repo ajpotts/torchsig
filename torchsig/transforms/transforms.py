@@ -50,7 +50,34 @@ __all__ = [
     "Spurs",
     "TimeReversal",
     "TimeVaryingNoise",
+    "reconstruct_spectrogram_support_vectors",
 ]
+
+
+def reconstruct_spectrogram_support_vectors(
+    signal: Signal,
+) -> tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]:
+    """Reconstruct the frequency and time coordinates for a spectrogram.
+
+    Args:
+        signal: A two-dimensional spectrogram signal containing the compact
+            support-vector metadata written by :class:`Spectrogram`.
+
+    Returns:
+        A tuple containing the frequency and time coordinate arrays,
+        respectively.
+
+    Raises:
+        ValueError: If ``signal.data`` is not a two-dimensional spectrogram.
+    """
+    expected_num_dimensions = 2
+    if signal.data.ndim != expected_num_dimensions:
+        raise ValueError(f"spectrogram data must be two dimensional, got shape {signal.data.shape}.")
+
+    num_frequency_bins, num_time_bins = signal.data.shape
+    frequency = signal.spectrogram_frequency_start + np.arange(num_frequency_bins) * signal.spectrogram_frequency_step
+    time = signal.spectrogram_time_start + np.arange(num_time_bins) * signal.spectrogram_time_step
+    return frequency.astype(TorchSigRealDataType), time.astype(TorchSigRealDataType)
 
 
 def transform_crash_logger(transform_func, data, **kwargs):
@@ -1871,26 +1898,45 @@ class SpectralInversion(SignalTransform):
 
 
 class Spectrogram(SignalTransform):
-    """Computes the spectogram of I/Q data.
+    """Compute a spectrogram and attach its physical coordinate axes.
 
     This transform computes the spectrogram by applying the Short-Time Fourier Transform (STFT)
-    to the input IQ data.
+    to the input IQ data. The output array has shape ``(frequency, time)``.
+    Compact origin-and-step metadata describes the descending baseband-frequency
+    support and time-bin centers. Use
+    :func:`reconstruct_spectrogram_support_vectors` to materialize their arrays.
+    Coordinates use hertz and seconds when a sample rate is available,
+    otherwise cycles per sample and samples.
 
     Attributes:
         fft_size: The FFT size (number of bins) in the spectrogram.
+        fft_stride: The hop between consecutive FFT windows in samples.
+        sample_rate: Optional sample rate override in hertz.
     """
 
-    def __init__(self, fft_size: int, fft_stride: int | None = None, **kwargs):
+    def __init__(self, fft_size: int, fft_stride: int | None = None, sample_rate: float | None = None, **kwargs):
         """Initialize the Spectrogram transform.
 
         Args:
             fft_size: The FFT size (number of bins) in the spectrogram.
+            fft_stride: Number of samples between FFT windows. Defaults to
+                ``fft_size``.
+            sample_rate: Sample rate in hertz. When omitted, the transform
+                reads ``sample_rate`` from signal metadata when available and
+                otherwise emits normalized coordinates.
             **kwargs: Additional keyword arguments passed to the parent class.
+
+        Raises:
+            ValueError: If ``sample_rate`` is provided but is not finite and
+                positive.
         """
+        if sample_rate is not None and (not np.isfinite(sample_rate) or sample_rate <= 0):
+            raise ValueError(f"sample_rate must be finite and positive, got {sample_rate}.")
         super().__init__(required_metadata=[], data_dtype=TorchSigRealDataType, **kwargs)
         self.fft_size = fft_size
         # fft_stride is the number of data points to move or "hop" over when computing the next FF
         self.fft_stride = copy(fft_size) if fft_stride is None else fft_stride
+        self.sample_rate = sample_rate
 
     def __apply__(self, signal: Signal) -> Signal:
         """Apply spectrogram computation to the signal.
@@ -1901,11 +1947,36 @@ class Spectrogram(SignalTransform):
         Returns:
             Signal with spectrogram computed.
         """
+        sample_rate = self.sample_rate
+        if sample_rate is None and hasattr(signal, "sample_rate"):
+            sample_rate = float(signal.sample_rate)
+        if sample_rate is not None and (not np.isfinite(sample_rate) or sample_rate <= 0):
+            raise ValueError(f"sample_rate must be finite and positive, got {sample_rate}.")
         signal.data = F.spectrogram(
             signal.data,
             self.fft_size,
             self.fft_stride,
         )
+        if sample_rate is None:
+            time_start = self.fft_size / 2
+            time_step = self.fft_stride
+            frequency_start = 0.5 - 1 / self.fft_size
+            frequency_step = -1 / self.fft_size
+            time_units = "samples"
+            frequency_units = "cycles/sample"
+        else:
+            time_start = self.fft_size / (2 * sample_rate)
+            time_step = self.fft_stride / sample_rate
+            frequency_start = sample_rate / 2 - sample_rate / self.fft_size
+            frequency_step = -sample_rate / self.fft_size
+            time_units = "seconds"
+            frequency_units = "Hz"
+        signal["spectrogram_time_start"] = time_start
+        signal["spectrogram_time_step"] = time_step
+        signal["spectrogram_frequency_start"] = frequency_start
+        signal["spectrogram_frequency_step"] = frequency_step
+        signal["spectrogram_time_units"] = time_units
+        signal["spectrogram_frequency_units"] = frequency_units
 
         return signal
 
