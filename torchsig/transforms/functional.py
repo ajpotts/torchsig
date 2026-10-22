@@ -114,6 +114,45 @@ def _preserve_sampling_clock_output(
     return output.astype(TorchSigComplexDataType, copy=False)
 
 
+def _apply_sampling_clock_impairment(
+    data: np.ndarray,
+    *,
+    jitter_ppm: float,
+    drift_ppm: float,
+    rng: np.random.Generator | None,
+    initial_phase: float,
+    jitter_model: str = "independent",
+    jitter_alpha: float = 0.9,
+    drift_model: str = "constant",
+    drift_rate_ppm_per_sec: float = 0.0,
+    drift_noise_ppm_per_sqrt_sec: float = 0.0,
+    sample_rate_hz: float = 1.0,
+) -> np.ndarray:
+    """Apply a sampling-clock model using the shared resampler setup."""
+    generator = rng or np.random.default_rng()
+    complex_data = data.astype(TorchSigComplexDataType)
+    uprate = 5000
+    prototype_filter = prototype_polyphase_filter(num_branches=uprate).astype(TorchSigRealDataType)
+    impaired_data = _sampling_clock_impairments(
+        h=prototype_filter,
+        x=complex_data,
+        uprate=uprate,
+        drate=uprate,
+        jitter_ppm=jitter_ppm,
+        drift_ppm=drift_ppm,
+        rng=generator,
+        initial_phase=initial_phase,
+        jitter_model=jitter_model,
+        jitter_alpha=jitter_alpha,
+        drift_model=drift_model,
+        drift_rate_ppm_per_sec=drift_rate_ppm_per_sec,
+        drift_noise_ppm_per_sqrt_sec=drift_noise_ppm_per_sqrt_sec,
+        sample_rate_hz=sample_rate_hz,
+    )
+    filter_delay = (len(prototype_filter) - 1) / (2 * uprate)
+    return _preserve_sampling_clock_output(impaired_data, len(complex_data), start_position=filter_delay)
+
+
 log = logging.getLogger(__name__)
 
 
@@ -293,27 +332,8 @@ def clock_drift(
     Returns:
         Data with sampling-clock drift applied.
     """
-    rng = rng or np.random.default_rng()
-
-    # enforce data to be the correct complex type
-    data = data.astype(TorchSigComplexDataType)
-
-    # define up/down rates
-    uprate = 5000
-    downrate = uprate
-
-    # build the prototype filter
-    pfb_prototype_filter = prototype_polyphase_filter(num_branches=uprate)
-
-    # convert to real data type
-    pfb_prototype_filter = pfb_prototype_filter.astype(TorchSigRealDataType)
-
-    # call the impairment
-    data_with_drift = _sampling_clock_impairments(
-        h=pfb_prototype_filter,
-        x=data,
-        uprate=uprate,
-        drate=downrate,
+    return _apply_sampling_clock_impairment(
+        data,
         jitter_ppm=0,
         drift_ppm=drift_ppm,
         rng=rng,
@@ -323,9 +343,6 @@ def clock_drift(
         drift_noise_ppm_per_sqrt_sec=drift_noise_ppm_per_sqrt_sec,
         sample_rate_hz=sample_rate_hz,
     )
-
-    filter_delay = (len(pfb_prototype_filter) - 1) / (2 * uprate)
-    return _preserve_sampling_clock_output(data_with_drift, len(data), start_position=filter_delay)
 
 
 def clock_jitter(
@@ -368,27 +385,8 @@ def clock_jitter(
     if not np.isfinite(jitter_alpha) or abs(jitter_alpha) >= 1.0:
         raise ValueError("jitter_alpha must be finite and have absolute value less than 1")
 
-    rng = rng or np.random.default_rng()
-
-    # enforce data to be the correct complex type
-    data = data.astype(TorchSigComplexDataType)
-
-    # define up/down rates
-    uprate = 5000
-    downrate = uprate
-
-    # build the prototype filter
-    pfb_prototype_filter = prototype_polyphase_filter(num_branches=uprate)
-
-    # convert to real data type
-    pfb_prototype_filter = pfb_prototype_filter.astype(TorchSigRealDataType)
-
-    # call the impairment
-    data_with_jitter = _sampling_clock_impairments(
-        h=pfb_prototype_filter,
-        x=data,
-        uprate=uprate,
-        drate=downrate,
+    return _apply_sampling_clock_impairment(
+        data,
         jitter_ppm=jitter_ppm,
         drift_ppm=0,
         rng=rng,
@@ -396,9 +394,6 @@ def clock_jitter(
         jitter_model=jitter_model,
         jitter_alpha=jitter_alpha,
     )
-
-    filter_delay = (len(pfb_prototype_filter) - 1) / (2 * uprate)
-    return _preserve_sampling_clock_output(data_with_jitter, len(data), start_position=filter_delay)
 
 
 def cochannel_interference(
