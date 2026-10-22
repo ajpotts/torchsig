@@ -760,7 +760,10 @@ class ClockDrift(SignalTransform):
 
 
 class ClockJitter(SignalTransform):
-    """Apply Gaussian ADC sampling-time error.
+    """Apply a selectable Gaussian ADC sampling-time-error model.
+
+    Independent and AR(1) jitter are absolute sampling-time errors. Period
+    jitter represents accumulated sampling-period errors.
 
     This timing impairment is independent of carrier local-oscillator error;
     signal frequency and sample-rate metadata remain nominal.
@@ -770,6 +773,8 @@ class ClockJitter(SignalTransform):
         self,
         jitter_ppm: tuple[float, float] = (1, 10),
         initial_phase: float | tuple[float, float] = 0.0,
+        jitter_model: Literal["independent", "period", "ar1"] = "independent",
+        jitter_alpha: float = 0.9,
         **kwargs,
     ):
         """Initialize the ClockJitter transform.
@@ -779,6 +784,10 @@ class ClockJitter(SignalTransform):
             initial_phase: Initial sampling phase in input-sample periods, or
                 a range from which to draw it. Values must be in the half-open
                 interval ``[0, 1)``. Defaults to 0.
+            jitter_model: ``"independent"``, ``"period"``, or ``"ar1"``.
+                Defaults to independent absolute timing jitter.
+            jitter_alpha: AR(1) correlation coefficient in the open interval
+                ``(-1, 1)``. Used only by the AR(1) model. Defaults to 0.9.
             **kwargs: Additional keyword arguments passed to the parent class.
         """
         super().__init__(required_metadata=[], data_dtype=TorchSigComplexDataType, **kwargs)
@@ -787,6 +796,12 @@ class ClockJitter(SignalTransform):
             raise ValueError("initial_phase must be finite and in the interval [0, 1)")
         self.jitter_ppm = jitter_ppm
         self.initial_phase = initial_phase
+        if jitter_model not in {"independent", "period", "ar1"}:
+            raise ValueError("jitter_model must be 'independent', 'period', or 'ar1'")
+        if not np.isfinite(jitter_alpha) or abs(jitter_alpha) >= 1.0:
+            raise ValueError("jitter_alpha must be finite and have absolute value less than 1")
+        self.jitter_model = jitter_model
+        self.jitter_alpha = jitter_alpha
         self.jitter_ppm_distribution = self.get_distribution(self.jitter_ppm, "log10")
         initial_phase_distribution_params = initial_phase if isinstance(initial_phase, tuple) else [initial_phase]
         self.initial_phase_distribution = self.get_distribution(initial_phase_distribution_params)
@@ -808,6 +823,8 @@ class ClockJitter(SignalTransform):
             jitter_ppm=jitter_ppm,
             rng=self.random_generator,
             initial_phase=initial_phase,
+            jitter_model=self.jitter_model,
+            jitter_alpha=self.jitter_alpha,
         )
 
         return signal
