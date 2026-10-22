@@ -240,9 +240,9 @@ class YOLOLabel(MetadataTransform):
     """Add a YOLO label to a signal.
 
     The label is a tuple of ``(cid, cx, cy, width, height)``. By default, its
-    frequency-axis height uses the generator-selected canonical ``bandwidth``.
-    Set ``bandwidth_key="estimated_occupied_bandwidth"`` to use the optional
-    threshold-based diagnostic estimate instead.
+    frequency-axis height uses ``estimated_occupied_bandwidth``. Set
+    ``bandwidth_key="bandwidth"`` to use the generator-selected canonical
+    bandwidth instead.
 
     Args:
         bandwidth_key: Signal metadata field used for the box height. Must be
@@ -257,7 +257,7 @@ class YOLOLabel(MetadataTransform):
 
     def __init__(
         self,
-        bandwidth_key: str = "bandwidth",
+        bandwidth_key: str = "estimated_occupied_bandwidth",
         class_index_field: str = "class_index",
         **kwargs,
     ) -> None:

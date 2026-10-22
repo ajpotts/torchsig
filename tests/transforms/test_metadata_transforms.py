@@ -190,11 +190,11 @@ def test_yolo_label_initializes_expected_metadata_fields():
     assert transform.required_metadata == [
         "class_index",
         "start",
-        "bandwidth",
+        "estimated_occupied_bandwidth",
         "center_freq",
         "dataset_metadata",
     ]
-    assert transform.bandwidth_key == "bandwidth"
+    assert transform.bandwidth_key == "estimated_occupied_bandwidth"
     assert transform.class_index_field == "class_index"
     assert transform.targets_metadata == ["yolo_label"]
 
@@ -211,7 +211,7 @@ def test_yolo_label_adds_expected_label_to_component_signal(parent_signal):
             0.5,  # start + duration / 2
             0.4,  # 1 - ((sample_rate / 2 + center_freq) / sample_rate)
             0.5,  # duration
-            0.2,  # bandwidth / sample_rate
+            0.1,  # estimated_occupied_bandwidth / sample_rate
         )
     )
 
@@ -222,16 +222,16 @@ def test_yolo_label_apply_returns_component_signal(component_signal):
     transformed_component = transform.__apply__(component_signal)
 
     assert transformed_component is component_signal
-    assert transformed_component.yolo_label == pytest.approx((3, 0.5, 0.4, 0.5, 0.2))
+    assert transformed_component.yolo_label == pytest.approx((3, 0.5, 0.4, 0.5, 0.1))
 
 
-def test_yolo_label_can_use_estimated_occupied_bandwidth(component_signal):
-    transform = YOLOLabel(bandwidth_key="estimated_occupied_bandwidth")
+def test_yolo_label_can_use_bandwidth(component_signal):
+    transform = YOLOLabel(bandwidth_key="bandwidth")
 
     transformed_component = transform(component_signal)
 
-    assert transform.required_metadata[2] == "estimated_occupied_bandwidth"
-    assert transformed_component.yolo_label == pytest.approx((3, 0.5, 0.4, 0.5, 0.1))
+    assert transform.required_metadata[2] == "bandwidth"
+    assert transformed_component.yolo_label == pytest.approx((3, 0.5, 0.4, 0.5, 0.2))
 
 
 def test_yolo_label_rejects_invalid_bandwidth_key():
@@ -283,7 +283,7 @@ def test_yolo_label_can_use_custom_group_index(parent_signal):
     grouping(parent_signal)
     transformed = YOLOLabel(class_index_field="kind_index")(parent_signal)
 
-    assert transformed.component_signals[0].yolo_label == pytest.approx((1, 0.5, 0.4, 0.5, 0.2))
+    assert transformed.component_signals[0].yolo_label == pytest.approx((1, 0.5, 0.4, 0.5, 0.1))
 
 
 def test_yolo_label_requires_selected_class_index_field(component_signal):
