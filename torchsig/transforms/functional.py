@@ -333,8 +333,15 @@ def clock_jitter(
     jitter_ppm: float = 10,
     rng: np.random.Generator | None = None,
     initial_phase: float = 0.0,
+    jitter_model: Literal["independent", "period", "ar1"] = "independent",
+    jitter_alpha: float = 0.9,
 ) -> np.ndarray:
-    """Apply Gaussian sampling-clock timing jitter.
+    """Apply a configurable Gaussian sampling-clock timing-jitter model.
+
+    Independent and AR(1) jitter are absolute sampling-time errors. Period
+    jitter represents independent sampling-period errors and therefore
+    accumulates over the record. AR(1) jitter uses ``jitter_alpha`` as its
+    lag-one correlation coefficient.
 
     The interpolation filter supports signals with full two-sided occupied
     bandwidth up to approximately 0.7 times the sample rate (edges at ±0.35).
@@ -348,10 +355,19 @@ def clock_jitter(
         rng: Random number generator. Defaults to np.random.default_rng(seed=None).
         initial_phase: Initial sampling phase in input-sample periods. Must be
             in the half-open interval ``[0, 1)``. Defaults to 0.
+        jitter_model: ``"independent"``, ``"period"``, or ``"ar1"``.
+            Defaults to independent absolute timing jitter.
+        jitter_alpha: AR(1) correlation coefficient in the open interval
+            ``(-1, 1)``. Used only by the AR(1) model. Defaults to 0.9.
 
     Returns:
         Data with sampling-clock jitter applied.
     """
+    if jitter_model not in {"independent", "period", "ar1"}:
+        raise ValueError("jitter_model must be 'independent', 'period', or 'ar1'")
+    if not np.isfinite(jitter_alpha) or abs(jitter_alpha) >= 1.0:
+        raise ValueError("jitter_alpha must be finite and have absolute value less than 1")
+
     rng = rng or np.random.default_rng()
 
     # enforce data to be the correct complex type
@@ -377,6 +393,8 @@ def clock_jitter(
         drift_ppm=0,
         rng=rng,
         initial_phase=initial_phase,
+        jitter_model=jitter_model,
+        jitter_alpha=jitter_alpha,
     )
 
     filter_delay = (len(pfb_prototype_filter) - 1) / (2 * uprate)
