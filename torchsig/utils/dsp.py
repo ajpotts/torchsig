@@ -71,8 +71,10 @@ __all__ = [
 _POWER_FLOOR_RATIO = 1e-10
 _MAX_SAMPLING_CLOCK_OUTPUT_SAMPLES = 10_000_000
 
-# Full two-sided occupied bandwidth as a fraction of sample rate. The
-# sampling-clock prototype is flat to about 0.03 dB through these ±0.35 edges.
+# Full two-sided occupied bandwidth as a fraction of sample rate. After the
+# production float32 coefficient conversion, the sampling-clock prototype is
+# flat to within 0.05 dB through these ±0.35 edges and provides at least 80 dB
+# rejection at a normalized frequency of 0.70.
 SAMPLING_CLOCK_MAX_OCCUPIED_BANDWIDTH = 0.7
 
 

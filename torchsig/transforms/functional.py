@@ -128,7 +128,12 @@ def _apply_sampling_clock_impairment(
     drift_noise_ppm_per_sqrt_sec: float = 0.0,
     sample_rate_hz: float = 1.0,
 ) -> np.ndarray:
-    """Apply a sampling-clock model using the shared resampler setup."""
+    """Apply a sampling-clock model using float32 filter coefficients.
+
+    The float32 production filter retains the documented 0.05 dB passband and
+    80 dB rejection contract while using half the coefficient storage of the
+    float64 design representation. Inputs and outputs remain complex64.
+    """
     generator = rng or np.random.default_rng()
     complex_data = data.astype(TorchSigComplexDataType)
     uprate = 5000
@@ -308,8 +313,10 @@ def clock_drift(
 ) -> np.ndarray:
     """Apply a configurable sampling-clock period-error model.
 
-    The interpolation filter supports signals with full two-sided occupied
-    bandwidth up to approximately 0.7 times the sample rate (edges at ±0.35).
+    The production float32 interpolation filter supports signals with full
+    two-sided occupied bandwidth up to 0.7 times the sample rate (edges at
+    ±0.35), with less than 0.05 dB passband-edge attenuation and at least 80 dB
+    rejection at normalized frequency 0.70.
 
     Positive ``drift_ppm`` advances the input sampling position faster and
     raises the apparent normalized frequency of a tone. This models ADC sample
@@ -360,8 +367,10 @@ def clock_jitter(
     accumulates over the record. AR(1) jitter uses ``jitter_alpha`` as its
     lag-one correlation coefficient.
 
-    The interpolation filter supports signals with full two-sided occupied
-    bandwidth up to approximately 0.7 times the sample rate (edges at ±0.35).
+    The production float32 interpolation filter supports signals with full
+    two-sided occupied bandwidth up to 0.7 times the sample rate (edges at
+    ±0.35), with less than 0.05 dB passband-edge attenuation and at least 80 dB
+    rejection at normalized frequency 0.70.
 
     This models ADC sample timing independently of carrier local-oscillator
     error. Signal metadata remains nominal after the transform.
