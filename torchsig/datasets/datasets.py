@@ -14,6 +14,7 @@ from torch.utils.data import Dataset, IterableDataset, get_worker_info
 
 from torchsig.datasets.dataset_utils import frequency_shift_signal
 from torchsig.signals.builder import BaseSignalGenerator, ConcatSignalGenerator
+from torchsig.signals.signal_lists import OFDM_NUM_SUBCARRIER_VALUES
 from torchsig.signals.signal_types import Signal
 from torchsig.transforms.metadata_transforms import GroupingLabel
 from torchsig.utils.abstractions import HierarchicalMetadataObject
@@ -278,7 +279,7 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
             if isinstance(transform, Seedable):
                 transform.add_parent(self)
         if isinstance(signal_generators, str):
-            signal_generators = lookup_signal_generator_by_string(signal_generators)
+            signal_generators = self._lookup_signal_generator(signal_generators)
         if isinstance(signal_generators, ConcatSignalGenerator):
             signal_generators = signal_generators.signal_generators
         for generator in signal_generators:
@@ -505,7 +506,7 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         """
         if isinstance(signal_generator, str):
             class_name = signal_generator
-            signal_generator = lookup_signal_generator_by_string(signal_generator)
+            signal_generator = self._lookup_signal_generator(signal_generator)
 
         if isinstance(signal_generator, ConcatSignalGenerator):
             for child_generator in signal_generator.signal_generators:
@@ -518,6 +519,15 @@ class TorchSigIterableDataset(HierarchicalMetadataObject, IterableDataset):
         self.add_signal_generator(
             signal_generator,
             class_name=class_name,
+        )
+
+    def _lookup_signal_generator(self, name: str) -> callable:
+        """Resolve a named generator using the configured OFDM class selection."""
+        if self.experiment_config.ofdm_num_subcarriers == tuple(OFDM_NUM_SUBCARRIER_VALUES):
+            return lookup_signal_generator_by_string(name)
+        return lookup_signal_generator_by_string(
+            name,
+            ofdm_num_subcarriers=self.experiment_config.ofdm_num_subcarriers,
         )
 
     def add_signal_generator(

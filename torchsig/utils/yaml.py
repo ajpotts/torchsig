@@ -85,8 +85,9 @@ def load_config_from_yaml(path: Path) -> "TorchSigDatasetConfig":
         "file_writer_name": writer_name,
         "file_writer_kwargs": dict(writer_options),
     }
-    if "signals" in cfg:
-        config_kwargs["experiment_config"] = load_experiment_config({"signals": cfg["signals"]})
+    experiment_settings = {name: cfg[name] for name in ("signals", "ofdm_num_subcarriers") if name in cfg}
+    if experiment_settings:
+        config_kwargs["experiment_config"] = load_experiment_config(experiment_settings)
     return TorchSigDatasetConfig(**config_kwargs)
 
 

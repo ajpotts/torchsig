@@ -18,7 +18,7 @@ from torchsig.signals.builders.ofdm import OFDMSignalGenerator
 from torchsig.signals.builders.tone import ToneSignalGenerator
 from torchsig.signals.builders.wifi import Wifi80211aSignalGenerator
 from torchsig.signals.builders.zigbee import ZigBeeSignalGenerator
-from torchsig.signals.signal_lists import OFDM_NUM_SUBCARRIER_VALUES
+from torchsig.signals.signal_lists import OFDM_NUM_SUBCARRIER_VALUES, OFDM_SUPPORTED_NUM_SUBCARRIER_VALUES
 
 __all__ = ["family_names", "lookup_signal_generator_by_string", "num_subcarrier_values", "signal_generator_lookup_table"]
 
@@ -39,6 +39,25 @@ def _add_signal_generator(
     metadata: dict[str, Any],
 ) -> None:
     signal_generator_lookup_table[name] = (generator_cls, metadata)
+
+
+def _validate_ofdm_num_subcarriers(values: Any) -> tuple[int, ...]:
+    """Validate and normalize configured OFDM subcarrier counts."""
+    if isinstance(values, (str, bytes)):
+        raise TypeError("ofdm_num_subcarriers must be an iterable of integers")
+    try:
+        normalized = tuple(values)
+    except TypeError as error:
+        raise TypeError("ofdm_num_subcarriers must be an iterable of integers") from error
+    if not normalized:
+        raise ValueError("ofdm_num_subcarriers must contain at least one value")
+    if any(isinstance(value, bool) or not isinstance(value, int) for value in normalized):
+        raise TypeError("ofdm_num_subcarriers values must be integers")
+    minimum = OFDM_SUPPORTED_NUM_SUBCARRIER_VALUES.start
+    maximum = OFDM_SUPPORTED_NUM_SUBCARRIER_VALUES.stop - 1
+    if any(value not in OFDM_SUPPORTED_NUM_SUBCARRIER_VALUES for value in normalized):
+        raise ValueError(f"ofdm_num_subcarriers values must be between {minimum} and {maximum}, inclusive")
+    return tuple(dict.fromkeys(normalized))
 
 
 def _family_name(signal_name: str) -> str | None:
@@ -155,7 +174,10 @@ for family_name in family_names:
     )
 
 
-def lookup_signal_generator_by_string(signal_generator_name: str) -> Any:
+def lookup_signal_generator_by_string(
+    signal_generator_name: str,
+    ofdm_num_subcarriers: Any = OFDM_NUM_SUBCARRIER_VALUES,
+) -> Any:
     """Look up and instantiate a signal generator by its name.
 
     This function searches the signal_generator_lookup_table for the given name
@@ -164,6 +186,8 @@ def lookup_signal_generator_by_string(signal_generator_name: str) -> Any:
 
     Args:
         signal_generator_name: The name of the signal generator to instantiate.
+        ofdm_num_subcarriers: OFDM subcarrier counts included when resolving the
+            ``"ofdm"`` or ``"all"`` aggregate. Defaults to the 3.0.0 class set.
 
     Returns:
         An instantiated signal generator object.
@@ -172,7 +196,34 @@ def lookup_signal_generator_by_string(signal_generator_name: str) -> Any:
         ValueError: If the signal generator name is not found in the lookup table
             or if there's an error instantiating the generator.
     """
-    lookup_value = signal_generator_lookup_table.get(signal_generator_name)
+    configured_counts = _validate_ofdm_num_subcarriers(ofdm_num_subcarriers)
+    lookup_table = signal_generator_lookup_table
+    if configured_counts != tuple(num_subcarrier_values) and signal_generator_name in {"ofdm", "all"}:
+        configured_specs = [(OFDMSignalGenerator, {"num_subcarriers": value}) for value in configured_counts]
+        _, default_specs, aggregate_metadata = signal_generator_lookup_table[signal_generator_name]
+        if signal_generator_name == "ofdm":
+            selected_specs = configured_specs
+        else:
+            default_ofdm_specs = [signal_generator_lookup_table[f"ofdm-{value}"] for value in num_subcarrier_values]
+            selected_specs = []
+            added_configured_ofdm = False
+            for spec in default_specs:
+                if spec in default_ofdm_specs:
+                    if not added_configured_ofdm:
+                        selected_specs.extend(configured_specs)
+                        added_configured_ofdm = True
+                else:
+                    selected_specs.append(spec)
+        lookup_value = (ConcatSignalGenerator, selected_specs, aggregate_metadata)
+    elif signal_generator_name.startswith("ofdm-"):
+        try:
+            num_subcarriers = int(signal_generator_name.removeprefix("ofdm-"))
+        except ValueError:
+            lookup_value = None
+        else:
+            lookup_value = (OFDMSignalGenerator, {"num_subcarriers": num_subcarriers}) if num_subcarriers in OFDM_SUPPORTED_NUM_SUBCARRIER_VALUES else None
+    else:
+        lookup_value = lookup_table.get(signal_generator_name)
     if lookup_value is None:
         raise ValueError(f"could not instantiate signal generator: {signal_generator_name!r}")
     if len(lookup_value) == _SIMPLE_GENERATOR_SPEC_LENGTH:

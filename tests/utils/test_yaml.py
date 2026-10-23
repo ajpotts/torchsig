@@ -116,6 +116,18 @@ def test_load_config_from_yaml_includes_signal_generation_config(tmp_path, monke
     assert effective.parameter_value("qpsk", "alpha") == 0.35
 
 
+def test_load_config_from_yaml_includes_ofdm_subcarrier_configuration(tmp_path, monkeypatch):
+    install_fake_datasets_module(monkeypatch)
+    cfg = make_valid_config_dict()
+    cfg["ofdm_num_subcarriers"] = [4, 5, 4097]
+    path = tmp_path / "configured_ofdm.yaml"
+    path.write_text(yaml.safe_dump(cfg))
+
+    config = load_config_from_yaml(path)
+
+    assert config.kwargs["experiment_config"].ofdm_num_subcarriers == (4, 5, 4097)
+
+
 def test_load_config_from_yaml_includes_storage_config(tmp_path, monkeypatch):
     """Storage backend and options are preserved in the dataset config."""
     install_fake_datasets_module(monkeypatch)

@@ -38,8 +38,30 @@ def test_ofdm_generator_entries(num_subcarriers):
     )
 
 
-def test_ofdm_generator_entries_cover_inclusive_supported_range():
-    assert signal_building.num_subcarrier_values == list(range(4, 8193))
+def test_ofdm_generator_entries_preserve_default_values():
+    assert signal_building.num_subcarrier_values == [64, 72, 128, 180, 256, 300, 512, 600, 900, 1024, 1200, 2048]
+
+
+def test_lookup_supports_explicit_nondefault_ofdm_count():
+    generator = signal_building.lookup_signal_generator_by_string("ofdm-4097")
+
+    assert isinstance(generator, OFDMSignalGenerator)
+    assert generator.num_subcarriers == 4097
+
+
+def test_lookup_configures_ofdm_family_from_parameter():
+    generator = signal_building.lookup_signal_generator_by_string(
+        "ofdm",
+        ofdm_num_subcarriers=[4, 5, 4097],
+    )
+
+    assert [child.num_subcarriers for child in generator.signal_generators] == [4, 5, 4097]
+
+
+@pytest.mark.parametrize("values", [[], [3], [8193], [4.5], "4"])
+def test_lookup_rejects_invalid_ofdm_counts(values):
+    with pytest.raises((TypeError, ValueError), match="ofdm_num_subcarriers"):
+        signal_building.lookup_signal_generator_by_string("ofdm", values)
 
 
 @pytest.mark.parametrize(

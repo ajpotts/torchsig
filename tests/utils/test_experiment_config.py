@@ -44,6 +44,34 @@ def test_programmatic_experiment_config_matches_yaml_schema():
     assert load_experiment_config(config) is config
 
 
+def test_programmatic_ofdm_subcarrier_configuration():
+    config = ExperimentConfig(ofdm_num_subcarriers=[4, 5, 4097])
+
+    assert config.ofdm_num_subcarriers == (4, 5, 4097)
+    assert config.to_dict() == {
+        "signals": {},
+        "ofdm_num_subcarriers": [4, 5, 4097],
+    }
+
+
+def test_yaml_ofdm_subcarrier_configuration_controls_family_generator():
+    dataset = TorchSigIterableDataset(
+        signal_generators="ofdm",
+        metadata=TorchSigDefaults().default_dataset_metadata,
+        target_labels=None,
+        experiment_config={"ofdm_num_subcarriers": [4, 5, 4097]},
+        seed=7,
+    )
+
+    assert [generator.num_subcarriers for generator in dataset.signal_generators] == [4, 5, 4097]
+
+
+@pytest.mark.parametrize("values", [[], [3], [8193], [4.5], "4"])
+def test_experiment_config_rejects_invalid_ofdm_subcarrier_counts(values):
+    with pytest.raises((TypeError, ValueError), match="ofdm_num_subcarriers"):
+        ExperimentConfig(ofdm_num_subcarriers=values)
+
+
 @pytest.mark.parametrize(
     ("signals", "exception", "message"),
     [

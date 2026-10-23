@@ -7,9 +7,19 @@ from typing import ClassVar, Final
 # TorchSig
 from torchsig.signals.signal_utils import check_signal_class
 
-__all__ = ["CLASS_FAMILY_DICT", "FAMILY_SHARED_LIST", "OFDM_NUM_SUBCARRIER_VALUES", "SIGNALS_SHARED_LIST", "TORCHSIG_NUM_FAMILIES", "TORCHSIG_NUM_SIGNALS", "TorchSigSignalLists"]
+__all__ = [
+    "CLASS_FAMILY_DICT",
+    "FAMILY_SHARED_LIST",
+    "OFDM_NUM_SUBCARRIER_VALUES",
+    "OFDM_SUPPORTED_NUM_SUBCARRIER_VALUES",
+    "SIGNALS_SHARED_LIST",
+    "TORCHSIG_NUM_FAMILIES",
+    "TORCHSIG_NUM_SIGNALS",
+    "TorchSigSignalLists",
+]
 
-OFDM_NUM_SUBCARRIER_VALUES: Final[range] = range(4, 8193)
+OFDM_NUM_SUBCARRIER_VALUES: Final[tuple[int, ...]] = (64, 72, 128, 180, 256, 300, 512, 600, 900, 1024, 1200, 2048)
+OFDM_SUPPORTED_NUM_SUBCARRIER_VALUES: Final[range] = range(4, 8193)
 
 # Signal class to signal family mapping
 CLASS_FAMILY_DICT: Final[dict[str, str]] = {

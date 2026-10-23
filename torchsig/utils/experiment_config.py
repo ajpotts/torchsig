@@ -12,7 +12,8 @@ from typing import Any
 import yaml
 
 from torchsig.signals.builders.constellation_maps import all_symbol_maps
-from torchsig.utils.signal_building import public_generator_names
+from torchsig.signals.signal_lists import OFDM_NUM_SUBCARRIER_VALUES
+from torchsig.utils.signal_building import _validate_ofdm_num_subcarriers, public_generator_names
 
 __all__ = ["ExperimentConfig", "FixedValue", "SignalConfig", "load_experiment_config"]
 
@@ -62,6 +63,9 @@ class ExperimentConfig:
 
     Args:
         signals: Mapping of concrete signal class names to their configuration.
+        ofdm_num_subcarriers: Subcarrier counts included by the aggregate
+            ``"ofdm"`` and ``"all"`` generators. Defaults to the established
+            3.0.0 OFDM class set.
 
     Example:
         Configure a fixed QPSK pulse-shaping rolloff::
@@ -74,11 +78,21 @@ class ExperimentConfig:
                 },
             )
 
+        Configure the OFDM family with additional subcarrier counts::
+
+            config = ExperimentConfig(
+                ofdm_num_subcarriers=[4, 5, 64, 4097],
+            )
+
     The initial schema supports fixed parameter values. ``FixedValue`` leaves
     room for future range, choice, and distribution value specifications.
     """
 
-    def __init__(self, signals: Mapping[str, SignalConfig] | None = None) -> None:
+    def __init__(
+        self,
+        signals: Mapping[str, SignalConfig] | None = None,
+        ofdm_num_subcarriers: Any = OFDM_NUM_SUBCARRIER_VALUES,
+    ) -> None:
         if signals is None:
             signals = {}
         if not isinstance(signals, Mapping):
@@ -114,10 +128,16 @@ class ExperimentConfig:
             validated[class_name] = SignalConfig(parameters=parameters)
 
         self._signals = MappingProxyType(validated)
+        self._ofdm_num_subcarriers = _validate_ofdm_num_subcarriers(ofdm_num_subcarriers)
 
     def __reduce__(self):
         """Support pickling while preserving read-only signal configuration."""
-        return type(self), (dict(self._signals),)
+        return type(self), (dict(self._signals), self._ofdm_num_subcarriers)
+
+    @property
+    def ofdm_num_subcarriers(self) -> tuple[int, ...]:
+        """OFDM subcarrier counts used by aggregate ``ofdm`` and ``all`` generators."""
+        return self._ofdm_num_subcarriers
 
     @property
     def signals(self) -> Mapping[str, SignalConfig]:
@@ -147,9 +167,12 @@ class ExperimentConfig:
 
     def to_dict(self) -> dict[str, Any]:
         """Return the canonical configuration suitable for YAML serialization."""
-        return {
+        config: dict[str, Any] = {
             "signals": {class_name: {"parameters": {name: {"value": parameter.value} for name, parameter in signal_config.parameters.items()}} for class_name, signal_config in self._signals.items()}
         }
+        if self._ofdm_num_subcarriers != tuple(OFDM_NUM_SUBCARRIER_VALUES):
+            config["ofdm_num_subcarriers"] = list(self._ofdm_num_subcarriers)
+        return config
 
 
 def _mapping(value: Any, location: str) -> Mapping[str, Any]:
@@ -168,7 +191,7 @@ def _validate_fixed_value(class_name: str, parameter_name: str, value: Any) -> N
 
 def _config_from_mapping(loaded: Any) -> ExperimentConfig:
     root = _mapping(loaded, "experiment configuration root")
-    unknown_root = set(root).difference({"signals"})
+    unknown_root = set(root).difference({"signals", "ofdm_num_subcarriers"})
     if unknown_root:
         raise ValueError(f"unknown experiment configuration settings: {sorted(unknown_root)}")
     signals = _mapping(root.get("signals", {}), "signals")
@@ -194,7 +217,10 @@ def _config_from_mapping(loaded: Any) -> ExperimentConfig:
             parsed_parameters[parameter_name] = FixedValue(parameter_config["value"])
         parsed_signals[class_name] = SignalConfig(parameters=parsed_parameters)
 
-    return ExperimentConfig(signals=parsed_signals)
+    return ExperimentConfig(
+        signals=parsed_signals,
+        ofdm_num_subcarriers=root.get("ofdm_num_subcarriers", OFDM_NUM_SUBCARRIER_VALUES),
+    )
 
 
 def load_experiment_config(

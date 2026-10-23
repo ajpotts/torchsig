@@ -41,13 +41,11 @@ def test_torchsig_signal_lists_groups_expected_signal_families():
     assert all("lfm-" in name for name in signal_lists.lfm_signals)
 
 
-def test_torchsig_signal_lists_includes_full_ofdm_subcarrier_range():
+def test_torchsig_signal_lists_preserves_default_ofdm_subcarrier_values():
     signal_lists = TorchSigSignalLists()
 
     assert len(signal_lists.ofdm_signals) == len(OFDM_NUM_SUBCARRIER_VALUES)
-    assert signal_lists.ofdm_signals[0] == "ofdm-4"
-    assert signal_lists.ofdm_signals[-1] == "ofdm-8192"
-    assert "ofdm-4097" in signal_lists.ofdm_signals
+    assert signal_lists.ofdm_signals == [f"ofdm-{value}" for value in OFDM_NUM_SUBCARRIER_VALUES]
 
 
 def test_torchsig_signal_lists_assigns_every_known_signal_to_exactly_one_group():
